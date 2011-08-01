@@ -1,7 +1,14 @@
 mdadm (3.2.2-1) UNRELEASED; urgency=low
 
   [ martin f. krafft ]
-  * New upstream version (Closes: #625392, #615494).
+  * New upstream version (closes: #615494), which addresses:
+    - --grow option aware of size change of underlying device (closes: #618463)
+    - builds with -Werror on gcc-4.6 (closes: #625392).
+    - new features/functionality:
+      + Policy framework.
+      + Improved management of reshaping arrays.
+      + Support for Intel Matrix Storage Manager (IMSM)
+    Thanks to Scott Schaefer for his help in preparing this release!
   * Do not print io rescheduling info message when run by cron
     (closes: #598957).
   * Fix checkarray script so that it does not die after scheduling the first
