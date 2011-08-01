@@ -18,6 +18,8 @@ mdadm (3.2.2-1) UNRELEASED; urgency=low
     devices (closes: #618561).
   * Update mdadd.sh script from Arno's webpage.
   * Update md.txt from latest kernel source.
+  * Updated debconf translations:
+    - Catalan by Innocent De Marchi (closes: #628371)
   * Small typo fix in RAID5_versus_RAID10.txt
   * Bump Standards-Version to 3.9.2; no changes required.
 
@@ -30,7 +32,7 @@ mdadm (3.2.2-1) UNRELEASED; urgency=low
   * document defaults change in debian/NEWS (it was forgotten to be
     done for squeeze) - metadata & chunk size (Closes: #595516)
 
- -- martin f. krafft <madduck@debian.org>  Fri, 29 Jul 2011 17:22:38 +0200
+ -- martin f. krafft <madduck@debian.org>  Mon, 01 Aug 2011 10:40:22 +0200
 
 mdadm (3.1.4-1+8efb9d1) unstable; urgency=low
 
