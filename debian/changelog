@@ -16,6 +16,8 @@ mdadm (3.2.2-1) UNRELEASED; urgency=low
     (closes: #611632).
   * Work around a shell coding bug for cases when there are zero active
     devices (closes: #618561).
+  * Add NEWS entry about metadata change and requirement on new Grub version
+    (closes: #595516).
   * Update mdadd.sh script from Arno's webpage.
   * Update md.txt from latest kernel source.
   * Updated debconf translations:
