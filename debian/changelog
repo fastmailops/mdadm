@@ -1,5 +1,6 @@
 mdadm (3.2.2-1) UNRELEASED; urgency=low
 
+  [ martin f. krafft ]
   * New upstream version.
   * Do not print io rescheduling info message when run by cron
     (closes: #598957).
@@ -19,6 +20,10 @@ mdadm (3.2.2-1) UNRELEASED; urgency=low
   * Update md.txt from latest kernel source.
   * Small typo fix in RAID5_versus_RAID10.txt
   * Bump Standards-Version to 3.9.1; no changes required.
+
+  [ Michael Tokarev ]
+  * don't print W: auto-read-only in checkarray in quiet mode,
+    thanks to Bernd Hanisch for the patch (Closes: #605722)
 
  -- martin f. krafft <madduck@debian.org>  Fri, 29 Jul 2011 15:47:31 +0200
 

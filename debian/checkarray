@@ -159,7 +159,7 @@ for array in $arrays; do
   fi
 
   if [ "$(cat /sys/block/$array/md/array_state)" = 'read-auto' ]; then
-    echo "$PROGNAME: W: array $array in auto-read-only state, skipping..." >&2
+    [ $quiet -lt 1 ] && echo "$PROGNAME: W: array $array in auto-read-only state, skipping..." >&2
     continue
   fi
 
