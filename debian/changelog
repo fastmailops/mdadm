@@ -26,6 +26,7 @@ mdadm (3.2.2-1) UNRELEASED; urgency=low
     thanks to Bernd Hanisch for the patch (Closes: #605722)
   * move initscript metadata from /lib/init/rw/.mdadm to /run/mdadm,
     and depend on initscripts (>= 2.88dsf-13.3) for /run (Closes: #633054)
+  * move runtime stuff from /dev/.mdadm to /run/mdadm
   * document defaults change in debian/NEWS (it was forgotten to be
     done for squeeze) - metadata & chunk size (Closes: #595516)
 

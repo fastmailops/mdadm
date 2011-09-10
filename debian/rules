@@ -9,6 +9,9 @@
 TG_BRANCHES="contrib/scripts/mdadd contrib/docs/raid5-vs-raid10 contrib/docs/superblock_formats contrib/docs/md.txt contrib/docs/jd-rebuilding-raid debian/conffile-location debian/disable-incremental fixes/linker-flag-z-now"
 -include /usr/share/topgit/tg2quilt.mk
 
+RUNDIR = /run/mdadm
+RUNOPTS = MAP_DIR=$(RUNDIR) MDMON_DIR=$(RUNDIR) FAILED_SLOTS_DIR=$(RUNDIR)/failed-slots
+
 CXFLAGS = -ggdb
 CXFLAGS_UDEB := $(CXFLAGS) -fomit-frame-pointer
 ifneq (,$(findstring noopt,$(DEB_BUILD_OPTIONS)))
@@ -36,14 +39,14 @@ build-stamp: debian/mdadm-startall.8
 mdadm.udeb: FLAGS = CXFLAGS="$(CXFLAGS_UDEB)" CONFFILE=/tmp/mdadm.conf
 mdadm.udeb: configure
 	dh_testdir
-	$(MAKE) $(FLAGS) all
+	$(MAKE) $(FLAGS) all $(RUNOPTS)
 	mv mdadm mdadm.udeb
 .PHONY: mdadm.udeb
 
 mdadm: FLAGS = CXFLAGS="$(CXFLAGS)" CONFFILE=/etc/mdadm/mdadm.conf CONFFILE2=/etc/mdadm.conf
 mdadm: configure
 	dh_testdir
-	$(MAKE) $(FLAGS) all
+	$(MAKE) $(FLAGS) all $(RUNOPTS)
 .PHONY: mdadm
 
 INTERPOLATED_FILES = debian/bugscript debian/mkconf
