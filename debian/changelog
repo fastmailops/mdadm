@@ -24,6 +24,8 @@ mdadm (3.2.2-1) UNRELEASED; urgency=low
   [ Michael Tokarev ]
   * don't print W: auto-read-only in checkarray in quiet mode,
     thanks to Bernd Hanisch for the patch (Closes: #605722)
+  * move initscript metadata from /lib/init/rw/.mdadm to /run/mdadm,
+    and depend on initscripts (>= 2.88dsf-13.3) for /run (Closes: #633054)
 
  -- martin f. krafft <madduck@debian.org>  Fri, 29 Jul 2011 15:47:31 +0200
 

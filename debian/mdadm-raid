@@ -32,6 +32,7 @@ DEBIANCONFIG=/etc/default/mdadm
 test -x "$MDADM" || exit 0
 
 AUTOSTART=true
+STATEDIR=/run/mdadm
 test -f $DEBIANCONFIG && . $DEBIANCONFIG
 
 . /lib/lsb/init-functions
@@ -80,15 +81,6 @@ is_true()
     *) return 1;
   esac
 }
-
-for dir in /lib/init/rw /dev/shm /dev; do
-  statedir=$dir/.mdadm
-  test -d $statedir && STATEDIR=$statedir && break
-  test -w $dir || continue
-  mkdir $statedir || continue
-  STATEDIR=$statedir
-  break
-done
 
 case "${1:-}" in
   start)
@@ -173,13 +165,14 @@ case "${1:-}" in
         ret=$?
 
         log_action_begin_msg "Generating udev events for MD arrays"
+        [ -d $STATEDIR ] || mkdir -p $STATEDIR
         for uevent in /sys/block/md*/uevent; do
           test -e $uevent || break
           sentinel=${uevent#/sys/block/}; sentinel=${sentinel%/uevent}-uevent
-          test -e ${STATEDIR:-/doesnotexist}/$sentinel && continue
+          test -e $STATEDIR/$sentinel && continue
           test -w $uevent || continue
           echo add > $uevent
-          test -d "${STATEDIR:-}" && : > $STATEDIR/$sentinel
+          test -d $STATEDIR && : > $STATEDIR/$sentinel
         done
         log_action_end_msg 0
 
@@ -238,7 +231,7 @@ case "${1:-}" in
         esac
       done || exit $?
 
-      rm -rf ${STATEDIR:-}
+      rm -f $STATEDIR/md*-uevent
 
     else
       log_notice "disabled in $DEBIANCONFIG"
