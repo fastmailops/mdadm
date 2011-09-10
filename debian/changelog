@@ -1,7 +1,7 @@
 mdadm (3.2.2-1) UNRELEASED; urgency=low
 
   [ martin f. krafft ]
-  * New upstream version.
+  * New upstream version (Closes: #625392, #615494).
   * Do not print io rescheduling info message when run by cron
     (closes: #598957).
   * Fix checkarray script so that it does not die after scheduling the first
