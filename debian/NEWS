@@ -1,3 +1,20 @@
+mdadm (3.1.4-1+8efb9d1) unstable; urgency=low
+
+  Default metadata format for newly created arrays has changed from
+  0.90 to 1.2. Location of the superblock is now 4Kb from the start
+  of the device, instead of at the end of the device for 0.90.
+  The change from 0.9 to 1.x lifted many restrictions of the old
+  metadata format, and change in location (from end to 4k after
+  start for 1.2) reduced chances to confuse a raid array with
+  filesystem inside it.  It is now less easy to mount a component
+  device as separate filesystem by incident, thus destroying the
+  array.
+
+  Also, chunk size by default is 512K (was 64K) and bitmap chunk size
+  is 64Mb.
+
+ -- Michael Tokarev <mjt@tls.msk.ru>  Sat, 10 Sep 2011 13:35:12 +0400
+
 mdadm (2.6.7-2) unstable; urgency=low
 
   /dev/disk symlinks:
