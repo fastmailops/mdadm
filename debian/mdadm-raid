@@ -9,10 +9,10 @@
 ### BEGIN INIT INFO
 # Provides:          mdadm-raid
 # Required-Start:    mountkernfs hostname
-# Should-Start:      udev devfsd
+# Should-Start:      udev multipath-tools-boot
 # X-Start-Before:    checkfs mountall
 # Required-Stop:     mountkernfs
-# Should-Stop:       udev devfsd
+# Should-Stop:       udev
 # X-Stop-After:      umountfs
 # Default-Start:     S
 # Default-Stop:      0 6
