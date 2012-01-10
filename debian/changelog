@@ -4,6 +4,7 @@ mdadm (3.2.3-1) UNRELEASED; urgency=low
     Closes: #641886, #628667, #645563, #651880, #607375
   * update Neil's email (Closes: #650630)
   * update mdadd.sh to version 1.52 (Closes: #655212)
+  * fixed a typo (RAID6 vs RAID10) in FAQ (Closes: #637068)
   * declare ordering dependency for multipath-tools-boot in
     mdadm-raid init script (Closes: #641584)
     While at it, remove mention of devfsd

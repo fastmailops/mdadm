@@ -140,7 +140,7 @@ The latest version of this FAQ is available here:
   In two thirds of the cases, yes[0], and it does not matter which layout you
   use. When you assemble 4 disks into a RAID10, you essentially stripe a RAID0
   across two RAID1, so the four disks A,B,C,D become two pairs: A,B and C,D.
-  If A fails, the RAID6 can only survive if the second failing disk is either
+  If A fails, the RAID10 can only survive if the second failing disk is either
   C or D; If B fails, your array is dead.
 
   Thus, if you see a disk failing, replace it as soon as possible!
