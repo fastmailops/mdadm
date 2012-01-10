@@ -1,10 +1,12 @@
-mdadm (3.2.2-2) UNRELEASED; urgency=low
+mdadm (3.2.3-1) UNRELEASED; urgency=low
 
+  * new upstream bugfix/stable version, with lots of fixes all over.
+    Closes: #641886, #628667, #645563, #651880, #607375
   * declare ordering dependency for multipath-tools-boot in
     mdadm-raid init script (Closes: #641584)
     While at it, remove mention of devfsd
 
- -- Michael Tokarev <mjt@tls.msk.ru>  Tue, 10 Jan 2012 14:37:30 +0400
+ -- Michael Tokarev <mjt@tls.msk.ru>  Tue, 10 Jan 2012 16:08:46 +0400
 
 mdadm (3.2.2-1) unstable; urgency=low
 
