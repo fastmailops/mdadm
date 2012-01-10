@@ -6,9 +6,9 @@ Tue, 16 May 2006 13:21:06 -0500
 The mdadm source was downloaded from
   http://www.kernel.org/pub/linux/utils/raid/mdadm/
 
-Upstream Author: Neil Brown <neilb@cse.unsw.edu.au>
+Upstream Author: Neil Brown <neilb@suse.de>
 
-Copyright © 2001-2006 Neil Brown <neilb@cse.unsw.edu.au>
+Copyright © 2001-2006 Neil Brown <neilb@suse.de>
 Packaging copyright © 2001-2005 Mario Jou/3en <joussen@debian.org>
 Packaging copyright © 2005-2008 Martin F. Krafft <madduck@debian.org>
 
