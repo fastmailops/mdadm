@@ -1,5 +1,6 @@
 mdadm (3.2.3-1) UNRELEASED; urgency=low
 
+  [ Michael Tokarev ]
   * new upstream bugfix/stable version, with lots of fixes all over.
     Closes: #641886, #628667, #645563, #651880, #607375, #633880
   * update Neil's email (Closes: #650630)
@@ -10,6 +11,9 @@ mdadm (3.2.3-1) UNRELEASED; urgency=low
     While at it, remove mention of devfsd
   * added Slovak (sk.po) po-debconf translation from Slavko <linux@slavino.sk>
     (Closes: #641972)
+
+  [ Peter Eisentraut ]
+  * Added support for "status" action to mdadm init script (Closes: #651737)
 
  -- Michael Tokarev <mjt@tls.msk.ru>  Tue, 10 Jan 2012 16:08:46 +0400
 

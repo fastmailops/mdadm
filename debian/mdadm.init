@@ -65,12 +65,15 @@ case "${1:-}" in
       set -e
     fi
     ;;
+  status)
+    status_of_proc -p $PIDFILE "$MDADM" "mdadm" && exit 0 || exit $?
+    ;;
   restart|reload|force-reload)
     ${0:-} stop
     ${0:-} start
     ;;
   *)
-    echo "Usage: ${0:-} {start|stop|restart|reload|force-reload}" >&2
+    echo "Usage: ${0:-} {start|stop|status|restart|reload|force-reload}" >&2
     exit 1
     ;;
 esac
