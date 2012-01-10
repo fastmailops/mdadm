@@ -74,6 +74,7 @@ int main(int argc, char *argv[])
 	int export = 0;
 	int assume_clean = 0;
 	char *symlinks = NULL;
+	int grow_continue = 0;
 	/* autof indicates whether and how to create device node.
 	 * bottom 3 bits are style.  Rest (when shifted) are number of parts
 	 * 0  - unset
@@ -111,6 +112,8 @@ int main(int argc, char *argv[])
 	FILE *outf;
 
 	int mdfd = -1;
+
+	int freeze_reshape = 0;
 
 	srandom(time(0) ^ getpid());
 
@@ -209,13 +212,17 @@ int main(int argc, char *argv[])
 		case 'I': newmode = INCREMENTAL;
 			shortopt = short_bitmap_auto_options; break;
 		case AutoDetect:
-			newmode = AUTODETECT; break;
+			newmode = AUTODETECT;
+			break;
 
 		case MiscOpt:
 		case 'D':
 		case 'E':
 		case 'X':
-		case 'Q': newmode = MISC; break;
+		case 'Q':
+			newmode = MISC;
+			break;
+
 		case 'R':
 		case 'S':
 		case 'o':
@@ -226,17 +233,15 @@ int main(int argc, char *argv[])
 		case DetailPlatform:
 		case KillSubarray:
 		case UpdateSubarray:
-			if (opt == KillSubarray || opt == UpdateSubarray) {
-				if (subarray) {
-					fprintf(stderr, Name ": subarray can only"
-						" be specified once\n");
-					exit(2);
-				}
-				subarray = optarg;
-			}
 		case UdevRules:
-		case 'K': if (!mode) newmode = MISC; break;
-		case NoSharing: newmode = MONITOR; break;
+		case 'K':
+			if (!mode)
+				newmode = MISC;
+			break;
+
+		case NoSharing:
+			newmode = MONITOR;
+			break;
 		}
 		if (mode && newmode == mode) {
 			/* everybody happy ! */
@@ -609,10 +614,15 @@ int main(int argc, char *argv[])
 		case O(ASSEMBLE,Force): /* force assembly */
 		case O(MISC,'f'): /* force zero */
 		case O(MISC,Force): /* force zero */
+		case O(MANAGE,Force): /* add device which is too large */
 			force=1;
 			continue;
-
 			/* now for the Assemble options */
+		case O(ASSEMBLE, FreezeReshape):   /* Freeze reshape during
+						    * initrd phase */
+		case O(INCREMENTAL, FreezeReshape):
+			freeze_reshape = 1;
+			continue;
 		case O(CREATE,'u'): /* uuid of array */
 		case O(ASSEMBLE,'u'): /* uuid of array */
 			if (ident.uuid_set) {
@@ -840,6 +850,7 @@ int main(int argc, char *argv[])
 			continue;
 		case O(MONITOR,'1'): /* oneshot */
 			oneshot = 1;
+			spare_sharing = 0;
 			continue;
 		case O(MONITOR,'t'): /* test */
 			test = 1;
@@ -915,6 +926,14 @@ int main(int argc, char *argv[])
 		case O(MISC, DetailPlatform):
 		case O(MISC, KillSubarray):
 		case O(MISC, UpdateSubarray):
+			if (opt == KillSubarray || opt == UpdateSubarray) {
+				if (subarray) {
+					fprintf(stderr, Name ": subarray can only"
+						" be specified once\n");
+					exit(2);
+				}
+				subarray = optarg;
+			}
 			if (devmode && devmode != opt &&
 			    (devmode == 'E' || (opt == 'E' && devmode != 'Q'))) {
 				fprintf(stderr, Name ": --examine/-E cannot be given with ");
@@ -988,6 +1007,11 @@ int main(int argc, char *argv[])
 			backup_file = optarg;
 			continue;
 
+		case O(GROW, Continue):
+			/* Continue interrupted grow
+			 */
+			grow_continue = 1;
+			continue;
 		case O(ASSEMBLE, InvalidBackup):
 			/* Acknowledge that the backupfile is invalid, but ask
 			 * to continue anyway
@@ -1185,7 +1209,8 @@ int main(int argc, char *argv[])
 		require_homehost = 0;
 	}
 
-	if ((mode != MISC || devmode != 'E') &&
+	if (!((mode == MISC && devmode == 'E')
+	      || (mode == MONITOR && spare_sharing == 0)) &&
 	    geteuid() != 0) {
 		fprintf(stderr, Name ": must be super-user to perform this action\n");
 		exit(1);
@@ -1202,7 +1227,7 @@ int main(int argc, char *argv[])
 		if (!rv && devs_found>1)
 			rv = Manage_subdevs(devlist->devname, mdfd,
 					    devlist->next, verbose-quiet, test,
-					    update);
+					    update, force);
 		if (!rv && readonly < 0)
 			rv = Manage_ro(devlist->devname, mdfd, readonly);
 		if (!rv && runstop)
@@ -1226,14 +1251,16 @@ int main(int argc, char *argv[])
 					       NULL, backup_file, invalid_backup,
 					       readonly, runstop, update,
 					       homehost, require_homehost,
-					       verbose-quiet, force);
+					       verbose-quiet, force,
+					       freeze_reshape);
 			}
 		} else if (!scan)
 			rv = Assemble(ss, devlist->devname, &ident,
 				      devlist->next, backup_file, invalid_backup,
 				      readonly, runstop, update,
 				      homehost, require_homehost,
-				      verbose-quiet, force);
+				      verbose-quiet, force,
+				      freeze_reshape);
 		else if (devs_found>0) {
 			if (update && devs_found > 1) {
 				fprintf(stderr, Name ": can only update a single array at a time\n");
@@ -1257,13 +1284,22 @@ int main(int argc, char *argv[])
 					       NULL, backup_file, invalid_backup,
 					       readonly, runstop, update,
 					       homehost, require_homehost,
-					       verbose-quiet, force);
+					       verbose-quiet, force,
+					       freeze_reshape);
 			}
 		} else {
 			struct mddev_ident *a, *array_list =  conf_get_ident(NULL);
 			struct mddev_dev *devlist = conf_get_devs();
+			struct map_ent *map = NULL;
 			int cnt = 0;
 			int failures, successes;
+
+			if (conf_verify_devnames(array_list)) {
+				fprintf(stderr, Name
+					": Duplicate MD device names in "
+					"conf file were found.\n");
+				exit(1);
+			}
 			if (devlist == NULL) {
 				fprintf(stderr, Name ": No devices listed in conf file were found.\n");
 				exit(1);
@@ -1281,6 +1317,10 @@ int main(int argc, char *argv[])
 				if (a->autof == 0)
 					a->autof = autof;
 			}
+			if (map_lock(&map))
+				fprintf(stderr, Name " %s: failed to get "
+					"exclusive lock on mapfile\n",
+					__func__);
 			do {
 				failures = 0;
 				successes = 0;
@@ -1298,7 +1338,8 @@ int main(int argc, char *argv[])
 						     NULL, NULL, 0,
 						     readonly, runstop, NULL,
 						     homehost, require_homehost,
-						     verbose-quiet, force);
+						     verbose-quiet, force,
+						     freeze_reshape);
 					if (r == 0) {
 						a->assembled = 1;
 						successes++;
@@ -1323,9 +1364,13 @@ int main(int argc, char *argv[])
 						rv2 = Assemble(ss, NULL,
 							       &ident,
 							       devlist, NULL, 0,
-							       readonly, runstop, NULL,
-							       homehost, require_homehost,
-							       verbose-quiet, force);
+							       readonly,
+							       runstop, NULL,
+							       homehost,
+							       require_homehost,
+							       verbose-quiet,
+							       force,
+							       freeze_reshape);
 						if (rv2==0) {
 							cnt++;
 							acnt++;
@@ -1342,6 +1387,7 @@ int main(int argc, char *argv[])
 				fprintf(stderr, Name ": No arrays found in config file\n");
 				rv = 1;
 			}
+			map_unlock(&map);
 		}
 		break;
 	case BUILD:
@@ -1633,7 +1679,11 @@ int main(int argc, char *argv[])
 				delay = DEFAULT_BITMAP_DELAY;
 			rv = Grow_addbitmap(devlist->devname, mdfd, bitmap_file,
 					    bitmap_chunk, delay, write_behind, force);
-		} else if (size >= 0 || raiddisks != 0 || layout_str != NULL
+		} else if (grow_continue)
+			rv = Grow_continue_command(devlist->devname,
+						   mdfd, backup_file,
+						   verbose);
+		else if (size >= 0 || raiddisks != 0 || layout_str != NULL
 			   || chunk != 0 || level != UnSet) {
 			rv = Grow_reshape(devlist->devname, mdfd, quiet, backup_file,
 					  size, level, layout_str, chunk, raiddisks,
@@ -1679,7 +1729,8 @@ int main(int argc, char *argv[])
 		else
 			rv = Incremental(devlist->devname, verbose-quiet,
 					 runstop, ss, homehost,
-					 require_homehost, autof);
+					 require_homehost, autof,
+					 freeze_reshape);
 		break;
 	case AUTODETECT:
 		autodetect();

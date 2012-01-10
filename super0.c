@@ -360,6 +360,9 @@ static void getinfo_super0(struct supertype *st, struct mdinfo *info, char *map)
 	info->array.state = sb->state;
 	info->component_size = sb->size*2;
 
+	if (sb->state & (1<<MD_SB_BITMAP_PRESENT))
+		info->bitmap_offset = 8;
+
 	info->disk.state = sb->this_disk.state;
 	info->disk.major = sb->this_disk.major;
 	info->disk.minor = sb->this_disk.minor;
@@ -386,6 +389,8 @@ static void getinfo_super0(struct supertype *st, struct mdinfo *info, char *map)
 			info->array.raid_disks -= info->delta_disks;
 	} else
 		info->reshape_active = 0;
+
+	info->recovery_blocked = info->reshape_active;
 
 	sprintf(info->name, "%d", sb->md_minor);
 	/* work_disks is calculated rather than read directly */
@@ -570,6 +575,10 @@ static int update_super0(struct supertype *st, struct mdinfo *info,
 		sb->state &= ~(1<<MD_SB_BITMAP_PRESENT);
 	} else if (strcmp(update, "_reshape_progress")==0)
 		sb->reshape_position = info->reshape_progress;
+	else if (strcmp(update, "writemostly")==0)
+		sb->state |= (1<<MD_DISK_WRITEMOSTLY);
+	else if (strcmp(update, "readwrite")==0)
+		sb->state &= ~(1<<MD_DISK_WRITEMOSTLY);
 	else
 		rv = -1;
 
@@ -688,6 +697,8 @@ static int add_to_super0(struct supertype *st, mdu_disk_info_t *dinfo,
 	dk->minor = dinfo->minor;
 	dk->raid_disk = dinfo->raid_disk;
 	dk->state = dinfo->state;
+	/* In case our source disk was writemostly, don't copy that bit */
+	dk->state &= ~(1<<MD_DISK_WRITEMOSTLY);
 
 	sb->this_disk = sb->disks[dinfo->number];
 	sb->sb_csum = calc_sb0_csum(sb);
@@ -1115,6 +1126,13 @@ static int validate_geometry0(struct supertype *st, int level,
 {
 	unsigned long long ldsize;
 	int fd;
+	unsigned int tbmax = 4;
+
+	/* prior to linux 3.1, a but limits usable device size to 2TB.
+	 * It was introduced in 2.6.29, but we won't worry about that detail
+	 */
+	if (get_linux_version() < 3001000)
+		tbmax = 2;
 
 	if (level == LEVEL_CONTAINER) {
 		if (verbose)
@@ -1127,9 +1145,10 @@ static int validate_geometry0(struct supertype *st, int level,
 				MD_SB_DISKS);
 		return 0;
 	}
-	if (size > (0x7fffffffULL<<9)) {
+	if (size >= tbmax * 2ULL*1024*1024*1024) {
 		if (verbose)
-			fprintf(stderr, Name ": 0.90 metadata supports at most 2 terrabytes per device\n");
+			fprintf(stderr, Name ": 0.90 metadata supports at most "
+				"%d terabytes per device\n", tbmax);
 		return 0;
 	}
 	if (chunk && *chunk == UnSet)
@@ -1153,8 +1172,6 @@ static int validate_geometry0(struct supertype *st, int level,
 	close(fd);
 
 	if (ldsize < MD_RESERVED_SECTORS * 512)
-		return 0;
-	if (size > (0x7fffffffULL<<9))
 		return 0;
 	*freesize = MD_NEW_SIZE_SECTORS(ldsize >> 9);
 	return 1;

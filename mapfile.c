@@ -159,6 +159,18 @@ void map_unlock(struct map_ent **melp)
 	lf = NULL;
 }
 
+void map_fork(void)
+{
+	/* We are forking, so must close the lock file.
+	 * Don't risk flushing anything though.
+	 */
+	if (lf) {
+		close(fileno(lf));
+		fclose(lf);
+		lf = NULL;
+	}
+}
+
 void map_add(struct map_ent **melp,
 	    int devnum, char *metadata, int uuid[4], char *path)
 {
@@ -419,7 +431,9 @@ void RebuildMap(void)
 				 *   find a unique name based on metadata name.
 				 *   
 				 */
-				struct mddev_ident *match = conf_match(info, st);
+				struct mddev_ident *match = conf_match(st, info,
+								       NULL, 0,
+								       NULL);
 				struct stat stb;
 				if (match && match->devname && match->devname[0] == '/') {
 					path = match->devname;

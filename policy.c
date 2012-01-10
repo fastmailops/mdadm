@@ -195,7 +195,9 @@ static char *disk_path(struct mdinfo *disk)
 	int prefix_len;
 	DIR *by_path;
 	char symlink[PATH_MAX] = "/dev/disk/by-path/";
+	char nm[PATH_MAX];
 	struct dirent *ent;
+	int rv;
 
 	by_path = opendir(symlink);
 	if (!by_path)
@@ -218,7 +220,17 @@ static char *disk_path(struct mdinfo *disk)
 		return strdup(ent->d_name);
 	}
 	closedir(by_path);
-	return NULL;
+	/* A NULL path isn't really acceptable - use the devname.. */
+	sprintf(symlink, "/sys/dev/block/%d:%d", disk->disk.major, disk->disk.minor);
+	rv = readlink(symlink, nm, sizeof(nm)-1);
+	if (rv > 0) {
+		char *dname;
+		nm[rv] = 0;
+		dname = strrchr(nm, '/');
+		if (dname)
+			return strdup(dname + 1);
+	}
+	return strdup("unknown");
 }
 
 char type_part[] = "part";
@@ -245,13 +257,13 @@ static int pol_match(struct rule *rule, char *path, char *type)
 		if (rule->name == rule_path) {
 			if (pathok == 0)
 				pathok = -1;
-			if (fnmatch(rule->value, path, 0) == 0)
+			if (path && fnmatch(rule->value, path, 0) == 0)
 				pathok = 1;
 		}
 		if (rule->name == rule_type) {
 			if (typeok == 0)
 				typeok = -1;
-			if (strcmp(rule->value, type) == 0)
+			if (type && strcmp(rule->value, type) == 0)
 				typeok = 1;
 		}
 		rule = rule->next;
@@ -270,7 +282,8 @@ static void pol_merge(struct dev_policy **pol, struct rule *rule)
 
 	for (r = rule; r ; r = r->next)
 		if (r->name == pol_act ||
-		    r->name == pol_domain)
+		    r->name == pol_domain ||
+		    r->name == pol_auto)
 			pol_new(pol, r->name, r->value, metadata);
 }
 
@@ -280,7 +293,10 @@ static int path_has_part(char *path, char **part)
 	 * if it does, place a pointer to "-pathNN"
 	 * in 'part'.
 	 */
-	int l = strlen(path);
+	int l;
+	if (!path)
+		return 0;
+	l = strlen(path);
 	while (l > 1 && isdigit(path[l-1]))
 		l--;
 	if (l < 5 || strncmp(path+l-5, "-part", 5) != 0)
@@ -343,9 +359,6 @@ struct dev_policy *path_policy(char *path, char *type)
 	struct dev_policy *pol = NULL;
 	int i;
 
-	if (!type)
-		return NULL;
-
 	rules = config_rules;
 
 	while (rules) {
@@ -366,7 +379,7 @@ struct dev_policy *path_policy(char *path, char *type)
 	/* Now add any metadata-specific internal knowledge
 	 * about this path
 	 */
-	for (i=0; superlist[i]; i++)
+	for (i=0; path && superlist[i]; i++)
 		if (superlist[i]->get_disk_controller_domain) {
 			const char *d =
 				superlist[i]->get_disk_controller_domain(path);
@@ -399,12 +412,8 @@ struct dev_policy *disk_policy(struct mdinfo *disk)
 	char *type = disk_type(disk);
 	struct dev_policy *pol = NULL;
 
-	if (!type)
-		return NULL;
 	if (config_rules_has_path)
 		path = disk_path(disk);
-	if (!path)
-		return NULL;
 
 	pol = path_policy(path, type);
 
@@ -501,6 +510,7 @@ void policy_add(char *type, ...)
 	}
 	pr->next = config_rules;
 	config_rules = pr;
+	va_end(ap);
 }
 
 void policy_free(void)
@@ -678,6 +688,8 @@ struct domainlist *domain_from_array(struct mdinfo *mdi, const char *metadata)
 {
 	struct domainlist *domlist = NULL;
 
+	if (!mdi)
+		return NULL;
 	for (mdi = mdi->devs ; mdi ; mdi = mdi->next)
 		domainlist_add_dev(&domlist, makedev(mdi->disk.major,
 						     mdi->disk.minor),
@@ -755,8 +767,10 @@ int policy_check_path(struct mdinfo *disk, struct map_ent *array)
 
 	snprintf(path, PATH_MAX, FAILED_SLOTS_DIR "/%s", id_path);
 	f = fopen(path, "r");
-	if (!f)
+	if (!f) {
+		free(id_path);
 		return 0;
+	}
 
 	rv = fscanf(f, " %s %x:%x:%x:%x\n",
 		    array->metadata,
@@ -765,6 +779,7 @@ int policy_check_path(struct mdinfo *disk, struct map_ent *array)
 		    array->uuid+2,
 		    array->uuid+3);
 	fclose(f);
+	free(id_path);
 	return rv == 5;
 }
 
@@ -868,7 +883,8 @@ int Write_rules(char *rule_name)
        char udev_rule_file[PATH_MAX];
 
        if (rule_name) {
-	       strcpy(udev_rule_file, rule_name);
+	       strncpy(udev_rule_file, rule_name, sizeof(udev_rule_file) - 6);
+	       udev_rule_file[sizeof(udev_rule_file) - 6] = '\0';
 	       strcat(udev_rule_file, ".temp");
                fd = creat(udev_rule_file,
                           S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);

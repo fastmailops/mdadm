@@ -332,15 +332,25 @@ int Create(struct supertype *st, char *mddev,
 			char *name = "default";
 			for(i=0; !st && superlist[i]; i++) {
 				st = superlist[i]->match_metadata_desc(name);
+				if (!st)
+					continue;
 				if (do_default_layout)
 					layout = default_layout(st, level, verbose);
-				if (st && !st->ss->validate_geometry
-					    	(st, level, layout, raiddisks,
-						 &chunk, size*2, dname, &freesize,
-						 verbose > 0)) {
+				switch (st->ss->validate_geometry(
+						st, level, layout, raiddisks,
+						&chunk, size*2, dname, &freesize,
+						verbose > 0)) {
+				case -1: /* Not valid, message printed, and not
+					  * worth checking any further */
+					exit(2);
+					break;
+				case 0: /* Geometry not valid */
 					free(st);
 					st = NULL;
 					chunk = do_default_chunk ? UnSet : chunk;
+					break;
+				case 1:	/* All happy */
+					break;
 				}
 			}
 
@@ -544,14 +554,28 @@ int Create(struct supertype *st, char *mddev,
 	/* We need to create the device */
 	map_lock(&map);
 	mdfd = create_mddev(mddev, name, autof, LOCAL, chosen_name);
-	if (mdfd < 0)
+	if (mdfd < 0) {
+		map_unlock(&map);
 		return 1;
+	}
+	/* verify if chosen_name is not in use,
+	 * it could be in conflict with already existing device
+	 * e.g. container, array
+	 */
+	if (strncmp(chosen_name, "/dev/md/", 8) == 0
+	    && map_by_name(&map, chosen_name+8) != NULL) {
+		fprintf(stderr, Name ": Array name %s is in use already.\n",
+			chosen_name);
+		close(mdfd);
+		map_unlock(&map);
+		return 1;
+	}
 	mddev = chosen_name;
 
 	vers = md_get_version(mdfd);
 	if (vers < 9000) {
 		fprintf(stderr, Name ": Create requires md driver version 0.90.0 or later\n");
-		goto abort;
+		goto abort_locked;
 	} else {
 		mdu_array_info_t inf;
 		memset(&inf, 0, sizeof(inf));
@@ -559,7 +583,7 @@ int Create(struct supertype *st, char *mddev,
 		if (inf.working_disks != 0) {
 			fprintf(stderr, Name ": another array by this name"
 				" is already running.\n");
-			goto abort;
+			goto abort_locked;
 		}
 	}
 
@@ -655,7 +679,7 @@ int Create(struct supertype *st, char *mddev,
 		}
 	}
 	if (!st->ss->init_super(st, &info.array, size, name, homehost, uuid))
-		goto abort;
+		goto abort_locked;
 
 	total_slots = info.array.nr_disks;
 	st->ss->getinfo_super(st, &info, NULL);
@@ -778,6 +802,10 @@ int Create(struct supertype *st, char *mddev,
 	}
 
 	infos = malloc(sizeof(*infos) * total_slots);
+	if (!infos) {
+		fprintf(stderr, Name ": Unable to allocate memory\n");
+		goto abort;
+	}
 
 	for (pass=1; pass <=2 ; pass++) {
 		struct mddev_dev *moved_disk = NULL; /* the disk that was moved out of the insert point */
@@ -856,15 +884,6 @@ int Create(struct supertype *st, char *mddev,
 					/* getinfo_super might have lost these ... */
 					inf->disk.major = major(stb.st_rdev);
 					inf->disk.minor = minor(stb.st_rdev);
-					/* FIXME the following should not be needed
-					 * as getinfo_super is suppose to set
-					 * them.  However it doesn't for imsm,
-					 * so we have this hack for now
-					 */
-					if (st->ss == &super_imsm) {
-						inf->disk.number = dnum;
-						inf->disk.raid_disk = dnum;
-					}
 				}
 				break;
 			case 2:
@@ -909,7 +928,7 @@ int Create(struct supertype *st, char *mddev,
 					Name ": Failed to write metadata to %s\n",
 					dv->devname);
 				st->ss->free_super(st);
-				goto abort;
+				goto abort_locked;
 			}
 
 			/* update parent container uuid */
@@ -992,6 +1011,7 @@ int Create(struct supertype *st, char *mddev,
 
  abort:
 	map_lock(&map);
+ abort_locked:
 	map_remove(&map, fd2devnum(mdfd));
 	map_unlock(&map);
 

@@ -132,7 +132,7 @@ bitmap_info_t *bitmap_fd_read(int fd, int brief)
 	void *buf;
 	unsigned int n, skip;
 
-	if (posix_memalign(&buf, 512, 8192) != 0) {
+	if (posix_memalign(&buf, 4096, 8192) != 0) {
 		fprintf(stderr, Name ": failed to allocate 8192 bytes\n");
 		return NULL;
 	}
@@ -147,6 +147,7 @@ bitmap_info_t *bitmap_fd_read(int fd, int brief)
 		fprintf(stderr, Name ": failed to allocate %zd bytes\n",
 				sizeof(*info));
 #endif
+		free(buf);
 		return NULL;
 	}
 
@@ -154,6 +155,7 @@ bitmap_info_t *bitmap_fd_read(int fd, int brief)
 		fprintf(stderr, Name ": failed to read superblock of bitmap "
 			"file: %s\n", strerror(errno));
 		free(info);
+		free(buf);
 		return NULL;
 	}
 	memcpy(&info->sb, buf, sizeof(info->sb));
@@ -198,6 +200,7 @@ bitmap_info_t *bitmap_fd_read(int fd, int brief)
 		total_bits = read_bits;
 	}
 out:
+	free(buf);
 	info->total_bits = total_bits;
 	info->dirty_bits = dirty_bits;
 	return info;
@@ -331,7 +334,7 @@ int ExamineBitmap(char *filename, int brief, struct supertype *st)
 		goto free_info;
 	printf("          Bitmap : %llu bits (chunks), %llu dirty (%2.1f%%)\n",
 			info->total_bits, info->dirty_bits,
-			100.0 * info->dirty_bits / (info->total_bits + 1));
+			100.0 * info->dirty_bits / (info->total_bits?:1));
 free_info:
 	free(info);
 	return rv;

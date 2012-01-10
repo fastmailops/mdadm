@@ -131,10 +131,15 @@ struct mdstat_ent *mdstat_read(int hold, int start)
 	FILE *f;
 	struct mdstat_ent *all, *rv, **end, **insert_here;
 	char *line;
+	int fd;
 
 	if (hold && mdstat_fd != -1) {
 		lseek(mdstat_fd, 0L, 0);
-		f = fdopen(dup(mdstat_fd), "r");
+		fd = dup(mdstat_fd);
+		if (fd >= 0)
+			f = fdopen(fd, "r");
+		else
+			return NULL;
 	} else
 		f = fopen("/proc/mdstat", "r");
 	if (f == NULL)
@@ -257,10 +262,10 @@ struct mdstat_ent *mdstat_read(int hold, int start)
 				if (strncmp(w, "check", 5)==0)
 					ent->resync = 3;
 
-				if (l > 8 && strcmp(w+l-8, "=DELAYED"))
-					ent->percent = 0;
-				if (l > 8 && strcmp(w+l-8, "=PENDING"))
-					ent->percent = 0;
+				if (l > 8 && strcmp(w+l-8, "=DELAYED") == 0)
+					ent->percent = PROCESS_DELAYED;
+				if (l > 8 && strcmp(w+l-8, "=PENDING") == 0)
+					ent->percent = PROCESS_PENDING;
 			} else if (ent->percent == -1 &&
 				   w[0] >= '0' &&
 				   w[0] <= '9' &&

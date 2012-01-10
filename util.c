@@ -146,16 +146,16 @@ int get_linux_version()
 {
 	struct utsname name;
 	char *cp;
-	int a,b,c;
+	int a = 0, b = 0,c = 0;
 	if (uname(&name) <0)
 		return -1;
 
 	cp = name.release;
 	a = strtoul(cp, &cp, 10);
-	if (*cp != '.') return -1;
-	b = strtoul(cp+1, &cp, 10);
-	if (*cp != '.') return -1;
-	c = strtoul(cp+1, NULL, 10);
+	if (*cp == '.')
+		b = strtoul(cp+1, &cp, 10);
+	if (*cp == '.')
+		c = strtoul(cp+1, &cp, 10);
 
 	return (a*1000000)+(b*1000)+c;
 }
@@ -363,7 +363,7 @@ int enough_fd(int fd)
 	struct mdu_array_info_s array;
 	struct mdu_disk_info_s disk;
 	int avail_disks = 0;
-	int i;
+	int i, rv;
 	char *avail;
 
 	if (ioctl(fd, GET_ARRAY_INFO, &array) != 0 ||
@@ -386,9 +386,10 @@ int enough_fd(int fd)
 		avail[disk.raid_disk] = 1;
 	}
 	/* This is used on an active array, so assume it is clean */
-	return enough(array.level, array.raid_disks, array.layout,
-		      1,
-		      avail, avail_disks);
+	rv = enough(array.level, array.raid_disks, array.layout,
+		    1, avail, avail_disks);
+	free(avail);
+	return rv;
 }
 
 
@@ -535,6 +536,7 @@ int check_raid(int fd, char *name)
 	struct supertype *st = guess_super(fd);
 
 	if (!st) return 0;
+	st->ignore_hw_compat = 1;
 	st->ss->load_super(st, fd, name);
 	/* Looks like a raid array .. */
 	fprintf(stderr, Name ": %s appears to be part of a raid array:\n",
@@ -639,7 +641,7 @@ char *human_size(long long bytes)
 	 * We allow upto 2048Megabytes before converting to
 	 * gigabytes, as that shows more precision and isn't
 	 * too large a number.
-	 * Terrabytes are not yet handled.
+	 * Terabytes are not yet handled.
 	 */
 
 	if (bytes < 5000*1024)
@@ -702,6 +704,12 @@ void print_r10_layout(int layout)
 unsigned long long calc_array_size(int level, int raid_disks, int layout,
 				   int chunksize, unsigned long long devsize)
 {
+	devsize &= ~(unsigned long long)((chunksize>>9)-1);
+	return get_data_disks(level, layout, raid_disks) * devsize;
+}
+
+int get_data_disks(int level, int layout, int raid_disks)
+{
 	int data_disks = 0;
 	switch (level) {
 	case 0: data_disks = raid_disks; break;
@@ -712,8 +720,8 @@ unsigned long long calc_array_size(int level, int raid_disks, int layout,
 	case 10: data_disks = raid_disks / (layout & 255) / ((layout>>8)&255);
 		break;
 	}
-	devsize &= ~(unsigned long long)((chunksize>>9)-1);
-	return data_disks * devsize;
+
+	return data_disks;
 }
 
 #if !defined(MDASSEMBLE) || defined(MDASSEMBLE) && defined(MDASSEMBLE_AUTO)
@@ -1120,7 +1128,8 @@ static int get_gpt_last_partition_end(int fd, unsigned long long *endofpart)
 {
 	struct GPT gpt;
 	unsigned char empty_gpt_entry[16]= {0};
-	struct GPT_part_entry part;
+	struct GPT_part_entry *part;
+	char buf[512];
 	unsigned long long curr_part_end;
 	unsigned all_partitions, entry_size;
 	unsigned part_nr;
@@ -1144,18 +1153,20 @@ static int get_gpt_last_partition_end(int fd, unsigned long long *endofpart)
 
 	/* sanity checks */
 	if (all_partitions > 1024 ||
-	    entry_size > 512)
+	    entry_size > sizeof(buf))
 		return -1;
+
+	part = (struct GPT_part_entry *)buf;
 
 	for (part_nr=0; part_nr < all_partitions; part_nr++) {
 		/* read partition entry */
-		if (read(fd, &part, entry_size) != (ssize_t)entry_size)
+		if (read(fd, buf, entry_size) != (ssize_t)entry_size)
 			return 0;
 
 		/* is this valid partition? */
-		if (memcmp(part.type_guid, empty_gpt_entry, 16) != 0) {
+		if (memcmp(part->type_guid, empty_gpt_entry, 16) != 0) {
 			/* check the last lba for the current partition */
-			curr_part_end = __le64_to_cpu(part.ending_lba);
+			curr_part_end = __le64_to_cpu(part->ending_lba);
 			if (curr_part_end > *endofpart)
 				*endofpart = curr_part_end;
 		}
@@ -1369,7 +1380,7 @@ int open_subarray(char *dev, char *subarray, struct supertype *st, int quiet)
 		if (!quiet)
 			fprintf(stderr, Name ": Couldn't open %s, aborting\n",
 				dev);
-		return 2;
+		return -1;
 	}
 
 	st->devnum = fd2devnum(fd);
@@ -1572,7 +1583,7 @@ int mdmon_running(int devnum)
 
 int start_mdmon(int devnum)
 {
-	int i;
+	int i, skipped;
 	int len;
 	pid_t pid;	
 	int status;
@@ -1587,7 +1598,7 @@ int start_mdmon(int devnum)
 	if (check_env("MDADM_NO_MDMON"))
 		return 0;
 
-	len = readlink("/proc/self/exe", pathbuf, sizeof(pathbuf));
+	len = readlink("/proc/self/exe", pathbuf, sizeof(pathbuf)-1);
 	if (len > 0) {
 		char *sl;
 		pathbuf[len] = 0;
@@ -1603,8 +1614,13 @@ int start_mdmon(int devnum)
 	switch(fork()) {
 	case 0:
 		/* FIXME yuk. CLOSE_EXEC?? */
-		for (i=3; i < 100; i++)
-			close(i);
+		skipped = 0;
+		for (i=3; skipped < 20; i++)
+			if (close(i) < 0)
+				skipped++;
+			else
+				skipped = 0;
+
 		for (i=0; paths[i]; i++)
 			if (paths[i][0])
 				execl(paths[i], "mdmon",
@@ -1697,7 +1713,8 @@ int experimental(void)
 	if (check_env("MDADM_EXPERIMENTAL"))
 		return 1;
 	else {
-		fprintf(stderr, Name ": To use this feature MDADM_EXPERIMENTAL enviroment variable has to defined.\n");
+		fprintf(stderr, Name ": To use this feature MDADM_EXPERIMENTAL"
+				" environment variable has to be defined.\n");
 		return 0;
 	}
 }

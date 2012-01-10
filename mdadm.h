@@ -194,24 +194,30 @@ struct mdinfo {
 	unsigned long long	custom_array_size; /* size for non-default sized
 						    * arrays (in sectors)
 						    */
+#define NO_RESHAPE		0
+#define VOLUME_RESHAPE		1
+#define CONTAINER_RESHAPE	2
 	int			reshape_active;
 	unsigned long long	reshape_progress;
+	int			recovery_blocked; /* for external metadata it
+						   * indicates that there is
+						   * reshape in progress in
+						   * container,
+						   * for native metadata it is
+						   * reshape_active field mirror
+						   */
 	union {
 		unsigned long long resync_start; /* per-array resync position */
 		unsigned long long recovery_start; /* per-device rebuild position */
 		#define MaxSector  (~0ULL) /* resync/recovery complete position */
 	};
+	unsigned long		bitmap_offset;	/* 0 == none, 1 == a file */
 	unsigned long		safe_mode_delay; /* ms delay to mark clean */
 	int			new_level, delta_disks, new_layout, new_chunk;
 	int			errors;
 	unsigned long		cache_size; /* size of raid456 stripe cache*/
 	int			mismatch_cnt;
 	char			text_version[50];
-	void 			*update_private; /* for passing metadata-format
-						  * specific update data
-						  * between successive calls to
-						  * update_super()
-						  */
 
 	int container_member; /* for assembling external-metatdata arrays
 			       * This is to be used internally by metadata
@@ -313,6 +319,8 @@ enum special_options {
 	RebuildMapOpt,
 	InvalidBackup,
 	UdevRules,
+	FreezeReshape,
+	Continue,
 };
 
 /* structures read from config file */
@@ -427,6 +435,7 @@ extern void map_add(struct map_ent **melp,
 		    int devnum, char *metadata, int uuid[4], char *path);
 extern int map_lock(struct map_ent **melp);
 extern void map_unlock(struct map_ent **melp);
+extern void map_fork(void);
 
 /* various details can be requested */
 enum sysfs_read_flags {
@@ -440,11 +449,13 @@ enum sysfs_read_flags {
 	GET_DISKS	= (1 << 7),
 	GET_DEGRADED	= (1 << 8),
 	GET_SAFEMODE	= (1 << 9),
-	GET_DEVS	= (1 << 10), /* gets role, major, minor */
-	GET_OFFSET	= (1 << 11),
-	GET_SIZE	= (1 << 12),
-	GET_STATE	= (1 << 13),
-	GET_ERROR	= (1 << 14),
+	GET_BITMAP_LOCATION = (1 << 10),
+
+	GET_DEVS	= (1 << 20), /* gets role, major, minor */
+	GET_OFFSET	= (1 << 21),
+	GET_SIZE	= (1 << 22),
+	GET_STATE	= (1 << 23),
+	GET_ERROR	= (1 << 24),
 };
 
 /* If fd >= 0, get the array it is open on,
@@ -646,6 +657,8 @@ extern struct superswitch {
 	 *   linear-grow-new - add a new device to a linear array, but don't
 	 *                   change the size: so superblock still matches
 	 *   linear-grow-update - now change the size of the array.
+	 *   writemostly - set the WriteMostly1 bit in the superblock devflags
+	 *   readwrite - clear the WriteMostly1 bit in the superblock devflags
 	 */
 	int (*update_super)(struct supertype *st, struct mdinfo *info,
 			    char *update,
@@ -700,6 +713,12 @@ extern struct superswitch {
 	 * inter-device dependencies, it should record sufficient details
 	 * so these can be validated.
 	 * Both 'size' and '*freesize' are in sectors.  chunk is KiB.
+	 * Return value is:
+	 *  1: everything is OK
+	 *  0: not OK for some reason - if 'verbose', then error was reported.
+	 * -1: st->sb was NULL, 'subdev' is a member of a container of this
+	 *     types, but array is not acceptable for some reason
+	 *     message was reported even if verbose is 0.
 	 */
 	int (*validate_geometry)(struct supertype *st, int level, int layout,
 				 int raiddisks,
@@ -1010,7 +1029,7 @@ extern int Manage_runstop(char *devname, int fd, int runstop, int quiet);
 extern int Manage_resize(char *devname, int fd, long long size, int raid_disks);
 extern int Manage_subdevs(char *devname, int fd,
 			  struct mddev_dev *devlist, int verbose, int test,
-			  char *update);
+			  char *update, int force);
 extern int autodetect(void);
 extern int Grow_Add_device(char *devname, int fd, char *newdev);
 extern int Grow_addbitmap(char *devname, int fd, char *file, int chunk, int delay, int write_behind, int force);
@@ -1022,7 +1041,17 @@ extern int Grow_reshape(char *devname, int fd, int quiet, char *backup_file,
 extern int Grow_restart(struct supertype *st, struct mdinfo *info,
 			int *fdlist, int cnt, char *backup_file, int verbose);
 extern int Grow_continue(int mdfd, struct supertype *st,
-			 struct mdinfo *info, char *backup_file);
+			 struct mdinfo *info, char *backup_file,
+			 int freeze_reshape);
+
+extern int restore_backup(struct supertype *st,
+			  struct mdinfo *content,
+			  int working_disks,
+			  int spares,
+			  char *backup_file,
+			  int verbose);
+extern int Grow_continue_command(char *devname, int fd,
+				 char *backup_file, int verbose);
 
 extern int Assemble(struct supertype *st, char *mddev,
 		    struct mddev_ident *ident,
@@ -1030,7 +1059,7 @@ extern int Assemble(struct supertype *st, char *mddev,
 		    char *backup_file, int invalid_backup,
 		    int readonly, int runstop,
 		    char *update, char *homehost, int require_homehost,
-		    int verbose, int force);
+		    int verbose, int force, int freeze_reshape);
 
 extern int Build(char *mddev, int chunk, int level, int layout,
 		 int raiddisks, struct mddev_dev *devlist, int assume_clean,
@@ -1064,7 +1093,7 @@ extern int WaitClean(char *dev, int sock, int verbose);
 
 extern int Incremental(char *devname, int verbose, int runstop,
 		       struct supertype *st, char *homehost, int require_homehost,
-		       int autof);
+		       int autof, int freeze_reshape);
 extern void RebuildMap(void);
 extern int IncrementalScan(int verbose);
 extern int IncrementalRemove(char *devname, char *path, int verbose);
@@ -1114,8 +1143,12 @@ extern char *conf_get_homehost(int *require_homehostp);
 extern char *conf_line(FILE *file);
 extern char *conf_word(FILE *file, int allow_key);
 extern int conf_name_is_free(char *name);
+extern int conf_verify_devnames(struct mddev_ident *array_list);
 extern int devname_matches(char *name, char *match);
-extern struct mddev_ident *conf_match(struct mdinfo *info, struct supertype *st);
+extern struct mddev_ident *conf_match(struct supertype *st,
+				      struct mdinfo *info,
+				      char *devname,
+				      int verbose, int *rvp);
 extern int experimental(void);
 
 extern void free_line(char *line);
@@ -1136,6 +1169,7 @@ extern unsigned long long get_component_size(int fd);
 extern void remove_partitions(int fd);
 extern int test_partition(int fd);
 extern int test_partition_from_id(dev_t id);
+extern int get_data_disks(int level, int layout, int raid_disks);
 extern unsigned long long calc_array_size(int level, int raid_disks, int layout,
 				   int chunksize, unsigned long long devsize);
 extern int flush_metadata_updates(struct supertype *st);
@@ -1143,7 +1177,7 @@ extern void append_metadata_update(struct supertype *st, void *buf, int len);
 extern int assemble_container_content(struct supertype *st, int mdfd,
 				      struct mdinfo *content, int runstop,
 				      char *chosen_name, int verbose,
-				      char *backup_file);
+				      char *backup_file, int freeze_reshape);
 extern struct mdinfo *container_choose_spares(struct supertype *st,
 					      unsigned long long min_size,
 					      struct domainlist *domlist,
@@ -1345,3 +1379,5 @@ static inline int xasprintf(char **strp, const char *fmt, ...) {
 #define PATH_MAX	4096
 #endif
 
+#define PROCESS_DELAYED -2
+#define PROCESS_PENDING -3

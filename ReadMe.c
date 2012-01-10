@@ -24,7 +24,7 @@
 
 #include "mdadm.h"
 
-char Version[] = Name " - v3.2.2 - 17th June 2011\n";
+char Version[] = Name " - v3.2.3 - 23rd December 2011\n";
 
 /*
  * File: ReadMe.c
@@ -153,6 +153,7 @@ struct option long_options[] = {
     {"scan",      0, 0, 's'},
     {"force",	  0, 0, Force},
     {"update",	  1, 0, 'U'},
+    {"freeze-reshape", 0, 0, FreezeReshape},
 
     /* Management */
     {"add",       0, 0, Add},
@@ -190,6 +191,7 @@ struct option long_options[] = {
     {"backup-file", 1,0, BackupFile},
     {"invalid-backup",0,0,InvalidBackup},
     {"array-size", 1, 0, 'Z'},
+    {"continue", 0, 0, Continue},
 
     /* For Incremental */
     {"rebuild-map", 0, 0, RebuildMapOpt},

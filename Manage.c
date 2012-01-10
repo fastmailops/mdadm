@@ -44,6 +44,7 @@ int Manage_ro(char *devname, int fd, int readonly)
 #ifndef MDASSEMBLE
 	struct mdinfo *mdi;
 #endif
+	int rv = 0;
 
 	if (md_get_version(fd) < 9000) {
 		fprintf(stderr, Name ": need md driver version 0.90.0 or later\n");
@@ -75,7 +76,8 @@ int Manage_ro(char *devname, int fd, int readonly)
 
 				vers[9] = mdi->text_version[0];
 				sysfs_set_str(mdi, NULL, "metadata_version", vers);
-				return 1;
+				rv = 1;
+				goto out;
 			}
 		} else {
 			char *cp;
@@ -84,35 +86,43 @@ int Manage_ro(char *devname, int fd, int readonly)
 			sysfs_set_str(mdi, NULL, "metadata_version", vers);
 
 			cp = strchr(vers+10, '/');
-			if (*cp)
+			if (cp)
 				*cp = 0;
 			ping_monitor(vers+10);
 			if (mdi->array.level <= 0)
 				sysfs_set_str(mdi, NULL, "array_state", "active");
 		}
-		return 0;
+		goto out;
 	}
 #endif
 	if (ioctl(fd, GET_ARRAY_INFO, &array)) {
 		fprintf(stderr, Name ": %s does not appear to be active.\n",
 			devname);
-		return 1;
+		rv = 1;
+		goto out;
 	}
 
 	if (readonly>0) {
 		if (ioctl(fd, STOP_ARRAY_RO, NULL)) {
 			fprintf(stderr, Name ": failed to set readonly for %s: %s\n",
 				devname, strerror(errno));
-			return 1;
+			rv = 1;
+			goto out;
 		}
 	} else if (readonly < 0) {
 		if (ioctl(fd, RESTART_ARRAY_RW, NULL)) {
 			fprintf(stderr, Name ": failed to set writable for %s: %s\n",
 				devname, strerror(errno));
-			return 1;
+			rv = 1;
+			goto out;
 		}
 	}
-	return 0;
+out:
+#ifndef MDASSEMBLE
+	if (mdi)
+		sysfs_free(mdi);
+#endif
+	return rv;
 }
 
 #ifndef MDASSEMBLE
@@ -156,7 +166,7 @@ static void remove_devices(int devnum, char *path)
 				sprintf(pe, "%d", part);
 		}
 		n = readlink(path2, link, sizeof(link));
-		if (n && (int)strlen(base) == n &&
+		if (n > 0 && (int)strlen(base) == n &&
 		    strncmp(link, base, n) == 0)
 			unlink(path2);
 	}
@@ -173,6 +183,7 @@ int Manage_runstop(char *devname, int fd, int runstop, int quiet)
 	 * quiet < 0 means we will try again if it fails.
 	 */
 	mdu_param_t param; /* unused */
+	int rv = 0;
 
 	if (runstop == -1 && md_get_version(fd) < 9000) {
 		if (ioctl(fd, STOP_MD, 0)) {
@@ -251,7 +262,8 @@ int Manage_runstop(char *devname, int fd, int runstop, int quiet)
 				fprintf(stderr, Name
 					": failed to stop array %s: %s\n",
 					devname, strerror(errno));
-				return 1;
+				rv = 1;
+				goto out;
 			}
 
 			/* Give monitor a chance to act */
@@ -263,7 +275,8 @@ int Manage_runstop(char *devname, int fd, int runstop, int quiet)
 					": failed to completely stop %s"
 					": Device is busy\n",
 					devname);
-				return 1;
+				rv = 1;
+				goto out;
 			}
 		} else if (mdi &&
 			   mdi->array.major_version == -1 &&
@@ -291,9 +304,8 @@ int Manage_runstop(char *devname, int fd, int runstop, int quiet)
 							"member %s still active\n",
 							devname, m->dev);
 					free_mdstat(mds);
-					if (mdi)
-						sysfs_free(mdi);
-					return 1;
+					rv = 1;
+					goto out;
 				}
 		}
 
@@ -318,9 +330,8 @@ int Manage_runstop(char *devname, int fd, int runstop, int quiet)
 						"process, mounted filesystem "
 						"or active volume group?\n");
 			}
-			if (mdi)
-				sysfs_free(mdi);
-			return 1;
+			rv = 1;
+			goto out;
 		}
 		/* prior to 2.6.28, KOBJ_CHANGE was not sent when an md array
 		 * was stopped, so We'll do it here just to be sure.  Drop any
@@ -345,8 +356,11 @@ int Manage_runstop(char *devname, int fd, int runstop, int quiet)
 		map_lock(&map);
 		map_remove(&map, devnum);
 		map_unlock(&map);
+	out:
+		if (mdi)
+			sysfs_free(mdi);
 	}
-	return 0;
+	return rv;
 }
 
 int Manage_resize(char *devname, int fd, long long size, int raid_disks)
@@ -371,7 +385,7 @@ int Manage_resize(char *devname, int fd, long long size, int raid_disks)
 
 int Manage_subdevs(char *devname, int fd,
 		   struct mddev_dev *devlist, int verbose, int test,
-		   char *update)
+		   char *update, int force)
 {
 	/* do something to each dev.
 	 * devmode can be
@@ -623,19 +637,44 @@ int Manage_subdevs(char *devname, int fd,
 
 			if (add_dev == dv->devname) {
 				if (!get_dev_size(tfd, dv->devname, &ldsize)) {
+					st->ss->free_super(st);
 					close(tfd);
 					return 1;
 				}
 			} else if (!get_dev_size(tfd, NULL, &ldsize)) {
+				st->ss->free_super(st);
 				close(tfd);
 				tfd = -1;
 				continue;
 			}
 
+			if (tst->ss->validate_geometry(
+				    tst, array.level, array.layout,
+				    array.raid_disks, NULL,
+				    ldsize >> 9, NULL, NULL, 0) == 0) {
+				if (!force) {
+					fprintf(stderr, Name
+						": %s is larger than %s can "
+						"effectively use.\n"
+						"       Add --force is you "
+						"really wan to add this device.\n",
+						add_dev, devname);
+					st->ss->free_super(st);
+					close(tfd);
+					return 1;
+				}
+				fprintf(stderr, Name
+					": %s is larger than %s can "
+					"effectively use.\n"
+					"       Adding anyway as --force "
+					"was given.\n",
+					add_dev, devname);
+			}
 			if (!tst->ss->external &&
 			    array.major_version == 0 &&
 			    md_get_version(fd)%100 < 2) {
 				close(tfd);
+				st->ss->free_super(st);
 				tfd = -1;
 				if (ioctl(fd, HOT_ADD_DISK,
 					  (unsigned long)stb.st_rdev)==0) {
@@ -686,6 +725,7 @@ int Manage_subdevs(char *devname, int fd,
 				/* FIXME this is a bad test to be using */
 				if (!tst->sb) {
 					close(tfd);
+					st->ss->free_super(st);
 					fprintf(stderr, Name ": cannot load array metadata from %s\n", devname);
 					return 1;
 				}
@@ -695,6 +735,7 @@ int Manage_subdevs(char *devname, int fd,
 				    array_size) {
 					close(tfd);
 					tfd = -1;
+					st->ss->free_super(st);
 					if (add_dev != dv->devname)
 						continue;
 					fprintf(stderr, Name ": %s not large enough to join array\n",
@@ -741,11 +782,25 @@ int Manage_subdevs(char *devname, int fd,
 						remove_partitions(tfd);
 						close(tfd);
 						tfd = -1;
-						if (update) {
+						if (update || dv->writemostly > 0) {
 							int rv = -1;
 							tfd = dev_open(dv->devname, O_RDWR);
+							if (tfd < 0) {
+								fprintf(stderr, Name ": failed to open %s for"
+									" superblock update during re-add\n", dv->devname);
+								st->ss->free_super(st);
+								return 1;
+							}
 
-							if (tfd >= 0)
+							if (dv->writemostly == 1)
+								rv = st->ss->update_super(
+									st, NULL, "writemostly",
+									devname, verbose, 0, NULL);
+							if (dv->writemostly == 2)
+								rv = st->ss->update_super(
+									st, NULL, "readwrite",
+									devname, verbose, 0, NULL);
+							if (update)
 								rv = st->ss->update_super(
 									st, NULL, update,
 									devname, verbose, 0, NULL);
@@ -756,6 +811,7 @@ int Manage_subdevs(char *devname, int fd,
 							if (rv != 0) {
 								fprintf(stderr, Name ": failed to update"
 									" superblock during re-add\n");
+								st->ss->free_super(st);
 								return 1;
 							}
 						}
@@ -765,11 +821,13 @@ int Manage_subdevs(char *devname, int fd,
 							if (verbose >= 0)
 								fprintf(stderr, Name ": re-added %s\n", add_dev);
 							count++;
+							st->ss->free_super(st);
 							continue;
 						}
 						if (errno == ENOMEM || errno == EROFS) {
 							fprintf(stderr, Name ": add new device failed for %s: %s\n",
 								add_dev, strerror(errno));
+							st->ss->free_super(st);
 							if (add_dev != dv->devname)
 								continue;
 							return 1;
@@ -1188,9 +1246,9 @@ int move_spare(char *from_devname, char *to_devname, dev_t devid)
 	sprintf(devname, "%d:%d", major(devid), minor(devid));
 
 	devlist.disposition = 'r';
-	if (Manage_subdevs(from_devname, fd2, &devlist, -1, 0, NULL) == 0) {
+	if (Manage_subdevs(from_devname, fd2, &devlist, -1, 0, NULL, 0) == 0) {
 		devlist.disposition = 'a';
-		if (Manage_subdevs(to_devname, fd1, &devlist, -1, 0, NULL) == 0) {
+		if (Manage_subdevs(to_devname, fd1, &devlist, -1, 0, NULL, 0) == 0) {
 			/* make sure manager is aware of changes */
 			ping_manager(to_devname);
 			ping_manager(from_devname);
@@ -1198,7 +1256,7 @@ int move_spare(char *from_devname, char *to_devname, dev_t devid)
 			close(fd2);
 			return 1;
 		}
-		else Manage_subdevs(from_devname, fd2, &devlist, -1, 0, NULL);
+		else Manage_subdevs(from_devname, fd2, &devlist, -1, 0, NULL, 0);
 	}
 	close(fd1);
 	close(fd2);

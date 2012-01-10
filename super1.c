@@ -313,7 +313,7 @@ static void examine_super1(struct supertype *st, char *homehost)
 		printf("\n");
 	}
 	if (sb->devflags) {
-		printf("      Flags :");
+		printf("          Flags :");
 		if (sb->devflags & WriteMostly1)
 			printf(" write-mostly");
 		printf("\n");
@@ -578,6 +578,8 @@ static void getinfo_super1(struct supertype *st, struct mdinfo *info, char *map)
 
 	info->data_offset = __le64_to_cpu(sb->data_offset);
 	info->component_size = __le64_to_cpu(sb->size);
+	if (sb->feature_map & __le32_to_cpu(MD_FEATURE_BITMAP_OFFSET))
+		info->bitmap_offset = __le32_to_cpu(sb->bitmap_offset);
 
 	info->disk.major = 0;
 	info->disk.minor = 0;
@@ -600,6 +602,8 @@ static void getinfo_super1(struct supertype *st, struct mdinfo *info, char *map)
 		info->disk.state = 6; /* active and in sync */
 		info->disk.raid_disk = role;
 	}
+	if (sb->devflags & WriteMostly1)
+		info->disk.state |= (1 << MD_DISK_WRITEMOSTLY);
 	info->events = __le64_to_cpu(sb->events);
 	sprintf(info->text_version, "1.%d", st->minor_version);
 	info->safe_mode_delay = 200;
@@ -625,6 +629,8 @@ static void getinfo_super1(struct supertype *st, struct mdinfo *info, char *map)
 			info->array.raid_disks -= info->delta_disks;
 	} else
 		info->reshape_active = 0;
+
+	info->recovery_blocked = info->reshape_active;
 
 	if (map)
 		for (i=0; i<map_disks; i++)
@@ -803,6 +809,10 @@ static int update_super1(struct supertype *st, struct mdinfo *info,
 		       __le64_to_cpu(sb->data_size));
 	} else if (strcmp(update, "_reshape_progress")==0)
 		sb->reshape_position = __cpu_to_le64(info->reshape_progress);
+	else if (strcmp(update, "writemostly")==0)
+		sb->devflags |= WriteMostly1;
+	else if (strcmp(update, "readwrite")==0)
+		sb->devflags &= ~WriteMostly1;
 	else
 		rv = -1;
 
@@ -923,6 +933,7 @@ static int add_to_super1(struct supertype *st, mdu_disk_info_t *dk,
 		sb->max_dev = __cpu_to_le32(dk->number+1);
 
 	sb->dev_number = __cpu_to_le32(dk->number);
+	sb->devflags = 0; /* don't copy another disks flags */
 	sb->sb_csum = calc_sb_1_csum(sb);
 
 	dip = (struct devinfo **)&st->info;
@@ -1055,7 +1066,9 @@ static int write_init_super1(struct supertype *st)
 
 		sb->dev_number = __cpu_to_le32(di->disk.number);
 		if (di->disk.state & (1<<MD_DISK_WRITEMOSTLY))
-			sb->devflags |= __cpu_to_le32(WriteMostly1);
+			sb->devflags |= WriteMostly1;
+		else
+			sb->devflags &= ~WriteMostly1;
 
 		if ((rfd = open("/dev/urandom", O_RDONLY)) < 0 ||
 		    read(rfd, sb->device_uuid, 16) != 16) {
@@ -1373,7 +1386,8 @@ static int load_super1(struct supertype *st, int fd, char *devname)
 	return 0;
 
  no_bitmap:
-	super->feature_map = __cpu_to_le32(__le32_to_cpu(super->feature_map) & ~1);
+	super->feature_map = __cpu_to_le32(__le32_to_cpu(super->feature_map)
+					   & ~MD_FEATURE_BITMAP_OFFSET);
 	return 0;
 }
 
@@ -1475,12 +1489,10 @@ add_internal_bitmap1(struct supertype *st,
 		     int may_change, int major)
 {
 	/*
-	 * If not may_change, then this is a 'Grow', and the bitmap
-	 * must fit after the superblock.
-	 * If may_change, then this is create, and we can put the bitmap
-	 * before the superblock if we like, or may move the start.
-	 * If !may_change, the bitmap MUST live at offset of 1K, until
-	 * we get a sysfs interface.
+	 * If not may_change, then this is a 'Grow' without sysfs support for
+	 * bitmaps, and the bitmap must fit after the superblock at 1K offset.
+	 * If may_change, then this is create or a Grow with sysfs syupport,
+	 * and we can put the bitmap wherever we like.
 	 *
 	 * size is in sectors,  chunk is in bytes !!!
 	 */
@@ -1491,16 +1503,20 @@ add_internal_bitmap1(struct supertype *st,
 	long offset;
 	unsigned long long chunk = *chunkp;
 	int room = 0;
+	int creating = 0;
 	struct mdp_superblock_1 *sb = st->sb;
 	bitmap_super_t *bms = (bitmap_super_t*)(((char*)sb) + 1024);
 	int uuid[4];
 
+	if (__le64_to_cpu(sb->data_size) == 0)
+		/* Must be creating the array, else data_size would be non-zero */
+		creating = 1;
 	switch(st->minor_version) {
 	case 0:
 		/* either 3K after the superblock (when hot-add),
 		 * or some amount of space before.
 		 */
-		if (may_change) {
+		if (creating) {
 			/* We are creating array, so we *know* how much room has
 			 * been left.
 			 */
@@ -1510,8 +1526,8 @@ add_internal_bitmap1(struct supertype *st,
 			room = __le64_to_cpu(sb->super_offset)
 				- __le64_to_cpu(sb->data_offset)
 				- __le64_to_cpu(sb->data_size);
-			/* remove '1 ||' when we can set offset via sysfs */
-			if (1 || (room < 3*2 &&
+
+			if (!may_change || (room < 3*2 &&
 				  __le32_to_cpu(sb->max_dev) <= 384)) {
 				room = 3*2;
 				offset = 1*2;
@@ -1522,17 +1538,17 @@ add_internal_bitmap1(struct supertype *st,
 		break;
 	case 1:
 	case 2: /* between superblock and data */
-		if (may_change) {
+		if (creating) {
 			offset = 4*2;
 			room = choose_bm_space(__le64_to_cpu(sb->size));
 		} else {
 			room = __le64_to_cpu(sb->data_offset)
 				- __le64_to_cpu(sb->super_offset);
-			if (1 || __le32_to_cpu(sb->max_dev) <= 384) {
-				room -= 2;
+			if (!may_change) {
+				room -= 2; /* Leave 1K for superblock */
 				offset = 2;
 			} else {
-				room -= 4*2;
+				room -= 4*2; /* leave 4K for superblock */
 				offset = 4*2;
 			}
 		}
@@ -1577,7 +1593,8 @@ add_internal_bitmap1(struct supertype *st,
 
 	sb->bitmap_offset = __cpu_to_le32(offset);
 
-	sb->feature_map = __cpu_to_le32(__le32_to_cpu(sb->feature_map) | 1);
+	sb->feature_map = __cpu_to_le32(__le32_to_cpu(sb->feature_map)
+					| MD_FEATURE_BITMAP_OFFSET);
 	memset(bms, 0, sizeof(*bms));
 	bms->magic = __cpu_to_le32(BITMAP_MAGIC);
 	bms->version = __cpu_to_le32(major);
@@ -1591,7 +1608,6 @@ add_internal_bitmap1(struct supertype *st,
 	*chunkp = chunk;
 	return 1;
 }
-
 
 static void locate_bitmap1(struct supertype *st, int fd)
 {
@@ -1620,7 +1636,7 @@ static int write_bitmap1(struct supertype *st, int fd)
 	int rv = 0;
 
 	int towrite, n;
-	char *buf = (char*)(((long)(abuf+4096))&~4095UL);
+	char buf[4096];
 
 	locate_bitmap1(st, fd);
 
@@ -1635,7 +1651,7 @@ static int write_bitmap1(struct supertype *st, int fd)
 		n = towrite;
 		if (n > 4096)
 			n = 4096;
-		n = write(fd, buf, n);
+		n = awrite(fd, buf, n);
 		if (n > 0)
 			towrite -= n;
 		else

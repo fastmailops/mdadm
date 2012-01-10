@@ -707,6 +707,8 @@ void autoline(char *line)
 	for (i = 0; i < super_cnt; i++)
 		if (!seen[i])
 			policy_add(rule_policy, pol_auto, dflt, pol_metadata, superlist[i]->name, NULL);
+
+	free(seen);
 }
 
 int loaded = 0;
@@ -1017,11 +1019,12 @@ int conf_name_is_free(char *name)
 	return 1;
 }
 
-struct mddev_ident *conf_match(struct mdinfo *info, struct supertype *st)
+struct mddev_ident *conf_match(struct supertype *st,
+			       struct mdinfo *info,
+			       char *devname,
+			       int verbose, int *rvp)
 {
 	struct mddev_ident *array_list, *match;
-	int verbose = 0;
-	char *devname = NULL;
 	array_list = conf_get_ident(NULL);
 	match = NULL;
 	for (; array_list; array_list = array_list->next) {
@@ -1042,7 +1045,7 @@ struct mddev_ident *conf_match(struct mdinfo *info, struct supertype *st)
 					array_list->devname);
 			continue;
 		}
-		if (array_list->devices && devname &&
+		if (array_list->devices &&
 		    !match_oneof(array_list->devices, devname)) {
 			if (verbose >= 2 && array_list->devname)
 				fprintf(stderr, Name
@@ -1064,7 +1067,8 @@ struct mddev_ident *conf_match(struct mdinfo *info, struct supertype *st)
 		    array_list->super_minor == UnSet) {
 			if (verbose >= 2 && array_list->devname)
 				fprintf(stderr, Name
-			     ": %s doesn't have any identifying information.\n",
+					": %s doesn't have any identifying"
+					" information.\n",
 					array_list->devname);
 			continue;
 		}
@@ -1074,15 +1078,54 @@ struct mddev_ident *conf_match(struct mdinfo *info, struct supertype *st)
 			if (verbose >= 0) {
 				if (match->devname && array_list->devname)
 					fprintf(stderr, Name
-		   ": we match both %s and %s - cannot decide which to use.\n",
-						match->devname, array_list->devname);
+						": we match both %s and %s - "
+						"cannot decide which to use.\n",
+						match->devname,
+						array_list->devname);
 				else
 					fprintf(stderr, Name
-						": multiple lines in mdadm.conf match\n");
+						": multiple lines in mdadm.conf"
+						" match\n");
 			}
-			return NULL;
+			if (rvp)
+				*rvp = 2;
+			match = NULL;
+			break;
 		}
 		match = array_list;
 	}
 	return match;
+}
+
+int conf_verify_devnames(struct mddev_ident *array_list)
+{
+	struct mddev_ident *a1, *a2;
+
+	for (a1 = array_list; a1; a1 = a1->next) {
+		if (!a1->devname)
+			continue;
+		for (a2 = a1->next; a2; a2 = a2->next) {
+			if (!a2->devname)
+				continue;
+			if (strcmp(a1->devname, a2->devname) != 0)
+				continue;
+
+			if (a1->uuid_set && a2->uuid_set) {
+				char nbuf[64];
+				__fname_from_uuid(a1->uuid, 0, nbuf, ':');
+				fprintf(stderr,
+					Name ": Devices %s and ",
+					nbuf);
+				__fname_from_uuid(a2->uuid, 0, nbuf, ':');
+				fprintf(stderr,
+					"%s have the same name: %s\n",
+					nbuf, a1->devname);
+			} else
+				fprintf(stderr, Name ": Device %s given twice"
+					" in config file\n", a1->devname);
+			return 1;
+		}
+	}
+
+	return 0;
 }

@@ -117,11 +117,16 @@ static void close_aa(struct active_array *aa)
 		close(d->state_fd);
 	}
 
-	close(aa->action_fd);
-	close(aa->info.state_fd);
-	close(aa->resync_start_fd);
-	close(aa->metadata_fd);
-	close(aa->sync_completed_fd);
+	if (aa->action_fd >= 0)
+		close(aa->action_fd);
+	if (aa->info.state_fd >= 0)
+		close(aa->info.state_fd);
+	if (aa->resync_start_fd >= 0)
+		close(aa->resync_start_fd);
+	if (aa->metadata_fd >= 0)
+		close(aa->metadata_fd);
+	if (aa->sync_completed_fd >= 0)
+		close(aa->sync_completed_fd);
 }
 
 static void free_aa(struct active_array *aa)
@@ -409,7 +414,13 @@ static int disk_init_and_add(struct mdinfo *disk, struct mdinfo *clone,
 
 	*disk = *clone;
 	disk->recovery_fd = sysfs_open(aa->devnum, disk->sys_name, "recovery_start");
+	if (disk->recovery_fd < 0)
+		return -1;
 	disk->state_fd = sysfs_open(aa->devnum, disk->sys_name, "state");
+	if (disk->state_fd < 0) {
+		close(disk->recovery_fd);
+		return -1;
+	}
 	disk->prev_state = read_dev_state(disk->state_fd);
 	disk->curr_state = disk->prev_state;
 	disk->next = aa->info.devs;
@@ -461,7 +472,7 @@ static void manage_member(struct mdstat_ent *mdstat,
 	if (mdstat->level) {
 		int level = map_name(pers, mdstat->level);
 		if (level == 0 || level == LEVEL_LINEAR) {
-			a->container = NULL;
+			a->to_remove = 1;
 			wakeup_monitor();
 			return;
 		}
@@ -498,7 +509,10 @@ static void manage_member(struct mdstat_ent *mdstat,
 		newa = duplicate_aa(a);
 		if (!newa)
 			goto out;
-		/* Cool, we can add a device or several. */
+		/* prevent the kernel from activating the disk(s) before we
+		 * finish adding them
+		 */
+		sysfs_set_str(&a->info, NULL, "sync_action", "frozen");
 
 		/* Add device to array and set offset/size/slot.
 		 * and open files for each newdev */
@@ -736,7 +750,7 @@ void manage(struct mdstat_ent *mdstat, struct supertype *container)
 		/* Looks like a member of this container */
 		for (a = container->arrays; a; a = a->next) {
 			if (mdstat->devnum == a->devnum) {
-				if (a->container)
+				if (a->container && a->to_remove == 0)
 					manage_member(mdstat, a);
 				break;
 			}

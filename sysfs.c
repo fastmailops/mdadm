@@ -217,6 +217,19 @@ struct mdinfo *sysfs_read(int fd, int devnum, unsigned long options)
 		msec = (msec * 1000) / scale;
 		sra->safe_mode_delay = msec;
 	}
+	if (options & GET_BITMAP_LOCATION) {
+		strcpy(base, "bitmap/location");
+		if (load_sys(fname, buf))
+			goto abort;
+		if (strncmp(buf, "file", 4) == 0)
+			sra->bitmap_offset = 1;
+		else if (strncmp(buf, "none", 4) == 0)
+			sra->bitmap_offset = 0;
+		else if (buf[0] == '+')
+			sra->bitmap_offset = strtoul(buf+1, NULL, 10);
+		else
+			goto abort;
+	}
 
 	if (! (options & GET_DEVS))
 		return sra;
@@ -379,7 +392,7 @@ unsigned long long get_component_size(int fd)
 		return 0;
 	n = read(fd, fname, sizeof(fname));
 	close(fd);
-	if (n == sizeof(fname))
+	if (n < 0 || n == sizeof(fname))
 		return 0;
 	fname[n] = 0;
 	return strtoull(fname, NULL, 10) * 2;
@@ -470,7 +483,7 @@ int sysfs_fd_get_ll(int fd, unsigned long long *val)
 	lseek(fd, 0, 0);
 	n = read(fd, buf, sizeof(buf));
 	if (n <= 0)
-		return -1;
+		return -2;
 	buf[n] = 0;
 	*val = strtoull(buf, &ep, 0);
 	if (ep == buf || (*ep != 0 && *ep != '\n' && *ep != ' '))
@@ -541,7 +554,20 @@ int sysfs_set_array(struct mdinfo *info, int vers)
 	ver[0] = 0;
 	if (info->array.major_version == -1 &&
 	    info->array.minor_version == -2) {
+		char buf[1024];
+
 		strcat(strcpy(ver, "external:"), info->text_version);
+
+		/* meta version might already be set if we are setting
+		 * new geometry for a reshape.  In that case we don't
+		 * want to over-write the 'readonly' flag that is
+		 * stored in the metadata version.  So read the current
+		 * version first, and preserve the flag
+		 */
+		if (sysfs_get_str(info, NULL, "metadata_version",
+				  buf, 1024) > 0)
+			if (strlen(buf) >= 9 && buf[9] == '-')
+				ver[9] = '-';
 
 		if ((vers % 100) < 2 ||
 		    sysfs_set_str(info, NULL, "metadata_version",
@@ -606,7 +632,7 @@ int sysfs_add_disk(struct mdinfo *sra, struct mdinfo *sd, int resume)
 
 	memset(nm, 0, sizeof(nm));
 	sprintf(dv, "/sys/dev/block/%d:%d", sd->disk.major, sd->disk.minor);
-	rv = readlink(dv, nm, sizeof(nm));
+	rv = readlink(dv, nm, sizeof(nm)-1);
 	if (rv <= 0)
 		return -1;
 	nm[rv] = '\0';
@@ -709,9 +735,9 @@ int sysfs_disk_to_scsi_id(int fd, __u32 *id)
 	/* from an open block device, try to retrieve it scsi_id */
 	struct stat st;
 	char path[256];
-	char *c1, *c2;
 	DIR *dir;
 	struct dirent *de;
+	int host, bus, target, lun;
 
 	if (fstat(fd, &st))
 		return 1;
@@ -723,32 +749,22 @@ int sysfs_disk_to_scsi_id(int fd, __u32 *id)
 	if (!dir)
 		return 1;
 
-	de = readdir(dir);
-	while (de) {
-		if (strchr(de->d_name, ':'))
+	for (de = readdir(dir); de; de = readdir(dir)) {
+		int count;
+
+		if (de->d_type != DT_DIR)
+			continue;
+
+		count = sscanf(de->d_name, "%d:%d:%d:%d", &host, &bus, &target, &lun);
+		if (count == 4)
 			break;
-		de = readdir(dir);
 	}
 	closedir(dir);
 
 	if (!de)
 		return 1;
 
-	c1 = de->d_name;
-	c2 = strchr(c1, ':');
-	*c2 = '\0';
-	*id = strtol(c1, NULL, 10) << 24; /* host */
-	c1 = c2 + 1;
-	c2 = strchr(c1, ':');
-	*c2 = '\0';
-	*id |= strtol(c1, NULL, 10) << 16; /* bus */
-	c1 = c2 + 1;
-	c2 = strchr(c1, ':');
-	*c2 = '\0';
-	*id |= strtol(c1, NULL, 10) << 8; /* target */
-	c1 = c2 + 1;
-	*id |= strtol(c1, NULL, 10); /* lun */
-
+	*id = (host << 24) | (bus << 16) | (target << 8) | (lun << 0);
 	return 0;
 }
 
@@ -793,6 +809,8 @@ int sysfs_unique_holder(int devnum, long rdev)
 		}
 		n = read(fd, buf, sizeof(buf)-1);
 		close(fd);
+		if (n < 0)
+			continue;
 		buf[n] = 0;
 		if (sscanf(buf, "%d:%d%c", &mj, &mn, &c) != 3 ||
 		    c != '\n') {

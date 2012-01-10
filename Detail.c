@@ -58,7 +58,7 @@ int Detail(char *dev, int brief, int export, int test, char *homehost)
 
 	int rv = test ? 4 : 1;
 	int avail_disks = 0;
-	char *avail;
+	char *avail = NULL;
 
 	if (fd < 0) {
 		fprintf(stderr, Name ": cannot open %s: %s\n",
@@ -372,11 +372,13 @@ int Detail(char *dev, int brief, int export, int test, char *homehost)
 			else
 				st = ", degraded";
 
-			printf("          State : %s%s%s%s\n",
-			       (array.state&(1<<MD_SB_CLEAN))?"clean":"active",
-			       st,
-			       (!e || e->percent < 0) ? "" : sync_action[e->resync],
-			       larray_size ? "": ", Not Started");
+			printf("          State : %s%s%s%s%s%s \n",
+			       (array.state&(1<<MD_SB_CLEAN))?"clean":"active", st,
+			       (!e || (e->percent < 0 && e->percent != PROCESS_PENDING &&
+			       e->percent != PROCESS_DELAYED)) ? "" : sync_action[e->resync],
+			       larray_size ? "": ", Not Started",
+			       e->percent == PROCESS_DELAYED ? " (DELAYED)": "",
+			       e->percent == PROCESS_PENDING ? " (PENDING)": "");
 		}
 		if (array.raid_disks)
 			printf(" Active Devices : %d\n", array.active_disks);
@@ -416,10 +418,8 @@ int Detail(char *dev, int brief, int export, int test, char *homehost)
 		}
 
 		if (e && e->percent >= 0) {
-			printf(" Re%s Status : %d%% complete\n",
-			       (st && st->sb && info->reshape_active)?
-			          "shape":"build",
-			       e->percent);
+			static char *sync_action[] = {"Rebuild", "Resync", "Reshape", "Check"};
+			printf(" %7s Status : %d%% complete\n", sync_action[e->resync], e->percent);
 			is_rebuilding = 1;
 		}
 		free_mdstat(ms);
@@ -430,12 +430,9 @@ This is pretty boring
 			printf("  Reshape pos'n : %llu%s\n", (unsigned long long) info->reshape_progress<<9,
 			       human_size((unsigned long long)info->reshape_progress<<9));
 #endif
-			if (info->delta_disks > 0)
+			if (info->delta_disks != 0)
 				printf("  Delta Devices : %d, (%d->%d)\n",
 				       info->delta_disks, array.raid_disks - info->delta_disks, array.raid_disks);
-			if (info->delta_disks < 0)
-				printf("  Delta Devices : %d, (%d->%d)\n",
-				       info->delta_disks, array.raid_disks, array.raid_disks + info->delta_disks);
 			if (info->new_level != array.level) {
 				char *c = map_num(pers, info->new_level);
 				printf("      New Level : %s\n", c?c:"-unknown-");
@@ -590,6 +587,8 @@ This is pretty boring
 out:
 	close(fd);
 	free(subarray);
+	free(avail);
+	sysfs_free(sra);
 	return rv;
 }
 

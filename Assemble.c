@@ -138,7 +138,7 @@ int Assemble(struct supertype *st, char *mddev,
 	     char *backup_file, int invalid_backup,
 	     int readonly, int runstop,
 	     char *update, char *homehost, int require_homehost,
-	     int verbose, int force)
+	     int verbose, int force, int freeze_reshape)
 {
 	/*
 	 * The task of Assemble is to find a collection of
@@ -220,7 +220,9 @@ int Assemble(struct supertype *st, char *mddev,
 	int change = 0;
 	int inargv = 0;
 	int report_missmatch;
+#ifndef MDASSEMBLE
 	int bitmap_done;
+#endif
 	int start_partial_ok = (runstop >= 0) && 
 		(force || devlist==NULL || auto_assem);
 	unsigned int num_devs;
@@ -293,7 +295,7 @@ int Assemble(struct supertype *st, char *mddev,
 		char *devname = tmpdev->devname;
 		int dfd;
 		struct stat stb;
-		struct supertype *tst = dup_super(st);
+		struct supertype *tst;
 		struct dev_policy *pol = NULL;
 		int found_container = 0;
 
@@ -305,6 +307,8 @@ int Assemble(struct supertype *st, char *mddev,
 				fprintf(stderr, Name ": %s is not one of %s\n", devname, ident->devices);
 			continue;
 		}
+
+		tst = dup_super(st);
 
 		dfd = dev_open(devname, O_RDONLY|O_EXCL);
 		if (dfd < 0) {
@@ -439,13 +443,6 @@ int Assemble(struct supertype *st, char *mddev,
 			     content;
 			     content = content->next) {
 
-				/* do not assemble arrays that might have bad blocks */
-				if (content->array.state & (1<<MD_SB_BBM_ERRORS)) {
-					fprintf(stderr, Name ": BBM log found in metadata. "
-								"Cannot activate array(s).\n");
-					tmpdev->used = 2;
-					goto loop;
-				}
 				if (!ident_matches(ident, content, tst,
 						   homehost, update,
 						   report_missmatch ? devname : NULL))
@@ -455,6 +452,11 @@ int Assemble(struct supertype *st, char *mddev,
 						fprintf(stderr, Name ": member %s in %s is already assembled\n",
 							content->text_version,
 							devname);
+				} else if (content->array.state & (1<<MD_SB_BLOCK_VOLUME)) {
+					/* do not assemble arrays with unsupported configurations */
+					fprintf(stderr, Name ": Cannot activate member %s in %s.\n",
+						content->text_version,
+						devname);
 				} else
 					break;
 			}
@@ -697,14 +699,13 @@ int Assemble(struct supertype *st, char *mddev,
 		int err;
 		err = assemble_container_content(st, mdfd, content, runstop,
 						 chosen_name, verbose,
-						 backup_file);
+						 backup_file, freeze_reshape);
 		close(mdfd);
 		return err;
 	}
+	bitmap_done = 0;
 #endif
 	/* Ok, no bad inconsistancy, we can try updating etc */
-	bitmap_done = 0;
-	content->update_private = NULL;
 	devices = malloc(num_devs * sizeof(*devices));
 	devmap = calloc(num_devs * content->array.raid_disks, 1);
 	for (tmpdev = devlist; tmpdev; tmpdev=tmpdev->next) if (tmpdev->used == 1) {
@@ -889,8 +890,6 @@ int Assemble(struct supertype *st, char *mddev,
 		}
 		devcnt++;
 	}
-	free(content->update_private);
-	content->update_private = NULL;
 
 	if (devcnt == 0) {
 		fprintf(stderr, Name ": no devices found for %s\n",
@@ -1343,9 +1342,14 @@ int Assemble(struct supertype *st, char *mddev,
 			int rv;
 #ifndef MDASSEMBLE
 			if (content->reshape_active &&
-			    content->delta_disks <= 0)
-				rv = Grow_continue(mdfd, st, content, backup_file);
-			else
+			    content->delta_disks <= 0) {
+				rv = sysfs_set_str(content, NULL,
+						   "array_state", "readonly");
+				if (rv == 0)
+					rv = Grow_continue(mdfd, st, content,
+							   backup_file,
+							   freeze_reshape);
+			} else
 #endif
 				rv = ioctl(mdfd, RUN_ARRAY, NULL);
 			if (rv == 0) {
@@ -1372,6 +1376,7 @@ int Assemble(struct supertype *st, char *mddev,
 							sysfs_set_num(sra, NULL,
 								      "stripe_cache_size",
 								      (4 * content->array.chunk_size / 4096) + 1);
+						sysfs_free(sra);
 					}
 				}
 				if (okcnt < (unsigned)content->array.raid_disks) {
@@ -1511,7 +1516,7 @@ int Assemble(struct supertype *st, char *mddev,
 int assemble_container_content(struct supertype *st, int mdfd,
 			       struct mdinfo *content, int runstop,
 			       char *chosen_name, int verbose,
-			       char *backup_file)
+			       char *backup_file, int freeze_reshape)
 {
 	struct mdinfo *dev, *sra;
 	int working = 0, preexist = 0;
@@ -1523,10 +1528,13 @@ int assemble_container_content(struct supertype *st, int mdfd,
 
 	sra = sysfs_read(mdfd, 0, GET_VERSION);
 	if (sra == NULL || strcmp(sra->text_version, content->text_version) != 0)
-		if (sysfs_set_array(content, md_get_version(mdfd)) != 0)
+		if (sysfs_set_array(content, md_get_version(mdfd)) != 0) {
+			if (sra)
+				sysfs_free(sra);
 			return 1;
+		}
 
-	if (content->reshape_active)
+	if (st->ss->external && content->recovery_blocked)
 		block_subarray(content);
 
 	if (sra)
@@ -1552,48 +1560,37 @@ int assemble_container_content(struct supertype *st, int mdfd,
 		 (working + preexist + expansion) >=
 			content->array.working_disks) {
 		int err;
+		int start_reshape;
 
-		if (content->reshape_active) {
+		/* There are two types of reshape: container wide or sub-array specific
+		 * Check if metadata requests blocking container wide reshapes
+		 */
+		start_reshape = (content->reshape_active &&
+				 !((content->reshape_active == CONTAINER_RESHAPE) &&
+				   (content->array.state & (1<<MD_SB_BLOCK_CONTAINER_RESHAPE))));
+		if (start_reshape) {
 			int spare = content->array.raid_disks + expansion;
-			int i;
-			int *fdlist = malloc(sizeof(int) *
-					     (working + expansion
-					      + content->array.raid_disks));
-			for (i=0; i<spare; i++)
-				fdlist[i] = -1;
-			for (dev = content->devs; dev; dev = dev->next) {
-				char buf[20];
-				int fd;
-				sprintf(buf, "%d:%d",
-					dev->disk.major,
-					dev->disk.minor);
-				fd = dev_open(buf, O_RDWR);
-
-				if (dev->disk.raid_disk >= 0)
-					fdlist[dev->disk.raid_disk] = fd;
-				else
-					fdlist[spare++] = fd;
-			}
-			if (st->ss->external && st->ss->recover_backup)
-				err = st->ss->recover_backup(st, content);
-			else
-				err = Grow_restart(st, content, fdlist, spare,
-						   backup_file, verbose > 0);
-			while (spare > 0) {
-				spare--;
-				if (fdlist[spare] >= 0)
-					close(fdlist[spare]);
-			}
-			if (err) {
-				fprintf(stderr, Name ": Failed to restore critical"
-					" section for reshape - sorry.\n");
-				if (!backup_file)
-					fprintf(stderr, Name ":  Possibly you need"
-						" to specify a --backup-file\n");
+			if (restore_backup(st, content,
+					   working,
+					   spare, backup_file, verbose) == 1)
 				return 1;
+
+			err = sysfs_set_str(content, NULL,
+					    "array_state", "readonly");
+			if (err)
+				return 1;
+
+			if (st->ss->external) {
+				if (!mdmon_running(st->container_dev))
+					start_mdmon(st->container_dev);
+				ping_monitor_by_id(st->container_dev);
+				if (mdmon_running(st->container_dev) &&
+						st->update_tail == NULL)
+					st->update_tail = &st->updates;
 			}
 
-			err = Grow_continue(mdfd, st, content, backup_file);
+			err = Grow_continue(mdfd, st, content, backup_file,
+					    freeze_reshape);
 		} else switch(content->array.level) {
 		case LEVEL_LINEAR:
 		case LEVEL_MULTIPATH:
@@ -1617,12 +1614,14 @@ int assemble_container_content(struct supertype *st, int mdfd,
 		if (verbose >= 0) {
 			if (err)
 				fprintf(stderr, Name
-					": array %s now has %d devices",
-					chosen_name, working + preexist);
+					": array %s now has %d device%s",
+					chosen_name, working + preexist,
+					working + preexist == 1 ? "":"s");
 			else
 				fprintf(stderr, Name
-					": Started %s with %d devices",
-					chosen_name, working + preexist);
+					": Started %s with %d device%s",
+					chosen_name, working + preexist,
+					working + preexist == 1 ? "":"s");
 			if (preexist)
 				fprintf(stderr, " (%d new)", working);
 			if (expansion)
@@ -1635,11 +1634,15 @@ int assemble_container_content(struct supertype *st, int mdfd,
 		return err;
 		/* FIXME should have an O_EXCL and wait for read-auto */
 	} else {
-		if (verbose >= 0)
+		if (verbose >= 0) {
 			fprintf(stderr, Name
-				": %s assembled with %d devices but "
-				"not started\n",
-				chosen_name, working);
+				": %s assembled with %d device%s",
+				chosen_name, preexist + working,
+				preexist + working == 1 ? "":"s");
+			if (preexist)
+				fprintf(stderr, " (%d new)", working);
+			fprintf(stderr, " but not started\n");
+		}
 		return 1;
 	}
 }
