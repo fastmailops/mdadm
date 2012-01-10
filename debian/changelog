@@ -11,6 +11,8 @@ mdadm (3.2.3-1) UNRELEASED; urgency=low
     While at it, remove mention of devfsd
   * added Slovak (sk.po) po-debconf translation from Slavko <linux@slavino.sk>
     (Closes: #641972)
+  * set nice value of the check/resync thread too, together with I/O
+    scheduling class, based on patch by Sergey B Kirpichev (Closes: #652547)
 
   [ Peter Eisentraut ]
   * Added support for "status" action to mdadm init script (Closes: #651737)

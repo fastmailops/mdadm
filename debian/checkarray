@@ -27,10 +27,10 @@ usage()
 	-a|--all & check all assembled arrays (check /proc/mdstat).
 	-s|--status & print redundancy check status of devices.
 	-x|--cancel & queue a request to cancel a running redundancy check.
-	-i|--idle & perform check in a lowest I/O scheduling class (idle).
-	-l|--slow & perform check in a lower-than-standard I/O scheduling class.
-	-f|--fast & perform check in higher-than-standard I/O scheduling class.
-	--realtime & perform check in real-time I/O scheduling class (DANGEROUS!).
+	-i|--idle & perform check in a lowest scheduling class (idle)
+	-l|--slow & perform check in a lower-than-standard scheduling class
+	-f|--fast & perform check in higher-than-standard scheduling class
+	--realtime & perform check in real-time scheduling class (DANGEROUS!)
 	-c|--cron & honour AUTOCHECK setting in /etc/default/mdadm.
 	-q|--quiet & suppress informational messages.
 	-Q|--real-quiet & suppress all output messages, including warnings and errors.
@@ -181,11 +181,11 @@ for array in $arrays; do
       [ $quiet -lt 1 ] && echo "$PROGNAME: I: check queued for array $array." >&2
 
       case "$ionice" in
-        idle) arg='-c3';;
-        low) arg='-c2 -n7';;
-        high) arg='-c2 -n0';;
-        realtime) arg='-c1 -n4';;
-        *) continue;;
+        idle) ioarg='-c3'; renice=15;;
+        low) ioarg='-c2 -n7'; renice=5;;
+        high) ioarg='-c2 -n0'; renice=0;;
+        realtime) ioarg='-c1 -n4'; renice=-5;;
+        *) break;;
       esac
 
       resync_pid= wait=5
@@ -193,8 +193,9 @@ for array in $arrays; do
         wait=$((wait - 1))
         resync_pid=$(ps -ef | awk -v dev=$array 'BEGIN { pattern = "^\\[" dev "_resync]$" } $8 ~ pattern { print $2 }')
         if [ -n "$resync_pid" ]; then
-          [ $quiet -lt 1 ] && echo "$PROGNAME: I: selecting $ionice I/O scheduling class for resync of $array." >&2
-          ionice -p "$resync_pid" $arg || :
+          [ $quiet -lt 1 ] && echo "$PROGNAME: I: selecting $ionice I/O scheduling class and $renice niceness for resync of $array." >&2
+          ionice -p "$resync_pid" $ioarg || :
+          renice -n $renice -p "$resync_pid" 1>/dev/null || :
           break
         fi
         sleep 1
