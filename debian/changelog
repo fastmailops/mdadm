@@ -1,7 +1,7 @@
 mdadm (3.2.3-1) UNRELEASED; urgency=low
 
   * new upstream bugfix/stable version, with lots of fixes all over.
-    Closes: #641886, #628667, #645563, #651880, #607375
+    Closes: #641886, #628667, #645563, #651880, #607375, #633880
   * update Neil's email (Closes: #650630)
   * update mdadd.sh to version 1.52 (Closes: #655212)
   * fixed a typo (RAID6 vs RAID10) in FAQ (Closes: #637068)
