@@ -1,4 +1,12 @@
-mdadm (3.2.2-1) UNRELEASED; urgency=low
+mdadm (3.2.2-2) UNRELEASED; urgency=low
+
+  * declare ordering dependency for multipath-tools-boot in
+    mdadm-raid init script (Closes: #641584)
+    While at it, remove mention of devfsd
+
+ -- Michael Tokarev <mjt@tls.msk.ru>  Tue, 10 Jan 2012 14:37:30 +0400
+
+mdadm (3.2.2-1) unstable; urgency=low
 
   [ martin f. krafft ]
   * New upstream version (closes: #615494), which addresses:
@@ -41,9 +49,6 @@ mdadm (3.2.2-1) UNRELEASED; urgency=low
   * move runtime stuff from /dev/.mdadm to /run/mdadm
   * document defaults change in debian/NEWS (it was forgotten to be
     done for squeeze) - metadata & chunk size (Closes: #595516)
-  * declare ordering dependency for multipath-tools-boot in
-    mdadm-raid init script (Closes: #641584)
-    While at it, remove mention of devfsd
 
  -- martin f. krafft <madduck@debian.org>  Mon, 01 Aug 2011 10:41:41 +0200
 
