@@ -53,7 +53,6 @@ INTERPOLATED_FILES = debian/bugscript debian/mkconf
 
 clean:
 	dh_testdir
-	dh_testroot
 	rm -f $(INTERPOLATED_FILES)
 	rm -f build-stamp
 	[ ! -f Makefile ] || $(MAKE) clean

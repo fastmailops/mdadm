@@ -15,6 +15,7 @@ mdadm (3.2.3-1) UNRELEASED; urgency=low
     scheduling class, based on patch by Sergey B Kirpichev (Closes: #652547)
   * small changes for debian/checkarray
   * (internal) move files from contrib/* topgit branches into debian directory
+  * remove dh_testroot from clean target
 
   [ Peter Eisentraut ]
   * Added support for "status" action to mdadm init script (Closes: #651737)
