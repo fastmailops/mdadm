@@ -14,6 +14,7 @@ mdadm (3.2.3-1) UNRELEASED; urgency=low
   * set nice value of the check/resync thread too, together with I/O
     scheduling class, based on patch by Sergey B Kirpichev (Closes: #652547)
   * small changes for debian/checkarray
+  * (internal) move files from contrib/* topgit branches into debian directory
 
   [ Peter Eisentraut ]
   * Added support for "status" action to mdadm init script (Closes: #651737)
