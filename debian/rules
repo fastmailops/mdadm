@@ -6,7 +6,7 @@
 
 #export DH_VERBOSE=1
 
-TG_BRANCHES="contrib/docs/raid5-vs-raid10 contrib/docs/superblock_formats contrib/docs/md.txt contrib/docs/jd-rebuilding-raid debian/conffile-location debian/disable-udev-incr-assembly debian/no-Werror"
+TG_BRANCHES="debian/conffile-location debian/disable-udev-incr-assembly debian/no-Werror"
 -include /usr/share/topgit/tg2quilt.mk
 
 RUNDIR = /run/mdadm

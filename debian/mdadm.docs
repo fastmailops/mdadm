@@ -1,4 +1,4 @@
-docs/*
+debian/docs/*
 TODO
 debian/README.recipes
 debian/README.initramfs-transition
