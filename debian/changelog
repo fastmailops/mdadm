@@ -1,4 +1,4 @@
-mdadm (3.2.3-1) UNRELEASED; urgency=low
+mdadm (3.2.3-2) unstable; urgency=low
 
   [ Michael Tokarev ]
   * new upstream bugfix/stable version, with lots of fixes all over.
@@ -21,7 +21,7 @@ mdadm (3.2.3-1) UNRELEASED; urgency=low
   [ Peter Eisentraut ]
   * Added support for "status" action to mdadm init script (Closes: #651737)
 
- -- Michael Tokarev <mjt@tls.msk.ru>  Tue, 10 Jan 2012 16:08:46 +0400
+ -- Michael Tokarev <mjt@tls.msk.ru>  Wed, 18 Jan 2012 22:33:01 +0400
 
 mdadm (3.2.2-1) unstable; urgency=low
 
