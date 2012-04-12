@@ -10,7 +10,7 @@
 ^\w{3} [ :0-9]{11} [._[:alnum:]-]+ kernel:( \[ *[[:digit:]]+\.[[:digit:]]+\])? md: minimum _guaranteed_  ?speed: [[:digit:]]+ KB/sec/disk\.$
 ^\w{3} [ :0-9]{11} [._[:alnum:]-]+ kernel:( \[ *[[:digit:]]+\.[[:digit:]]+\])? md: using maximum available idle IO bandwidth \(but not more than [[:digit:]]+ KB/sec\) for (data-check|requested-resync|resync|reshape|recovery)\.$
 ^\w{3} [ :0-9]{11} [._[:alnum:]-]+ kernel:( \[ *[[:digit:]]+\.[[:digit:]]+\])? md: delaying (data-check|requested-resync|resync|reshape|recovery) of md[[:digit:]]+ until md[[:digit:]]+ has finished \(they share one or more physical units\)$
-^\w{3} [ :0-9]{11} [._[:alnum:]-]+ kernel:( \[ *[[:digit:]]+\.[[:digit:]]+\])? md: using [[:digit:]]+k window, over a total of [[:digit:]]+ blocks\.$
+^\w{3} [ :0-9]{11} [._[:alnum:]-]+ kernel:( \[ *[[:digit:]]+\.[[:digit:]]+\])? md: using [[:digit:]]+k window, over a total of [[:digit:]]+( blocks|k)\.$
 ^\w{3} [ :0-9]{11} [._[:alnum:]-]+ kernel:( \[ *[[:digit:]]+\.[[:digit:]]+\])? md: (un)?bind<[^>]+>$
 ^\w{3} [ :0-9]{11} [._[:alnum:]-]+ kernel:( \[ *[[:digit:]]+\.[[:digit:]]+\])? md: export_rdev\([^)]+\)$
 ^\w{3} [ :0-9]{11} [._[:alnum:]-]+ kernel:( \[ *[[:digit:]]+\.[[:digit:]]+\])? raid[[:digit:]]+: raid set [[:alnum:]]+ active with [[:digit:]]+ out of [[:digit:]]+ mirrors$
