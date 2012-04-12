@@ -1,3 +1,4 @@
 debian-conffile-location.diff
 debian-disable-udev-incr-assembly.diff
 debian-no-Werror.diff
+debian-run-udev.diff
