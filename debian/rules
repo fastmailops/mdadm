@@ -6,9 +6,6 @@
 
 #export DH_VERBOSE=1
 
-TG_BRANCHES="debian/conffile-location debian/disable-udev-incr-assembly debian/no-Werror"
--include /usr/share/topgit/tg2quilt.mk
-
 RUNDIR = /run/mdadm
 RUNOPTS = MAP_DIR=$(RUNDIR) MDMON_DIR=$(RUNDIR) FAILED_SLOTS_DIR=$(RUNDIR)/failed-slots
 
