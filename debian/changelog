@@ -1,4 +1,4 @@
-mdadm (3.2.3-3) UNRELEASED; urgency=low
+mdadm (3.2.3-3) unstable; urgency=low
 
   * switch from topgit to plain 3.0 (quilt) layout, creating
     debian/patches.  Don't build-depend on quilt as patching
@@ -8,7 +8,7 @@ mdadm (3.2.3-3) UNRELEASED; urgency=low
     addition of "blocks" in kernel messages.  Thanks to Frédéric Brière
     for the patch (Closes: #656038)
 
- -- Michael Tokarev <mjt@tls.msk.ru>  Thu, 12 Apr 2012 22:35:36 +0400
+ -- Michael Tokarev <mjt@tls.msk.ru>  Mon, 30 Apr 2012 14:12:38 +0400
 
 mdadm (3.2.3-2) unstable; urgency=low
 
