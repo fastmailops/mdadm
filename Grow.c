@@ -424,8 +424,8 @@ int Grow_addbitmap(char *devname, int fd, char *file, int chunk, int delay, int 
 		if (offset_setable) {
 			st->ss->getinfo_super(st, mdi, NULL);
 			sysfs_init(mdi, fd, -1);
-			rv = sysfs_set_num(mdi, NULL, "bitmap/location",
-					   mdi->bitmap_offset);
+			rv = sysfs_set_num_signed(mdi, NULL, "bitmap/location",
+						  mdi->bitmap_offset);
 		} else {
 			array.state |= (1<<MD_SB_BITMAP_PRESENT);
 			rv = ioctl(fd, SET_ARRAY_INFO, &array);
@@ -650,7 +650,7 @@ static void wait_reshape(struct mdinfo *sra)
 static int reshape_super(struct supertype *st, long long size, int level,
 			 int layout, int chunksize, int raid_disks,
 			 int delta_disks, char *backup_file, char *dev,
-			 int verbose)
+			 int direction, int verbose)
 {
 	/* nothing extra to check in the native case */
 	if (!st->ss->external)
@@ -664,7 +664,7 @@ static int reshape_super(struct supertype *st, long long size, int level,
 
 	return st->ss->reshape_super(st, size, level, layout, chunksize,
 				     raid_disks, delta_disks, backup_file, dev,
-				     verbose);
+				     direction, verbose);
 }
 
 static void sync_metadata(struct supertype *st)
@@ -1023,6 +1023,10 @@ char *analyse_change(struct mdinfo *info, struct reshape *re)
 		 * raid5 with 2 disks, or
 		 * raid0 with 1 disk
 		 */
+		if (info->new_level > 1 &&
+		    (info->component_size & 7))
+			return "Cannot convert RAID1 of this size - "
+				"reduce size to multiple of 4K first.";
 		if (info->new_level == 0) {
 			if (info->delta_disks != UnSet &&
 			    info->delta_disks != 0)
@@ -1275,7 +1279,7 @@ char *analyse_change(struct mdinfo *info, struct reshape *re)
 		break;
 
 	case 5:
-		/* We get to RAID5 for RAID5 or RAID6 */
+		/* We get to RAID5 from RAID5 or RAID6 */
 		if (re->level != 5 && re->level != 6)
 			return "Cannot convert to RAID5 from this level";
 
@@ -1297,11 +1301,27 @@ char *analyse_change(struct mdinfo *info, struct reshape *re)
 				char layout[40];
 				char *ls = map_num(r5layout, info->new_layout);
 				int l;
-				strcat(strcpy(layout, ls), "-6");
-				l = map_name(r6layout, layout);
-				if (l == UnSet)
-					return "Cannot find RAID6 layout"
-						" to convert to";
+				if (ls) {
+					/* Current RAID6 layout has a RAID5
+					 * equivalent - good
+					 */
+					strcat(strcpy(layout, ls), "-6");
+					l = map_name(r6layout, layout);
+					if (l == UnSet)
+						return "Cannot find RAID6 layout"
+							" to convert to";
+				} else {
+					/* Current RAID6 has no equivalent.
+					 * If it is already a '-6' layout we
+					 * can leave it unchanged, else we must
+					 * fail
+					 */
+					ls = map_num(r6layout, info->new_layout);
+					if (!ls ||
+					    strcmp(ls+strlen(ls)-2, "-6") != 0)
+						return "Please specify new layout";
+					l = info->new_layout;
+				}
 				re->after.layout = l;
 			}
 		}
@@ -1364,6 +1384,44 @@ char *analyse_change(struct mdinfo *info, struct reshape *re)
 
 	re->new_size = info->component_size * re->after.data_disks;
 	return NULL;
+}
+
+static int set_array_size(struct supertype *st, struct mdinfo *sra,
+			  char *text_version)
+{
+	struct mdinfo *info;
+	char *subarray;
+	int ret_val = -1;
+
+	if ((st == NULL) || (sra == NULL))
+		return ret_val;
+
+	if (text_version == NULL)
+		text_version = sra->text_version;
+	subarray = strchr(text_version+1, '/')+1;
+	info = st->ss->container_content(st, subarray);
+	if (info) {
+		unsigned long long current_size = 0;
+		unsigned long long new_size =
+			info->custom_array_size/2;
+
+		if (sysfs_get_ll(sra, NULL, "array_size", &current_size) == 0 &&
+		    new_size > current_size) {
+			if (sysfs_set_num(sra, NULL, "array_size", new_size)
+					< 0)
+				dprintf("Error: Cannot set array size");
+			else {
+				ret_val = 0;
+				dprintf("Array size changed");
+			}
+			dprintf(" from %llu to %llu.\n",
+				current_size, new_size);
+		}
+		sysfs_free(info);
+	} else
+		dprintf("Error: set_array_size(): info pointer in NULL\n");
+
+	return ret_val;
 }
 
 static int reshape_array(char *container, int fd, char *devname,
@@ -1568,16 +1626,38 @@ int Grow_reshape(char *devname, int fd, int quiet, char *backup_file,
 		long long orig_size = get_component_size(fd)/2;
 		long long min_csize;
 		struct mdinfo *mdi;
+		int raid0_takeover = 0;
 
 		if (orig_size == 0)
 			orig_size = array.size;
 
 		if (reshape_super(st, size, UnSet, UnSet, 0, 0, UnSet, NULL,
-				  devname, !quiet)) {
+				  devname, APPLY_METADATA_CHANGES, !quiet)) {
 			rv = 1;
 			goto release;
 		}
 		sync_metadata(st);
+		if (st->ss->external) {
+			/* metadata can have size limitation
+			 * update size value according to metadata information
+			 */
+			struct mdinfo *sizeinfo =
+				st->ss->container_content(st, subarray);
+			if (sizeinfo) {
+				unsigned long long new_size =
+					sizeinfo->custom_array_size/2;
+				int data_disks = get_data_disks(
+						sizeinfo->array.level,
+						sizeinfo->array.layout,
+						sizeinfo->array.raid_disks);
+				new_size /= data_disks;
+				dprintf("Metadata size correction from %llu to "
+					"%llu (%llu)\n", orig_size, new_size,
+					new_size * data_disks);
+				size = new_size;
+				sysfs_free(sizeinfo);
+			}
+		}
 
 		/* Update the size of each member device in case
 		 * they have been resized.  This will never reduce
@@ -1585,9 +1665,14 @@ int Grow_reshape(char *devname, int fd, int quiet, char *backup_file,
 		 * understands '0' to mean 'max'.
 		 */
 		min_csize = 0;
+		rv = 0;
 		for (mdi = sra->devs; mdi; mdi = mdi->next) {
-			if (sysfs_set_num(sra, mdi, "size", size) < 0)
+			if (sysfs_set_num(sra, mdi, "size", size) < 0) {
+				/* Probably kernel refusing to let us
+				 * reduce the size - not an error.
+				 */
 				break;
+			}
 			if (array.not_persistent == 0 &&
 			    array.major_version == 0 &&
 			    get_linux_version() < 3001000) {
@@ -1602,11 +1687,16 @@ int Grow_reshape(char *devname, int fd, int quiet, char *backup_file,
 				}
 			}
 		}
+		if (rv) {
+			fprintf(stderr, Name ": Cannot set size on "
+				"array members.\n");
+			goto size_change_error;
+		}
 		if (min_csize && size > min_csize) {
 			fprintf(stderr, Name ": Cannot safely make this array "
 				"use more than 2TB per device on this kernel.\n");
 			rv = 1;
-			goto release;
+			goto size_change_error;
 		}
 		if (min_csize && size == 0) {
 			/* Don't let the kernel choose a size - it will get
@@ -1615,6 +1705,27 @@ int Grow_reshape(char *devname, int fd, int quiet, char *backup_file,
 			fprintf(stderr, Name ": Limited v0.90 array to "
 				"2TB per device\n");
 			size = min_csize;
+		}
+		if (st->ss->external) {
+			if (sra->array.level == 0) {
+				rv = sysfs_set_str(sra, NULL, "level",
+						   "raid5");
+				if (!rv) {
+					raid0_takeover = 1;
+					/* get array parametes after takeover
+					 * to chane one parameter at time only
+					 */
+					rv = ioctl(fd, GET_ARRAY_INFO, &array);
+				}
+			}
+			/* make sure mdmon is
+			 * aware of the new level */
+			if (!mdmon_running(st->container_dev))
+				start_mdmon(st->container_dev);
+			ping_monitor(container);
+			if (mdmon_running(st->container_dev) &&
+					st->update_tail == NULL)
+				st->update_tail = &st->updates;
 		}
 
 		array.size = size;
@@ -1627,14 +1738,35 @@ int Grow_reshape(char *devname, int fd, int quiet, char *backup_file,
 						   "component_size", size);
 			else
 				rv = -1;
-		} else
+		} else {
 			rv = ioctl(fd, SET_ARRAY_INFO, &array);
+
+			/* manage array size when it is managed externally
+			 */
+			if ((rv == 0) && st->ss->external)
+				rv = set_array_size(st, sra, sra->text_version);
+		}
+
+		if (raid0_takeover) {
+			/* do not recync non-existing parity,
+			 * we will drop it anyway
+			 */
+			sysfs_set_str(sra, NULL, "sync_action", "frozen");
+			/* go back to raid0, drop parity disk
+			 */
+			sysfs_set_str(sra, NULL, "level", "raid0");
+			ioctl(fd, GET_ARRAY_INFO, &array);
+		}
+
+size_change_error:
 		if (rv != 0) {
 			int err = errno;
 
 			/* restore metadata */
 			if (reshape_super(st, orig_size, UnSet, UnSet, 0, 0,
-					  UnSet, NULL, devname, !quiet) == 0)
+					  UnSet, NULL, devname,
+					  ROLLBACK_METADATA_CHANGES,
+					  !quiet) == 0)
 				sync_metadata(st);
 			fprintf(stderr, Name ": Cannot set device size for %s: %s\n",
 				devname, strerror(err));
@@ -1843,10 +1975,11 @@ int Grow_reshape(char *devname, int fd, int quiet, char *backup_file,
 		/* Impose these changes on a single array.  First
 		 * check that the metadata is OK with the change. */
 
-		if (reshape_super(st, info.component_size, info.new_level,
+		if (reshape_super(st, -1, info.new_level,
 				  info.new_layout, info.new_chunk,
 				  info.array.raid_disks, info.delta_disks,
-				  backup_file, devname, quiet)) {
+				  backup_file, devname, APPLY_METADATA_CHANGES,
+				  quiet)) {
 			rv = 1;
 			goto release;
 		}
@@ -1860,6 +1993,63 @@ release:
 	if (frozen > 0)
 		unfreeze(st);
 	return rv;
+}
+
+/* verify_reshape_position()
+ *	Function checks if reshape position in metadata is not farther
+ *	than position in md.
+ * Return value:
+ *	 0 : not valid sysfs entry
+ *		it can be caused by not started reshape, it should be started
+ *		by reshape array or raid0 array is before takeover
+ *	-1 :	error, reshape position is obviously wrong
+ *	 1 :	success, reshape progress correct or updated
+*/
+static int verify_reshape_position(struct mdinfo *info, int level)
+{
+	int ret_val = 0;
+	char buf[40];
+	int rv;
+
+	/* read sync_max, failure can mean raid0 array */
+	rv = sysfs_get_str(info, NULL, "sync_max", buf, 40);
+
+	if (rv > 0) {
+		char *ep;
+		unsigned long long position = strtoull(buf, &ep, 0);
+
+		dprintf(Name": Read sync_max sysfs entry is: %s\n", buf);
+		if (!(ep == buf || (*ep != 0 && *ep != '\n' && *ep != ' '))) {
+			position *= get_data_disks(level,
+						   info->new_layout,
+						   info->array.raid_disks);
+			if (info->reshape_progress < position) {
+				dprintf("Corrected reshape progress (%llu) to "
+					"md position (%llu)\n",
+					info->reshape_progress, position);
+				info->reshape_progress = position;
+				ret_val = 1;
+			} else if (info->reshape_progress > position) {
+				fprintf(stderr, Name ": Fatal error: array "
+					"reshape was not properly frozen "
+					"(expected reshape position is %llu, "
+					"but reshape progress is %llu.\n",
+					position, info->reshape_progress);
+				ret_val = -1;
+			} else {
+				dprintf("Reshape position in md and metadata "
+					"are the same;");
+				ret_val = 1;
+			}
+		}
+	} else if (rv == 0) {
+		/* for valid sysfs entry, 0-length content
+		 * should be indicated as error
+		 */
+		ret_val = -1;
+	}
+
+	return ret_val;
 }
 
 static int reshape_array(char *container, int fd, char *devname,
@@ -1931,6 +2121,18 @@ static int reshape_array(char *container, int fd, char *devname,
 		goto release;
 	}
 
+	if (st->ss->external && restart && (info->reshape_progress == 0)) {
+		/* When reshape is restarted from '0', very begin of array
+		 * it is possible that for external metadata reshape and array
+		 * configuration doesn't happen.
+		 * Check if md has the same opinion, and reshape is restarted
+		 * from 0. If so, this is regular reshape start after reshape
+		 * switch in metadata to next array only.
+		 */
+		if ((verify_reshape_position(info, reshape.level) >= 0) &&
+		    (info->reshape_progress == 0))
+			restart = 0;
+	}
 	if (restart) {
 		/* reshape already started. just skip to monitoring the reshape */
 		if (reshape.backup_blocks == 0)
@@ -2003,6 +2205,9 @@ static int reshape_array(char *container, int fd, char *devname,
 
 		if (reshape.level > 0 && st->ss->external) {
 			/* make sure mdmon is aware of the new level */
+			if (mdmon_running(st->container_dev))
+				flush_mdmon(container);
+
 			if (!mdmon_running(st->container_dev))
 				start_mdmon(st->container_dev);
 			ping_monitor(container);
@@ -2248,9 +2453,16 @@ started:
 
 	sra->new_chunk = info->new_chunk;
 
-	if (restart)
+	if (restart) {
+		/* for external metadata checkpoint saved by mdmon can be lost
+		 * or missed /due to e.g. crash/. Check if md is not during
+		 * restart farther than metadata points to.
+		 * If so, this means metadata information is obsolete.
+		 */
+		if (st->ss->external)
+			verify_reshape_position(info, reshape.level);
 		sra->reshape_progress = info->reshape_progress;
-	else {
+	} else {
 		sra->reshape_progress = 0;
 		if (reshape.after.data_disks < reshape.before.data_disks)
 			/* start from the end of the new array */
@@ -2323,7 +2535,7 @@ started:
 		free(offsets);
 		sysfs_free(sra);
 		fprintf(stderr, Name ": Reshape has to be continued from"
-			" location %llu when root fileststem has been mounted\n",
+			" location %llu when root filesystem has been mounted.\n",
 			sra->reshape_progress);
 		return 1;
 	}
@@ -2396,7 +2608,7 @@ started:
 		/* Re-load the metadata as much could have changed */
 		int cfd = open_dev(st->container_dev);
 		if (cfd >= 0) {
-			ping_monitor(container);
+			flush_mdmon(container);
 			st->ss->free_super(st);
 			st->ss->load_container(st, cfd, container);
 			close(cfd);
@@ -2408,35 +2620,8 @@ started:
 	 */
 	if (reshape.before.data_disks !=
 	    reshape.after.data_disks &&
-	    info->custom_array_size) {
-		struct mdinfo *info2;
-		char *subarray = strchr(info->text_version+1, '/')+1;
-
-		info2 = st->ss->container_content(st, subarray);
-		if (info2) {
-			unsigned long long current_size = 0;
-			unsigned long long new_size =
-				info2->custom_array_size/2;
-
-			if (sysfs_get_ll(sra,
-					 NULL,
-					 "array_size",
-					 &current_size) == 0 &&
-			    new_size > current_size) {
-				if (sysfs_set_num(sra, NULL,
-						  "array_size", new_size)
-				    < 0)
-					dprintf("Error: Cannot"
-						" set array size");
-				else
-					dprintf("Array size "
-						"changed");
-				dprintf(" from %llu to %llu.\n",
-					current_size, new_size);
-			}
-			sysfs_free(info2);
-		}
-	}
+	    info->custom_array_size)
+		set_array_size(st, info, info->text_version);
 
 	if (info->new_level != reshape.level) {
 
@@ -2493,7 +2678,8 @@ int reshape_container(char *container, char *devname,
 	    reshape_super(st, -1, info->new_level,
 			  info->new_layout, info->new_chunk,
 			  info->array.raid_disks, info->delta_disks,
-			  backup_file, devname, quiet)) {
+			  backup_file, devname, APPLY_METADATA_CHANGES,
+			  quiet)) {
 		unfreeze(st);
 		return 1;
 	}
@@ -2555,6 +2741,13 @@ int reshape_container(char *container, char *devname,
 						  devname2devnum(container));
 			if (!mdstat)
 				continue;
+			if (mdstat->active == 0) {
+				fprintf(stderr, Name ": Skipping inactive "
+					"array md%i.\n", mdstat->devnum);
+				free_mdstat(mdstat);
+				mdstat = NULL;
+				continue;
+			}
 			break;
 		}
 		if (!content)
@@ -2593,6 +2786,9 @@ int reshape_container(char *container, char *devname,
 
 		sysfs_init(content, fd, mdstat->devnum);
 
+		if (mdmon_running(devname2devnum(container)))
+			flush_mdmon(container);
+
 		rv = reshape_array(container, fd, adev, st,
 				   content, force, NULL,
 				   backup_file, quiet, 1, restart,
@@ -2607,12 +2803,9 @@ int reshape_container(char *container, char *devname,
 		restart = 0;
 		if (rv)
 			break;
-		rv = !mdmon_running(devname2devnum(container));
-		if (rv) {
-			printf(Name ": Mdmon is not found. "
-			       "Cannot continue container reshape.\n");
-			break;
-		}
+
+		if (mdmon_running(devname2devnum(container)))
+			flush_mdmon(container);
 	}
 	if (!rv)
 		unfreeze(st);
@@ -3762,8 +3955,6 @@ int Grow_continue_command(char *devname, int fd,
 	char buf[40];
 	int cfd = -1;
 	int fd2 = -1;
-	char *ep;
-	unsigned long long position;
 
 	dprintf("Grow continue from command line called for %s\n",
 		devname);
@@ -3853,6 +4044,13 @@ int Grow_continue_command(char *devname, int fd,
 			mdstat = mdstat_by_subdev(array, container_dev);
 			if (!mdstat)
 				continue;
+			if (mdstat->active == 0) {
+				fprintf(stderr, Name ": Skipping inactive "
+					"array md%i.\n", mdstat->devnum);
+				free_mdstat(mdstat);
+				mdstat = NULL;
+				continue;
+			}
 			break;
 		}
 		if (!content) {
@@ -3891,28 +4089,8 @@ int Grow_continue_command(char *devname, int fd,
 	/* verify that array under reshape is started from
 	 * correct position
 	 */
-	ret_val = sysfs_get_str(content, NULL, "sync_max", buf, 40);
-	if (ret_val <= 0) {
-		fprintf(stderr, Name
-			": cannot open verify reshape progress for %s (%i)\n",
-			content->sys_name, ret_val);
-		ret_val = 1;
-		goto Grow_continue_command_exit;
-	}
-	dprintf(Name ": Read sync_max sysfs entry is: %s\n", buf);
-	position = strtoull(buf, &ep, 0);
-	if (ep == buf || (*ep != 0 && *ep != '\n' && *ep != ' ')) {
-		fprintf(stderr, Name ": Fatal error: array reshape was"
-			" not properly frozen\n");
-		ret_val = 1;
-		goto Grow_continue_command_exit;
-	}
-	position *= get_data_disks(map_name(pers, mdstat->level),
-				   content->new_layout,
-				   content->array.raid_disks);
-	if (position != content->reshape_progress) {
-		fprintf(stderr, Name ": Fatal error: array reshape was"
-			" not properly frozen.\n");
+	if (verify_reshape_position(content,
+				    map_name(pers, mdstat->level)) < 0) {
 		ret_val = 1;
 		goto Grow_continue_command_exit;
 	}

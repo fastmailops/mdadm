@@ -226,7 +226,7 @@ struct mdinfo *sysfs_read(int fd, int devnum, unsigned long options)
 		else if (strncmp(buf, "none", 4) == 0)
 			sra->bitmap_offset = 0;
 		else if (buf[0] == '+')
-			sra->bitmap_offset = strtoul(buf+1, NULL, 10);
+			sra->bitmap_offset = strtol(buf+1, NULL, 10);
 		else
 			goto abort;
 	}
@@ -425,6 +425,14 @@ int sysfs_set_num(struct mdinfo *sra, struct mdinfo *dev,
 {
 	char valstr[50];
 	sprintf(valstr, "%llu", val);
+	return sysfs_set_str(sra, dev, name, valstr);
+}
+
+int sysfs_set_num_signed(struct mdinfo *sra, struct mdinfo *dev,
+			 char *name, long long val)
+{
+	char valstr[50];
+	sprintf(valstr, "%lli", val);
 	return sysfs_set_str(sra, dev, name, valstr);
 }
 
@@ -837,7 +845,6 @@ int sysfs_freeze_array(struct mdinfo *sra)
 {
 	/* Try to freeze resync/rebuild on this array/container.
 	 * Return -1 if the array is busy,
-	 * return -2 container cannot be frozen,
 	 * return 0 if this kernel doesn't support 'frozen'
 	 * return 1 if it worked.
 	 */
@@ -847,8 +854,10 @@ int sysfs_freeze_array(struct mdinfo *sra)
 		return 1; /* no sync_action == frozen */
 	if (sysfs_get_str(sra, NULL, "sync_action", buf, 20) <= 0)
 		return 0;
-	if (strcmp(buf, "idle\n") != 0 &&
-	    strcmp(buf, "frozen\n") != 0)
+	if (strcmp(buf, "frozen\n") == 0)
+		/* Already frozen */
+		return 0;
+	if (strcmp(buf, "idle\n") != 0)
 		return -1;
 	if (sysfs_set_str(sra, NULL, "sync_action", "frozen") < 0)
 		return 0;

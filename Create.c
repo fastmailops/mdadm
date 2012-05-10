@@ -280,6 +280,13 @@ int Create(struct supertype *st, char *mddev,
 
 	if (size == 0) {
 		size = newsize / 2;
+		if (level == 1)
+			/* If this is ever reshaped to RAID5, we will
+			 * need a chunksize.  So round it off a bit
+			 * now just to be safe
+			 */
+			size &= ~(64ULL-1);
+
 		if (size && verbose > 0)
 			fprintf(stderr, Name ": setting size to %lluK\n",
 				(unsigned long long)size);
@@ -371,7 +378,7 @@ int Create(struct supertype *st, char *mddev,
 				did_default = 1;
 		} else {
 			if (do_default_layout)
-				layout = default_layout(st, level, verbose);
+				layout = default_layout(st, level, 0);
 			if (!st->ss->validate_geometry(st, level, layout,
 						       raiddisks,
 						       &chunk, size*2, dname,
@@ -482,6 +489,12 @@ int Create(struct supertype *st, char *mddev,
 				return 1;
 			}
 			size = minsize;
+			if (level == 1)
+				/* If this is ever reshaped to RAID5, we will
+				 * need a chunksize.  So round it off a bit
+				 * now just to be safe
+				 */
+				size &= ~(64ULL-1);
 			if (verbose > 0)
 				fprintf(stderr, Name ": size set to %lluK\n", size);
 		}
@@ -924,9 +937,6 @@ int Create(struct supertype *st, char *mddev,
 			}
 
 			if (st->ss->write_init_super(st)) {
-				fprintf(stderr,
-					Name ": Failed to write metadata to %s\n",
-					dv->devname);
 				st->ss->free_super(st);
 				goto abort_locked;
 			}

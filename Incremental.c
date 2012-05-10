@@ -259,8 +259,7 @@ int Incremental(char *devname, int verbose, int runstop,
 
 	name_to_use = info.name;
 	if (name_to_use[0] == 0 &&
-	    info.array.level == LEVEL_CONTAINER &&
-	    trustworthy == LOCAL) {
+	    info.array.level == LEVEL_CONTAINER) {
 		name_to_use = info.text_version;
 		trustworthy = METADATA;
 	}
@@ -326,7 +325,6 @@ int Incremental(char *devname, int verbose, int runstop,
 			fprintf(stderr, Name
 		      ": You have an old buggy kernel which cannot support\n"
 				"      --incremental reliably.  Aborting.\n");
-			sysfs_free(sra);
 			rv = 2;
 			goto out_unlock;
 		}
@@ -416,19 +414,19 @@ int Incremental(char *devname, int verbose, int runstop,
 				goto out_unlock;
 			}
 		}
-		info2.disk.major = major(stb.st_rdev);
-		info2.disk.minor = minor(stb.st_rdev);
+		info.disk.major = major(stb.st_rdev);
+		info.disk.minor = minor(stb.st_rdev);
 		/* add disk needs to know about containers */
 		if (st->ss->external)
 			sra->array.level = LEVEL_CONTAINER;
-		err = add_disk(mdfd, st, sra, &info2);
+		err = add_disk(mdfd, st, sra, &info);
 		if (err < 0 && errno == EBUSY) {
 			/* could be another device present with the same
 			 * disk.number. Find and reject any such
 			 */
 			find_reject(mdfd, st, sra, info.disk.number,
 				    info.events, verbose, chosen_name);
-			err = add_disk(mdfd, st, sra, &info2);
+			err = add_disk(mdfd, st, sra, &info);
 		}
 		if (err < 0) {
 			fprintf(stderr, Name ": failed to add %s to %s: %s.\n",
@@ -487,7 +485,7 @@ int Incremental(char *devname, int verbose, int runstop,
 	active_disks = count_active(st, sra, mdfd, &avail, &info);
 	if (enough(info.array.level, info.array.raid_disks,
 		   info.array.layout, info.array.state & 1,
-		   avail, active_disks) == 0) {
+		   avail) == 0) {
 		if (verbose >= 0)
 			fprintf(stderr, Name
 			     ": %s attached to %s, not enough to start (%d).\n",

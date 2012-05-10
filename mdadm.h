@@ -71,10 +71,10 @@ extern __off64_t lseek64 __P ((int __fd, __off64_t __offset, int __whence));
 
 /* MAP_DIR should be somewhere that persists across the pivotroot
  * from early boot to late boot.
- * Currently /dev seems to be the only option on most distros.
+ * /run  seems to have emerged as the best standard.
  */
 #ifndef MAP_DIR
-#define MAP_DIR "/dev/.mdadm"
+#define MAP_DIR "/run/mdadm"
 #endif /* MAP_DIR */
 /* MAP_FILE is what we name the map file we put in MAP_DIR, in case you
  * want something other than the default of "map"
@@ -83,7 +83,7 @@ extern __off64_t lseek64 __P ((int __fd, __off64_t __offset, int __whence));
 #define MAP_FILE "map"
 #endif /* MAP_FILE */
 /* MDMON_DIR is where pid and socket files used for communicating
- * with mdmon normally live.  It *should* be /var/run, but when
+ * with mdmon normally live.  Best is /var/run/mdadm as
  * mdmon is needed at early boot then it needs to write there prior
  * to /var/run being mounted read/write, and it also then needs to
  * persist beyond when /var/run is mounter read-only.  So, to be
@@ -91,7 +91,7 @@ extern __off64_t lseek64 __P ((int __fd, __off64_t __offset, int __whence));
  * boot process and stays up as long as possible during shutdown.
  */
 #ifndef MDMON_DIR
-#define MDMON_DIR "/dev/.mdadm/"
+#define MDMON_DIR "/run/mdadm"
 #endif /* MDMON_DIR */
 
 /* FAILED_SLOTS is where to save files storing recent removal of array
@@ -99,7 +99,7 @@ extern __off64_t lseek64 __P ((int __fd, __off64_t __offset, int __whence));
  * slot for array recovery
  */
 #ifndef FAILED_SLOTS_DIR
-#define FAILED_SLOTS_DIR "/dev/.mdadm/failed-slots"
+#define FAILED_SLOTS_DIR "/run/mdadm/failed-slots"
 #endif /* FAILED_SLOTS */
 
 #include	"md_u.h"
@@ -211,7 +211,7 @@ struct mdinfo {
 		unsigned long long recovery_start; /* per-device rebuild position */
 		#define MaxSector  (~0ULL) /* resync/recovery complete position */
 	};
-	unsigned long		bitmap_offset;	/* 0 == none, 1 == a file */
+	long			bitmap_offset;	/* 0 == none, 1 == a file */
 	unsigned long		safe_mode_delay; /* ms delay to mark clean */
 	int			new_level, delta_disks, new_layout, new_chunk;
 	int			errors;
@@ -321,6 +321,8 @@ enum special_options {
 	UdevRules,
 	FreezeReshape,
 	Continue,
+	OffRootOpt,
+	Prefer,
 };
 
 /* structures read from config file */
@@ -471,6 +473,8 @@ extern int sysfs_set_str(struct mdinfo *sra, struct mdinfo *dev,
 			 char *name, char *val);
 extern int sysfs_set_num(struct mdinfo *sra, struct mdinfo *dev,
 			 char *name, unsigned long long val);
+extern int sysfs_set_num_signed(struct mdinfo *sra, struct mdinfo *dev,
+				char *name, long long val);
 extern int sysfs_uevent(struct mdinfo *sra, char *event);
 extern int sysfs_get_fd(struct mdinfo *sra, struct mdinfo *dev,
 			char *name);
@@ -531,7 +535,12 @@ extern char *map_num(mapping_t *map, int num);
 extern int map_name(mapping_t *map, char *name);
 extern mapping_t r5layout[], r6layout[], pers[], modes[], faultylayout[];
 
-extern char *map_dev(int major, int minor, int create);
+extern char *map_dev_preferred(int major, int minor, int create,
+			       char *prefer);
+static inline char *map_dev(int major, int minor, int create)
+{
+	return map_dev_preferred(major, minor, create, NULL);
+}
 
 struct active_array;
 struct metadata_update;
@@ -739,9 +748,13 @@ extern struct superswitch {
 	 * initialized to indicate if reshape is being performed at the
 	 * container or subarray level
 	 */
+#define APPLY_METADATA_CHANGES		1
+#define ROLLBACK_METADATA_CHANGES	0
+
 	int (*reshape_super)(struct supertype *st, long long size, int level,
 			     int layout, int chunksize, int raid_disks,
 			     int delta_disks, char *backup, char *dev,
+			     int direction,
 			     int verbose); /* optional */
 	int (*manage_reshape)( /* optional */
 		int afd, struct mdinfo *sra, struct reshape *reshape,
@@ -867,6 +880,7 @@ struct supertype {
 			*  external:/md0/12
 			*/
 	int devcnt;
+	int retry_soon;
 
 	struct mdinfo *devs;
 
@@ -1074,7 +1088,7 @@ extern int Create(struct supertype *st, char *mddev,
 		  int runstop, int verbose, int force, int assume_clean,
 		  char *bitmap_file, int bitmap_chunk, int write_behind, int delay, int autof);
 
-extern int Detail(char *dev, int brief, int export, int test, char *homehost);
+extern int Detail(char *dev, int brief, int export, int test, char *homehost, char *prefer);
 extern int Detail_Platform(struct superswitch *ss, int scan, int verbose);
 extern int Query(char *dev);
 extern int Examine(struct mddev_dev *devlist, int brief, int export, int scan,
@@ -1083,7 +1097,7 @@ extern int Monitor(struct mddev_dev *devlist,
 		   char *mailaddr, char *alert_cmd,
 		   int period, int daemonise, int scan, int oneshot,
 		   int dosyslog, int test, char *pidfile, int increments,
-		   int share);
+		   int share, char *prefer);
 
 extern int Kill(char *dev, struct supertype *st, int force, int quiet, int noexcl);
 extern int Kill_subarray(char *dev, char *subarray, int quiet);
@@ -1162,7 +1176,7 @@ extern char *fname_from_uuid(struct supertype *st,
 			     struct mdinfo *info, char *buf, char sep);
 extern unsigned long calc_csum(void *super, int bytes);
 extern int enough(int level, int raid_disks, int layout, int clean,
-		   char *avail, int avail_disks);
+		   char *avail);
 extern int enough_fd(int fd);
 extern int ask(char *mesg);
 extern unsigned long long get_component_size(int fd);
@@ -1250,10 +1264,10 @@ static inline int dev2minor(int d)
 	return (-1-d) << MdpMinorShift;
 }
 
-static inline int ROUND_UP(int a, int base)
-{
-	return ((a+base-1)/base)*base;
-}
+#define _ROUND_UP(val, base)	(((val) + (base) - 1) & ~(base - 1))
+#define ROUND_UP(val, base)	_ROUND_UP(val, (typeof(val))(base))
+#define ROUND_UP_PTR(ptr, base)	((typeof(ptr)) \
+				 (ROUND_UP((unsigned long)(ptr), base)))
 
 static inline int is_subarray(char *vers)
 {
@@ -1381,3 +1395,13 @@ static inline int xasprintf(char **strp, const char *fmt, ...) {
 
 #define PROCESS_DELAYED -2
 #define PROCESS_PENDING -3
+
+/* When using "GET_DISK_INFO" it isn't certain how high
+ * we need to check.  So we impose an absolute limit of
+ * MAX_DISKS.  This needs to be much more than the largest
+ * number of devices any metadata can support.  Currently
+ * v1.x can support 1920
+ */
+#define MAX_DISKS	4096
+
+extern int __offroot;

@@ -310,7 +310,7 @@ int Assemble(struct supertype *st, char *mddev,
 
 		tst = dup_super(st);
 
-		dfd = dev_open(devname, O_RDONLY|O_EXCL);
+		dfd = dev_open(devname, O_RDONLY);
 		if (dfd < 0) {
 			if (report_missmatch)
 				fprintf(stderr, Name ": cannot open device %s: %s\n",
@@ -408,6 +408,17 @@ int Assemble(struct supertype *st, char *mddev,
 			/* tmpdev is a container.  We need to be either
 			 * looking for a member, or auto-assembling
 			 */
+			/* should be safe to try an exclusive open now, we
+			 * have rejected anything that some other mdadm might
+			 * be looking at
+			 */
+			dfd = dev_open(devname, O_RDONLY | O_EXCL);
+			if (dfd < 0) {
+				if (report_missmatch)
+					fprintf(stderr, Name ": %s is busy - skipping\n", devname);
+				goto loop;
+			}
+			close(dfd);
 
 			if (ident->container) {
 				if (ident->container[0] == '/' &&
@@ -492,6 +503,18 @@ int Assemble(struct supertype *st, char *mddev,
 					   report_missmatch ? devname : NULL))
 				goto loop;
 				
+			/* should be safe to try an exclusive open now, we
+			 * have rejected anything that some other mdadm might
+			 * be looking at
+			 */
+			dfd = dev_open(devname, O_RDONLY | O_EXCL);
+			if (dfd < 0) {
+				if (report_missmatch)
+					fprintf(stderr, Name ": %s is busy - skipping\n", devname);
+				goto loop;
+			}
+			close(dfd);
+
 			if (st == NULL)
 				st = dup_super(tst);
 			if (st->minor_version == -1)
@@ -934,7 +957,7 @@ int Assemble(struct supertype *st, char *mddev,
 				}
 				continue;
 			}
-		/* If this devices thinks that 'most_recent' has failed, then
+		/* If this device thinks that 'most_recent' has failed, then
 		 * we must reject this device.
 		 */
 		if (j != most_recent &&
@@ -953,7 +976,9 @@ int Assemble(struct supertype *st, char *mddev,
 			if (i < content->array.raid_disks) {
 				if (devices[j].i.recovery_start == MaxSector ||
 				    (content->reshape_active &&
-				     j >= content->array.raid_disks - content->delta_disks)) {
+				     ((i >= content->array.raid_disks - content->delta_disks) ||
+				      (i >= content->array.raid_disks - content->delta_disks - 1
+				       && content->array.level == 4)))) {
 					okcnt++;
 					avail[i]=1;
 				} else
@@ -963,9 +988,17 @@ int Assemble(struct supertype *st, char *mddev,
 		}
 	}
 	free(devmap);
-	while (force && !enough(content->array.level, content->array.raid_disks,
-				content->array.layout, 1,
-				avail, okcnt)) {
+	while (force &&
+	       (!enough(content->array.level, content->array.raid_disks,
+			content->array.layout, 1,
+			avail)
+		||
+		(content->reshape_active && content->delta_disks > 0 &&
+		 !enough(content->array.level, (content->array.raid_disks
+						- content->delta_disks),
+			 content->new_layout, 1,
+			 avail)
+			))) {
 		/* Choose the newest best drive which is
 		 * not up-to-date, update the superblock
 		 * and add it.
@@ -1132,7 +1165,7 @@ int Assemble(struct supertype *st, char *mddev,
 	if (force && !clean &&
 	    !enough(content->array.level, content->array.raid_disks,
 		    content->array.layout, clean,
-		    avail, okcnt)) {
+		    avail)) {
 		change += st->ss->update_super(st, content, "force-array",
 					devices[chosen_drive].devname, verbose,
 					       0, NULL);
@@ -1301,9 +1334,11 @@ int Assemble(struct supertype *st, char *mddev,
 						sparecnt--;
 				} else if (verbose > 0)
 					fprintf(stderr, Name ": added %s "
-						        "to %s as %d\n",
+						        "to %s as %d%s\n",
 						devices[j].devname, mddev,
-						devices[j].i.disk.raid_disk);
+						devices[j].i.disk.raid_disk,
+						devices[j].uptodate?"":
+						" (possibly out of date)");
 			} else if (verbose > 0 && i < content->array.raid_disks)
 				fprintf(stderr, Name ": no uptodate device for "
 					        "slot %d of %s\n",
@@ -1331,7 +1366,7 @@ int Assemble(struct supertype *st, char *mddev,
 		if (runstop == 1 ||
 		    (runstop <= 0 &&
 		     ( enough(content->array.level, content->array.raid_disks,
-			      content->array.layout, clean, avail, okcnt) &&
+			      content->array.layout, clean, avail) &&
 		       (okcnt + rebuilding_cnt >= req_cnt || start_partial_ok)
 			     ))) {
 			/* This array is good-to-go.
@@ -1437,13 +1472,13 @@ int Assemble(struct supertype *st, char *mddev,
 				mddev, strerror(errno));
 
 			if (!enough(content->array.level, content->array.raid_disks,
-				    content->array.layout, 1, avail, okcnt))
+				    content->array.layout, 1, avail))
 				fprintf(stderr, Name ": Not enough devices to "
 					"start the array.\n");
 			else if (!enough(content->array.level,
 					 content->array.raid_disks,
 					 content->array.layout, clean,
-					 avail, okcnt))
+					 avail))
 				fprintf(stderr, Name ": Not enough devices to "
 					"start the array while not clean "
 					"- consider --force.\n");
@@ -1471,12 +1506,12 @@ int Assemble(struct supertype *st, char *mddev,
 			if (sparecnt)
 				fprintf(stderr, " and %d spare%s", sparecnt, sparecnt==1?"":"s");
 			if (!enough(content->array.level, content->array.raid_disks,
-				    content->array.layout, 1, avail, okcnt))
+				    content->array.layout, 1, avail))
 				fprintf(stderr, " - not enough to start the array.\n");
 			else if (!enough(content->array.level,
 					 content->array.raid_disks,
 					 content->array.layout, clean,
-					 avail, okcnt))
+					 avail))
 				fprintf(stderr, " - not enough to start the "
 					"array while not clean - consider "
 					"--force.\n");
@@ -1523,6 +1558,7 @@ int assemble_container_content(struct supertype *st, int mdfd,
 	int expansion = 0;
 	struct map_ent *map = NULL;
 	int old_raid_disks;
+	int start_reshape;
 
 	sysfs_init(content, mdfd, 0);
 
@@ -1534,7 +1570,17 @@ int assemble_container_content(struct supertype *st, int mdfd,
 			return 1;
 		}
 
-	if (st->ss->external && content->recovery_blocked)
+	/* There are two types of reshape: container wide or sub-array specific
+	 * Check if metadata requests blocking container wide reshapes
+	 */
+	start_reshape = (content->reshape_active &&
+		!((content->reshape_active == CONTAINER_RESHAPE) &&
+		(content->array.state & (1<<MD_SB_BLOCK_CONTAINER_RESHAPE))));
+
+	/* Block subarray here if it is under reshape now
+	 * Do not allow for any changes in this array
+	 */
+	if (st->ss->external && content->recovery_blocked && start_reshape)
 		block_subarray(content);
 
 	if (sra)
@@ -1549,7 +1595,7 @@ int assemble_container_content(struct supertype *st, int mdfd,
 				working++;
 		} else if (errno == EEXIST)
 			preexist++;
-	if (working == 0)
+	if (working + expansion == 0)
 		return 1;/* Nothing new, don't try to start */
 
 	map_update(&map, fd2devnum(mdfd),
@@ -1560,14 +1606,7 @@ int assemble_container_content(struct supertype *st, int mdfd,
 		 (working + preexist + expansion) >=
 			content->array.working_disks) {
 		int err;
-		int start_reshape;
 
-		/* There are two types of reshape: container wide or sub-array specific
-		 * Check if metadata requests blocking container wide reshapes
-		 */
-		start_reshape = (content->reshape_active &&
-				 !((content->reshape_active == CONTAINER_RESHAPE) &&
-				   (content->array.state & (1<<MD_SB_BLOCK_CONTAINER_RESHAPE))));
 		if (start_reshape) {
 			int spare = content->array.raid_disks + expansion;
 			if (restore_backup(st, content,
@@ -1611,6 +1650,15 @@ int assemble_container_content(struct supertype *st, int mdfd,
 		}
 		if (!err)
 			sysfs_set_safemode(content, content->safe_mode_delay);
+
+		/* Block subarray here if it is not reshaped now
+		 * It has be blocked a little later to allow mdmon to switch in
+		 * in to R/W state
+		 */
+		if (st->ss->external && content->recovery_blocked &&
+		    !start_reshape)
+			block_subarray(content);
+
 		if (verbose >= 0) {
 			if (err)
 				fprintf(stderr, Name

@@ -32,6 +32,8 @@
 #include	<dirent.h>
 #include	<signal.h>
 
+int __offroot;
+
 /*
  * following taken from linux/blkpg.h because they aren't
  * anywhere else and it isn't safe to #include linux/ * stuff.
@@ -192,6 +194,7 @@ long long parse_size(char *size)
 	 * followed by 'K', 'M', or 'G'.
 	 * Without a suffix, K is assumed.
 	 * Number returned is in sectors (half-K)
+	 * -1 returned on error.
 	 */
 	char *c;
 	long long s = strtoll(size, &c, 10);
@@ -213,7 +216,7 @@ long long parse_size(char *size)
 		}
 	}
 	if (*c)
-		s = 0;
+		s = -1;
 	return s;
 }
 
@@ -309,10 +312,15 @@ int test_partition_from_id(dev_t id)
 	return rv;
 }
 
-int enough(int level, int raid_disks, int layout, int clean,
-	   char *avail, int avail_disks)
+int enough(int level, int raid_disks, int layout, int clean, char *avail)
 {
 	int copies, first;
+	int i;
+	int avail_disks = 0;
+
+	for (i = 0; i < raid_disks; i++)
+		avail_disks += !!avail[i];
+
 	switch (level) {
 	case 10:
 		/* This is the tricky one - we need to check
@@ -370,7 +378,7 @@ int enough_fd(int fd)
 	    array.raid_disks <= 0)
 		return 0;
 	avail = calloc(array.raid_disks, 1);
-	for (i=0; i < 1024 && array.nr_disks > 0; i++) {
+	for (i=0; i < MAX_DISKS && array.nr_disks > 0; i++) {
 		disk.number = i;
 		if (ioctl(fd, GET_DISK_INFO, &disk) != 0)
 			continue;
@@ -387,7 +395,7 @@ int enough_fd(int fd)
 	}
 	/* This is used on an active array, so assume it is clean */
 	rv = enough(array.level, array.raid_disks, array.layout,
-		    1, avail, avail_disks);
+		    1, avail);
 	free(avail);
 	return rv;
 }
@@ -704,6 +712,8 @@ void print_r10_layout(int layout)
 unsigned long long calc_array_size(int level, int raid_disks, int layout,
 				   int chunksize, unsigned long long devsize)
 {
+	if (level == 1)
+		return devsize;
 	devsize &= ~(unsigned long long)((chunksize>>9)-1);
 	return get_data_disks(level, layout, raid_disks) * devsize;
 }
@@ -959,9 +969,10 @@ struct supertype *super_by_fd(int fd, char **subarrayp)
 		char *dev = verstr+1;
 
 		subarray = strchr(dev, '/');
-		if (subarray)
+		if (subarray) {
 			*subarray++ = '\0';
-		subarray = strdup(subarray);
+			subarray = strdup(subarray);
+		}
 		container = devname2devnum(dev);
 		if (sra)
 			sysfs_free(sra);
@@ -1264,7 +1275,7 @@ void get_one_disk(int mdfd, mdu_array_info_t *ainf, mdu_disk_info_t *disk)
 	int d;
 
 	ioctl(mdfd, GET_ARRAY_INFO, ainf);
-	for (d = 0 ; d < 1024 ; d++) {
+	for (d = 0 ; d < MAX_DISKS ; d++) {
 		if (ioctl(mdfd, GET_DISK_INFO, disk) == 0 &&
 		    (disk->major || disk->minor))
 			return;
@@ -1622,10 +1633,17 @@ int start_mdmon(int devnum)
 				skipped = 0;
 
 		for (i=0; paths[i]; i++)
-			if (paths[i][0])
-				execl(paths[i], "mdmon",
-				      devnum2devname(devnum),
-				      NULL);
+			if (paths[i][0]) {
+				if (__offroot) {
+					execl(paths[i], "mdmon", "--offroot",
+					      devnum2devname(devnum),
+					      NULL);
+				} else {
+					execl(paths[i], "mdmon",
+					      devnum2devname(devnum),
+					      NULL);
+				}
+			}
 		exit(1);
 	case -1: fprintf(stderr, Name ": cannot run mdmon. "
 			 "Array remains readonly\n");

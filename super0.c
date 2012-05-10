@@ -114,7 +114,7 @@ static void examine_super0(struct supertype *st, char *homehost)
 	c=map_num(pers, sb->level);
 	printf("     Raid Level : %s\n", c?c:"-unknown-");
 	if ((int)sb->level > 0) {
-		int ddsks=0;
+		int ddsks = 0, ddsks_denom = 1;
 		printf("  Used Dev Size : %d%s\n", sb->size,
 		       human_size((long long)sb->size<<10));
 		switch(sb->level) {
@@ -122,11 +122,15 @@ static void examine_super0(struct supertype *st, char *homehost)
 		case 4:
 		case 5: ddsks = sb->raid_disks-1; break;
 		case 6: ddsks = sb->raid_disks-2; break;
-		case 10: ddsks = sb->raid_disks / (sb->layout&255) / ((sb->layout>>8)&255);
+		case 10: ddsks = sb->raid_disks;
+			ddsks_denom =  (sb->layout&255) * ((sb->layout>>8)&255);
 		}
-		if (ddsks)
-			printf("     Array Size : %llu%s\n", (unsigned long long)ddsks * sb->size,
-			       human_size(ddsks*(long long)sb->size<<10));
+		if (ddsks) {
+			long long asize = sb->size;
+			asize = (asize << 10) * ddsks / ddsks_denom;
+			printf("     Array Size : %llu%s\n",
+			       asize >> 10,  human_size(asize));
+		}
 	}
 	printf("   Raid Devices : %d\n", sb->raid_disks);
 	printf("  Total Devices : %d\n", sb->nr_disks);
@@ -942,10 +946,10 @@ static int load_super0(struct supertype *st, int fd, char *devname)
 
 static struct supertype *match_metadata_desc0(char *arg)
 {
-	struct supertype *st = malloc(sizeof(*st));
-	if (!st) return st;
+	struct supertype *st = calloc(1, sizeof(*st));
+	if (!st)
+		return st;
 
-	memset(st, 0, sizeof(*st));
 	st->container_dev = NoMdDev;
 	st->ss = &super0;
 	st->info = NULL;
@@ -1065,12 +1069,10 @@ static int write_bitmap0(struct supertype *st, int fd)
 	int rv = 0;
 
 	int towrite, n;
-	char abuf[4096+4096];
-	char *buf = (char*)(((long)(abuf+4096))&~4095L);
+	void *buf;
 
 	if (!get_dev_size(fd, NULL, &dsize))
 		return 1;
-
 
 	if (dsize < MD_RESERVED_SECTORS*512)
 		return -1;
@@ -1081,6 +1083,9 @@ static int write_bitmap0(struct supertype *st, int fd)
 
 	if (lseek64(fd, offset + 4096, 0)< 0LL)
 		return 3;
+
+	if (posix_memalign(&buf, 4096, 4096))
+		return -ENOMEM;
 
 	memset(buf, 0xff, 4096);
 	memcpy(buf,  ((char*)sb)+MD_SB_BYTES, sizeof(bitmap_super_t));
@@ -1100,6 +1105,7 @@ static int write_bitmap0(struct supertype *st, int fd)
 	if (towrite)
 		rv = -2;
 
+	free(buf);
 	return rv;
 }
 
