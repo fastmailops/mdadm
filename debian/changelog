@@ -1,4 +1,4 @@
-mdadm (3.2.4-1) UNRELEASED; urgency=low
+mdadm (3.2.4-1) unstable; urgency=low
 
   * new upstream (bugfix) release (Closes: #664088, #661552)
   * removed debian-run-udev.diff (applied upstream), and
