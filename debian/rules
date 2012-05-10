@@ -6,9 +6,6 @@
 
 #export DH_VERBOSE=1
 
-RUNDIR = /run/mdadm
-RUNOPTS = MAP_DIR=$(RUNDIR) MDMON_DIR=$(RUNDIR) FAILED_SLOTS_DIR=$(RUNDIR)/failed-slots
-
 CXFLAGS = -ggdb
 CXFLAGS_UDEB := $(CXFLAGS) -fomit-frame-pointer
 ifneq (,$(findstring noopt,$(DEB_BUILD_OPTIONS)))
@@ -36,14 +33,14 @@ build-stamp: debian/mdadm-startall.8
 mdadm.udeb: FLAGS = CXFLAGS="$(CXFLAGS_UDEB)" CONFFILE=/tmp/mdadm.conf
 mdadm.udeb: configure
 	dh_testdir
-	$(MAKE) $(FLAGS) all $(RUNOPTS)
+	$(MAKE) $(FLAGS) all
 	mv mdadm mdadm.udeb
 .PHONY: mdadm.udeb
 
 mdadm: FLAGS = CXFLAGS="$(CXFLAGS)" CONFFILE=/etc/mdadm/mdadm.conf CONFFILE2=/etc/mdadm.conf
 mdadm: configure
 	dh_testdir
-	$(MAKE) $(FLAGS) all $(RUNOPTS)
+	$(MAKE) $(FLAGS) all
 .PHONY: mdadm
 
 INTERPOLATED_FILES = debian/bugscript debian/mkconf

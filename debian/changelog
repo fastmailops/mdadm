@@ -1,3 +1,11 @@
+mdadm (3.2.4-1) UNRELEASED; urgency=low
+
+  * new upstream (bugfix) release (Closes: #664088, #661552)
+  * removed debian-run-udev.diff (applied upstream), and
+    all RUNDIR handling from debian/rules (it is the default now)
+
+ -- Michael Tokarev <mjt@tls.msk.ru>  Thu, 10 May 2012 17:51:41 +0400
+
 mdadm (3.2.3-3) unstable; urgency=low
 
   * switch from topgit to plain 3.0 (quilt) layout, creating
