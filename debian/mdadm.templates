@@ -62,9 +62,6 @@ _Description: Start arrays not listed in mdadm.conf?
  file (${config}). Therefore, it cannot be started during boot, unless you
  correct the configuration file and recreate the initial ramdisk.
  .
- Please refer to /usr/share/doc/mdadm/README.upgrading-2.5.3.gz if you intend
- to continue.
- .
  This warning is only relevant if you need arrays to be started from the
  initial ramdisk to be able to boot. If you use kernel autostarting, or do not
  need any arrays to be started as early as the initial ramdisk is loaded, you
