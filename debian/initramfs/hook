@@ -48,20 +48,6 @@ err()
   write E "$@"
 }
 
-if [ -e /usr/share/initramfs-tools/hooks/md ]; then
-  warn "initramfs md hook still present, stepping out of its way."
-  warn "Please see /usr/share/doc/mdadm/README.initramfs-transition ."
-  exit 0
-fi
-
-if [ -e /etc/initramfs-tools/hooks/md ]; then
-  warn "I found /etc/initramfs-tools/hooks/md, which may conflict"
-  warn "with this version of mdadm. Please use"
-  warn "/usr/share/initramfs-tools/hooks/mdadm as reference and update"
-  warn "(or remove) the file."
-  exit 0
-fi
-
 MDADM=/sbin/mdadm
 [ -x "$MDADM" ] || exit 0
 
