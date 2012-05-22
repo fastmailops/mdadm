@@ -6,12 +6,13 @@
 #, fuzzy
 msgid ""
 msgstr ""
-"Project-Id-Version: PACKAGE VERSION\n"
+"Project-Id-Version: mdadm\n"
 "Report-Msgid-Bugs-To: mdadm@packages.debian.org\n"
-"POT-Creation-Date: 2008-04-11 15:03+0200\n"
+"POT-Creation-Date: 2012-05-22 00:50+0100\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
+"Language: \n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=CHARSET\n"
 "Content-Transfer-Encoding: 8bit\n"
@@ -101,14 +102,6 @@ msgid ""
 "The specified array (${array}) is not listed in the configuration file "
 "(${config}). Therefore, it cannot be started during boot, unless you correct "
 "the configuration file and recreate the initial ramdisk."
-msgstr ""
-
-#. Type: boolean
-#. Description
-#: ../mdadm.templates:8001
-msgid ""
-"Please refer to /usr/share/doc/mdadm/README.upgrading-2.5.3.gz if you intend "
-"to continue."
 msgstr ""
 
 #. Type: boolean

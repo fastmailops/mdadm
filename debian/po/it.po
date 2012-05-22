@@ -7,7 +7,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: mdadm italian debconf\n"
 "Report-Msgid-Bugs-To: mdadm@packages.debian.org\n"
-"POT-Creation-Date: 2008-04-11 15:03+0200\n"
+"POT-Creation-Date: 2012-05-22 00:50+0100\n"
 "PO-Revision-Date: 2008-11-19 11:02+0100\n"
 "Last-Translator: Luca Monducci <luca.mo@tiscali.it>\n"
 "Language-Team: Italian <debian-l10n-italian@lists.debian.org>\n"
@@ -126,16 +126,6 @@ msgstr ""
 #. Description
 #: ../mdadm.templates:8001
 msgid ""
-"Please refer to /usr/share/doc/mdadm/README.upgrading-2.5.3.gz if you intend "
-"to continue."
-msgstr ""
-"Fare riferimento a /usr/share/doc/mdadm/README.upgrading-2.5.3.gz se si "
-"intende proseguire."
-
-#. Type: boolean
-#. Description
-#: ../mdadm.templates:8001
-msgid ""
 "This warning is only relevant if you need arrays to be started from the "
 "initial ramdisk to be able to boot. If you use kernel autostarting, or do "
 "not need any arrays to be started as early as the initial ramdisk is loaded, "
@@ -244,3 +234,10 @@ msgid ""
 msgstr ""
 "Inserire l'indirizzo email dell'utente che deve ricevere le notifiche di "
 "eventi importanti legati al MD."
+
+#~ msgid ""
+#~ "Please refer to /usr/share/doc/mdadm/README.upgrading-2.5.3.gz if you "
+#~ "intend to continue."
+#~ msgstr ""
+#~ "Fare riferimento a /usr/share/doc/mdadm/README.upgrading-2.5.3.gz se si "
+#~ "intende proseguire."

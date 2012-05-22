@@ -15,7 +15,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: mdadm\n"
 "Report-Msgid-Bugs-To: mdadm@packages.debian.org\n"
-"POT-Creation-Date: 2008-04-11 15:03+0200\n"
+"POT-Creation-Date: 2012-05-22 00:50+0100\n"
 "PO-Revision-Date: 2006-09-24 19:22-0300\n"
 "Last-Translator: Felipe Augusto van de Wiel (faw) <faw@cathedrallabs.org>\n"
 "Language-Team: l10n portuguese <debian-l10n-portuguese@lists.debian.org>\n"
@@ -168,16 +168,6 @@ msgstr ""
 #. Description
 #: ../mdadm.templates:8001
 msgid ""
-"Please refer to /usr/share/doc/mdadm/README.upgrading-2.5.3.gz if you intend "
-"to continue."
-msgstr ""
-"Por favor, veja /usr/share/doc/mdadm/README.upgrading-2.5.3.gz se você "
-"pretende continuar."
-
-#. Type: boolean
-#. Description
-#: ../mdadm.templates:8001
-msgid ""
 "This warning is only relevant if you need arrays to be started from the "
 "initial ramdisk to be able to boot. If you use kernel autostarting, or do "
 "not need any arrays to be started as early as the initial ramdisk is loaded, "
@@ -319,6 +309,13 @@ msgid ""
 msgstr ""
 "Por favor, informe o endereço de e-mail do usuário que deverá receber os e-"
 "mails de notificações para estes eventos MD importantes."
+
+#~ msgid ""
+#~ "Please refer to /usr/share/doc/mdadm/README.upgrading-2.5.3.gz if you "
+#~ "intend to continue."
+#~ msgstr ""
+#~ "Por favor, veja /usr/share/doc/mdadm/README.upgrading-2.5.3.gz se você "
+#~ "pretende continuar."
 
 #~ msgid "${msg}"
 #~ msgstr "${msg}"

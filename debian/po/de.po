@@ -13,7 +13,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: mdadm 2.6.9-3\n"
 "Report-Msgid-Bugs-To: mdadm@packages.debian.org\n"
-"POT-Creation-Date: 2008-04-11 15:03+0200\n"
+"POT-Creation-Date: 2012-05-22 00:50+0100\n"
 "PO-Revision-Date: 2009-06-24 17:35+0200\n"
 "Last-Translator: Mario Joussen <joussen@debian.org>\n"
 "Language-Team: German <debian-l10n-german@lists.debian.org>\n"
@@ -136,16 +136,6 @@ msgstr ""
 #. Description
 #: ../mdadm.templates:8001
 msgid ""
-"Please refer to /usr/share/doc/mdadm/README.upgrading-2.5.3.gz if you intend "
-"to continue."
-msgstr ""
-"Bitte lesen Sie /usr/share/doc/mdadm/README.upgrading-2.5.3.gz falls Sie "
-"beabsichtigen fortzufahren."
-
-#. Type: boolean
-#. Description
-#: ../mdadm.templates:8001
-msgid ""
 "This warning is only relevant if you need arrays to be started from the "
 "initial ramdisk to be able to boot. If you use kernel autostarting, or do "
 "not need any arrays to be started as early as the initial ramdisk is loaded, "
@@ -257,6 +247,13 @@ msgid ""
 msgstr ""
 "Geben Sie bitte die E-Mail-Adresse des Benutzers an, der die E-Mail-"
 "Benachrichtigung für wichtigen MD-Ereignisse erhalten soll."
+
+#~ msgid ""
+#~ "Please refer to /usr/share/doc/mdadm/README.upgrading-2.5.3.gz if you "
+#~ "intend to continue."
+#~ msgstr ""
+#~ "Bitte lesen Sie /usr/share/doc/mdadm/README.upgrading-2.5.3.gz falls Sie "
+#~ "beabsichtigen fortzufahren."
 
 #~ msgid "${msg}"
 #~ msgstr "${msg}"

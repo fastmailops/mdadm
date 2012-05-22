@@ -7,7 +7,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: 3.1.4-1+8efb9d1\n"
 "Report-Msgid-Bugs-To: mdadm@packages.debian.org\n"
-"POT-Creation-Date: 2008-04-11 15:03+0200\n"
+"POT-Creation-Date: 2012-05-22 00:50+0100\n"
 "PO-Revision-Date: 2011-05-17 16:54+0100\n"
 "Last-Translator: Innocent De Marchi <tangram.peces@gmail.com>\n"
 "Language-Team: Catalan <debian-l10n-catalan@lists.debian.org>\n"
@@ -130,16 +130,6 @@ msgstr ""
 #. Description
 #: ../mdadm.templates:8001
 msgid ""
-"Please refer to /usr/share/doc/mdadm/README.upgrading-2.5.3.gz if you intend "
-"to continue."
-msgstr ""
-"Si voleu continuar, us aconsellam la lectura de «/usr/share/doc/mdadm/README."
-"upgrading-2.5.3.gz»."
-
-#. Type: boolean
-#. Description
-#: ../mdadm.templates:8001
-msgid ""
 "This warning is only relevant if you need arrays to be started from the "
 "initial ramdisk to be able to boot. If you use kernel autostarting, or do "
 "not need any arrays to be started as early as the initial ramdisk is loaded, "
@@ -251,3 +241,10 @@ msgid ""
 msgstr ""
 "Introduïu l'adreça de correu electrònic de l'usuari que ha de rebre les "
 "notificacions de correu electrònic per a esdeveniments MD rellevants."
+
+#~ msgid ""
+#~ "Please refer to /usr/share/doc/mdadm/README.upgrading-2.5.3.gz if you "
+#~ "intend to continue."
+#~ msgstr ""
+#~ "Si voleu continuar, us aconsellam la lectura de «/usr/share/doc/mdadm/"
+#~ "README.upgrading-2.5.3.gz»."
