@@ -50,7 +50,7 @@ clean:
 	rm -f $(INTERPOLATED_FILES)
 	rm -f build-stamp
 	[ ! -f Makefile ] || $(MAKE) clean
-	rm -f mdadm.udeb mdadm
+	rm -f mdadm.udeb mdadm debian/mdadm-startall.8
 	dh_clean
 	debconf-updatepo
 
