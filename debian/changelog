@@ -1,3 +1,12 @@
+mdadm (3.2.5-1) UNRELEASED; urgency=low
+
+  * new upstream (bugfix) release, fixing regression when --add'ing
+    device to an array, introduced in 3.2.4, plus other minor fixes
+    (Closes: #673104, #673344)
+  * new patch: sha1-includes.diff to fix #include mess in new sha1.h
+
+ -- Michael Tokarev <mjt@tls.msk.ru>  Fri, 25 May 2012 20:23:52 +0400
+
 mdadm (3.2.4-1) unstable; urgency=low
 
   * new upstream (bugfix) release (Closes: #664088, #661552)
