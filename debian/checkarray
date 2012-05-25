@@ -175,6 +175,21 @@ for array in $arrays; do
         continue
       fi
 
+      # check if the array created recently and skip test if it is
+      created=$(mdadm --detail /dev/$array 2>/dev/null |
+                sed -n 's/.*Creation Time *://p' )
+      if [ -n "$created" ]; then
+        created=$(date +%s -d "$created" 2>/dev/null)
+      fi
+      if [ -n "$created" ]; then
+        now=$(date +%s)
+        if [ "$created" -lt "$now" -a \
+             "$created" -gt "$(($now - 14 * 24 * 60 * 60))" ]; then
+          [ $quiet -lt 2 ] && echo "$PROGNAME: I: array $array created recently, skipping..." >&2
+          continue
+        fi
+      fi
+
       # queue request for the array. The kernel will make sure that these requests
       # are properly queued so as to not kill one of the array.
       echo $action > $MDBASE/sync_action
