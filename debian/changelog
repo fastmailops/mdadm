@@ -1,11 +1,19 @@
 mdadm (3.2.5-1) UNRELEASED; urgency=low
 
+  [ Michael Tokarev ]
   * new upstream (bugfix) release, fixing regression when --add'ing
     device to an array, introduced in 3.2.4, plus other minor fixes
     (Closes: #673104, #673344)
   * new patch: sha1-includes.diff to fix #include mess in new sha1.h
   * added a check into debian/checkarray to skip checking arrays created
     less than 2 weeks ago (Closes: #624273)
+
+  [ Dmitrijs Ledkovs ]
+  * Remove obsolete documentation dating back to ~etch release
+  * Remove reference to obsolete documention from debconf templates
+  * Update debconf templates translations
+  * Remove compatability with acient initramfs-tools
+  * Remove debian-specific mdadm-startall.8 in clean target
 
  -- Michael Tokarev <mjt@tls.msk.ru>  Fri, 25 May 2012 20:23:52 +0400
 
