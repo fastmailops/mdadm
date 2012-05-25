@@ -1,4 +1,4 @@
-mdadm (3.2.5-1) UNRELEASED; urgency=low
+mdadm (3.2.5-1) unstable; urgency=low
 
   [ Michael Tokarev ]
   * new upstream (bugfix) release, fixing regression when --add'ing
