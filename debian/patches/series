@@ -2,3 +2,4 @@ debian-conffile-location.diff
 debian-disable-udev-incr-assembly.diff
 debian-no-Werror.diff
 sha1-includes.diff
+spelling-and-manpages.patch
