@@ -17,43 +17,6 @@ _Description: MD arrays needed for the root file system:
  Please enter 'all', 'none', or a space-separated list of devices such as
  'md0 md1' or 'md/1 md/d0' (the leading '/dev/' can be omitted).
 
-Template: mdadm/initrdstart_msg_intro
-Type: text
-_Description: for internal use - only the long description is needed.
- If the system's root file system is located on an MD array (RAID), it needs to be
- started early during the boot sequence. If it is located on
- a logical volume (LVM), which is on MD, all constituent arrays need to be
- started.
- .
- If you know exactly which arrays are needed to bring up the root file system,
- and you want to postpone starting all other arrays to a later point in the
- boot sequence, enter the arrays to start here. Alternatively, enter 'all' to
- simply start all available arrays.
- .
- If you do not need or want to start any arrays for the root file system, leave
- the answer blank (or enter 'none'). This may be the case if you are using
- kernel autostart or do not need any arrays to boot.
-
-Template: mdadm/initrdstart_msg_errexist
-Type: text
-_Description:
- An error occurred: device node does not exist
-
-Template: mdadm/initrdstart_msg_errblock
-Type: text
-_Description:
- An error occurred: not a block device
-
-Template: mdadm/initrdstart_msg_errmd
-Type: text
-_Description:
- An error occurred: not an MD array
-
-Template: mdadm/initrdstart_msg_errconf
-Type: text
-_Description:
- An error occurred: array not listed in mdadm.conf file
-
 Template: mdadm/initrdstart_notinconf
 Type: boolean
 Default: false
