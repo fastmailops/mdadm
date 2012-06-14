@@ -248,6 +248,15 @@ case "${1:-}" in
     log_notice "never anything to do"
     ;;
 
+  status)
+    if [ -f /proc/mdstat ]; then
+      log_problem "no MD subsystem loaded"
+      exit 1
+    else
+      cat /proc/mdstat
+    fi
+    ;;
+
   *)
     echo "Usage: ${0:-} {start|stop|restart}" >&2
     exit 1;;
