@@ -181,14 +181,3 @@ fi
 # See #369953
 set +u
 #DEBHELPER#
-set -u
-
-# do start mdadm-raid, but don't use dh_installinit to do so, to prevent
-# stopping raids on remove/upgrade.
-if [ -x /etc/init.d/mdadm-raid ]; then
-  if [ -x "$(command -v invoke-rc.d)" ]; then
-    invoke-rc.d mdadm-raid start || exit $?
-  else
-    /etc/init.d/mdadm-raid start || exit $?
-  fi
-fi

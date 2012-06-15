@@ -11,6 +11,10 @@ mdadm (3.2.5-2) UNRELEASED; urgency=low
   [ Michael Tokarev ]
   * fix spelling mistakes in previous changelog entry
 
+  [ Dmitrijs Ledkovs ]
+  * Use dh_installinit with --no-restart-on-upgrade, which will start
+    arrays, but will not stop them during upgrade.
+
  -- Michael Tokarev <mjt@tls.msk.ru>  Fri, 22 Jun 2012 11:58:11 +0400
 
 mdadm (3.2.5-1) unstable; urgency=low
