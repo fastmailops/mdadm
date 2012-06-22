@@ -10,6 +10,10 @@ mdadm (3.2.5-2) UNRELEASED; urgency=low
 
   [ Michael Tokarev ]
   * fix spelling mistakes in previous changelog entry
+  * some cleanups for checkarray:
+   - change --help printing and shorten/simplify the text
+   - make --quiet cumulative and stop documenting --real-quiet
+   - do not prduce help in case of incorrect usage, and exit with 1
 
   [ Dmitrijs Ledkovs ]
   * Use dh_installinit with --no-restart-on-upgrade, which will start

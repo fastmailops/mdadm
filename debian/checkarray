@@ -11,46 +11,42 @@ PROGNAME=${0##*/}
 
 about()
 {
-  echo "$PROGNAME -- MD array (RAID) redundancy checker tool"
-  echo "Copyright © martin f. krafft <madduck@debian.org>"
-  echo "Released under the terms of the Artistic Licence 2.0"
+  echo "\
+$PROGNAME -- MD array (RAID) redundancy checker tool
+Copyright © martin f. krafft <madduck@debian.org>
+Released under the terms of the Artistic Licence 2.0"
 }
 
 usage()
 {
   about
-  echo
-  echo "Usage: $PROGNAME [options] [arrays]"
-  echo
-  echo "Valid options are:"
-  cat <<-_eof | column -s\& -t
-	-a|--all & check all assembled arrays (check /proc/mdstat).
-	-s|--status & print redundancy check status of devices.
-	-x|--cancel & queue a request to cancel a running redundancy check.
-	-i|--idle & perform check in a lowest scheduling class (idle)
-	-l|--slow & perform check in a lower-than-standard scheduling class
-	-f|--fast & perform check in higher-than-standard scheduling class
-	--realtime & perform check in real-time scheduling class (DANGEROUS!)
-	-c|--cron & honour AUTOCHECK setting in /etc/default/mdadm.
-	-q|--quiet & suppress informational messages.
-	-Q|--real-quiet & suppress all output messages, including warnings and errors.
-	-h|--help & show this output.
-	-V|--version & show version information.
-	_eof
-  echo
-  echo "Examples:"
-  echo "  $PROGNAME --all --idle"
-  echo "  $PROGNAME --quiet /dev/md[123]"
-  echo "  $PROGNAME -sa"
-  echo "  $PROGNAME -x --all"
-  echo
-  echo "Devices can be specified in almost any format. The following are"
-  echo "all equivalent:"
-  echo "  /dev/md0, md0, /dev/md/0, /sys/block/md0"
-  echo
-  echo "The --all option overrides all arrays passed to the script."
-  echo
-  echo "You can also control the status of a check with /proc/mdstat ."
+  echo "
+Usage: $PROGNAME [options] [arrays]
+
+Valid options are:
+ -a|--all	check all assembled arrays (ignores arrays in command line).
+ -s|--status	print redundancy check status of devices.
+ -x|--cancel	queue a request to cancel a running redundancy check.
+ -i|--idle	perform check in a lowest scheduling class (idle)
+ -l|--slow	perform check in a lower-than-standard scheduling class
+ -f|--fast	perform check in higher-than-standard scheduling class
+ --realtime	perform check in real-time scheduling class (DANGEROUS!)
+ -c|--cron	honour AUTOCHECK setting in /etc/default/mdadm.
+ -q|--quiet	suppress informational messages
+		(use twice to suppress error messages too).
+ -h|--help	show this output.
+ -V|--version	show version information.
+
+Examples:
+ $PROGNAME --all --idle
+ $PROGNAME --quiet /dev/md[123]
+ $PROGNAME -sa
+ $PROGNAME -x --all
+
+Devices can be specified in almost any format. The following are equivalent:
+ /dev/md0, md0, /dev/md/0, /sys/block/md0
+
+You can also control the status of a check with /proc/mdstat file."
 }
 
 SHORTOPTS=achVqQsxilf
@@ -76,15 +72,15 @@ for opt in $@; do
     -f|--fast) ionice=high;;
     --realtime) ionice=realtime;;
     -c|--cron) cron=1;;
-    -q|--quiet) quiet=1;;
-    -Q|--real-quiet) quiet=2;;
+    -q|--quiet) quiet=$(($quiet+1));;
+    -Q|--real-quiet) quiet=$(($quiet+2));;	# for compatibility
     -h|--help) usage; exit 0;;
     -V|--version) about; exit 0;;
     /dev/md/*|md/*) arrays="${arrays:+$arrays }md${opt#*md/}";;
     /dev/md*|md*) arrays="${arrays:+$arrays }${opt#/dev/}";;
     /sys/block/md*) arrays="${arrays:+$arrays }${opt#/sys/block/}";;
     --) :;;
-    *) echo "$PROGNAME: E: invalid option: $opt" >&2; usage >&2; exit 0;;
+    *) echo "$PROGNAME: E: invalid option: $opt.  Try --help." >&2; exit 1;;
   esac
 done
 
