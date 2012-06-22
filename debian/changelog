@@ -5,6 +5,9 @@ mdadm (3.2.5-2) UNRELEASED; urgency=low
   * Implement status option for mdadm-raid init.d script
   * Fix lintian info's conflicts-with-version: Conflicts -> Breaks
 
+  [ Michael Tokarev ]
+  * fix spelling mistakes in previous changelog entry
+
  -- Michael Tokarev <mjt@tls.msk.ru>  Fri, 22 Jun 2012 11:58:11 +0400
 
 mdadm (3.2.5-1) unstable; urgency=low
@@ -21,7 +24,7 @@ mdadm (3.2.5-1) unstable; urgency=low
   * Remove obsolete documentation dating back to ~etch release
   * Remove reference to obsolete documention from debconf templates
   * Update debconf templates translations
-  * Remove compatability with acient initramfs-tools
+  * Remove compatibility with ancient initramfs-tools
   * Remove debian-specific mdadm-startall.8 in clean target
 
  -- Michael Tokarev <mjt@tls.msk.ru>  Fri, 25 May 2012 20:23:52 +0400
