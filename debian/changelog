@@ -4,6 +4,7 @@ mdadm (3.2.5-2) UNRELEASED; urgency=low
   * Fix mdadm.lintian-overrides
   * Fix spelling in binaries, fix lintian warnings
     manpage-has-errors-from-man and hyphen-used-as-minus-sign
+  * Drop unused debconf templates
   * Implement status option for mdadm-raid init.d script
   * Fix lintian info's conflicts-with-version: Conflicts -> Breaks
 
