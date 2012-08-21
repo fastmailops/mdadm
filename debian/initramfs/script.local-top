@@ -1,6 +1,7 @@
 #!/bin/sh
 #
-# Copyright © 2006-2008 Martin F. Krafft <madduck@debian.org>
+# Copyright © 2006-2008 Martin F. Krafft <madduck@debian.org>,
+#             2012 Michael Tokarev <mjt@tls.msk.ru>
 # based on the scripts in the initramfs-tools package.
 # released under the terms of the Artistic Licence.
 #
@@ -32,23 +33,24 @@ verbose()
 }
 
 MD_DEVS=all
-MD_MODULES='linear multipath raid0 raid1 raid456 raid5 raid6 raid10'
-[ -s /conf/conf.d/md ] && . /conf/conf.d/md
+[ -s /conf/md ] && . /conf/md
 
-verbose && log_begin_msg Loading MD modules
-for module in ${MD_MODULES:-}; do
-  if modprobe -q "$module"; then
-    verbose && log_success_msg "loaded module ${module}."
-  else
-    log_failure_msg "failed to load module ${module}."
-  fi
-done
-log_end_msg
+if [ "$MD_DEVS" = none ]; then
+  verbose &&
+    log_warning_msg "INITRDSTART set to \"none\" in /etc/default/mdadm, not assembling raid arrays"
+  exit 0
+fi
 
+if [ ! -f /proc/mdstat ] && ! modprobe -q md_mod; then
+  verbose && log_failure_msg "failed to load module md_mod."
+fi
 if [ ! -f /proc/mdstat ]; then
   verbose && panic "cannot initialise MD subsystem (/proc/mdstat missing)"
   exit 1
 fi
+
+# prevent writes/syncs so that resuming works (#415441).
+echo 1 > /sys/module/md_mod/parameters/start_ro
 
 # handle /dev/md/X nodes
 mkdir -p /dev/md
@@ -69,9 +71,6 @@ if [ ! -e $CONFIG ]; then
   MD_DEVS=all
 fi
 
-# prevent writes/syncs so that resuming works (#415441).
-echo 1 > /sys/module/md_mod/parameters/start_ro
-
 if [ "$MD_DEVS" = all ]; then
 
   verbose && log_begin_msg "Assembling all MD arrays"
@@ -84,7 +83,7 @@ if [ "$MD_DEVS" = all ]; then
   fi
   verbose && log_end_msg
 
-elif [ "$MD_DEVS" != none ]; then
+else
   for dev in $MD_DEVS; do
 
     verbose && log_begin_msg "Assembling MD array $dev"

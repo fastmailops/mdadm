@@ -1,6 +1,7 @@
 #!/bin/sh
 #
-# Copyright © 2006-2008 Martin F. Krafft <madduck@debian.org>
+# Copyright © 2006-2008 Martin F. Krafft <madduck@debian.org>,
+#             2012 Michael Tokarev <mjt@tls.msk.ru>
 # based on the scripts in the initramfs-tools package.
 # released under the terms of the Artistic Licence.
 #
@@ -74,7 +75,7 @@ INITRDSTART=all
 [ -z "$INITRDSTART" ] && INITRDSTART=none
 
 DESTMDADMCONF=$DESTDIR/etc/mdadm/mdadm.conf
-DESTCONFIG=$DESTDIR/conf/conf.d/md
+DESTCONFIG=$DESTDIR/conf/mdadm
 
 if [ -f $CONFIG ]; then
   homehost="$(sed -ne 's,^[[:space:]]*HOMEHOST[[:space:]]*,,p' $CONFIG)"
@@ -163,8 +164,9 @@ elif ! grep -q '^ARRAY' $DESTMDADMCONF; then
   info "letting initramfs assemble auto-detected arrays."
   exit 0
 else
-  # obtain dev:level pairs from config file, honouring multiline entries
-  devpairs="$(
+  # obtain devices list from config file, honouring multiline entries
+  devices="$(
+    dev=
     while read line; do
       case "$line" in
         (ARRAY*) :;;
@@ -173,21 +175,12 @@ else
       for atom in $line; do
         case "$atom" in
           (/dev*) dev=$atom;;
-          (level=raid*|level=linear|level=multipath) level=${atom#level=};;
-          (level=*)
-            err "invalid level specified in ARRAY statement in $CONFIG:"
-            err "  $line"
-            err "levels should be either raid*, linear, or multipath."
-            warn "falling back to emergency procedure in initramfs."
-            exit 1
-            ;;
-          (*) :;;
         esac
       done
-      [ -n "${dev:-}" ] || continue
 
       # /dev/mdX and /dev/md/X are the same, really
       case "$dev" in
+        "") continue ;;
         (/dev/md/*) alt=/dev/md${dev##*/};;
         (/dev/md*) alt=/dev/md/${dev#/dev/md};;
         (*)
@@ -200,32 +193,20 @@ else
         dev="$alt"
       fi
 
-      echo -n "${dev}:"
-      if [ -n "${level:-}" ]; then
-        echo -n "$level"
-      else
-        echo -n "$($MDADM --detail $dev | sed -rne 's,[[:space:]]+Raid Level : ,,p')"
-      fi
-      echo -n ' '
+      echo "$dev"
     done < $DESTMDADMCONF)" || exit $?
 fi
 
-uniquify()
-{
-  for i in $@; do echo "$i"; done | sort -u
-}
+if [ "$INITRDSTART" != none ] && [ -n "$devices" ]; then
 
-if [ "$INITRDSTART" != none ] && [ -n "$devpairs" ]; then
-  echo "MD_DEVPAIRS='${devpairs% }'" >> $DESTCONFIG
-
-  devs= levels=
-  for i in $devpairs; do
-    dev=${i%:*}
-    level=${i##*:}
-    case "$INITRDSTART" in
-      all|*${dev}*)
-        devs="${devs:+$devs }$dev"
-        levels="${levels:+$levels }$level"
+  devs=
+  for dev in $devices; do
+    case "$INITRDSTART " in
+      all|*${dev}[[:space:]]*)
+        case "$devs " in	# uniquiness
+          (*${dev}\ *) :;;
+          (*) devs="${devs:+$devs }$dev" ;;
+        esac
         ;;
       *) :;;
     esac
@@ -244,7 +225,7 @@ if [ "$INITRDSTART" != none ] && [ -n "$devpairs" ]; then
   done
 
   for i in $INITRDSTART; do
-    case "$INITRDSTART" in all|none|'') break;; *) :;; esac
+    case "$INITRDSTART" in all) break;; *) :;; esac
     case "$devs" in
       *${i}*) continue;;
       *) :;;
@@ -257,28 +238,11 @@ if [ "$INITRDSTART" != none ] && [ -n "$devpairs" ]; then
     break
   done
 
-  echo "MD_LEVELS='$levels'" >> $DESTCONFIG
   if [ "$INITRDSTART" = all ]; then
     echo "MD_DEVS=all" >> $DESTCONFIG
   else
     echo "MD_DEVS='$devs'" >> $DESTCONFIG
   fi
-
-  # handle module synonyms
-  modules="$(echo $levels \
-    | sed -re 's,\<[[:digit:]]+\>,raid&,g;   # prefix digits with raid
-               s,stripe,raid0,g;             # striping is raid0
-               s,mirror,raid1,g;             # mirroring is raid1
-               s,raid4,raid5,g;              # use raid5 to handle raid4
-               s,mp,multipath,g              # mp is multipath
-               ')"
-
-  # if raid456 module is present, use it for raid[456]
-  modprobe --set-version="$version" --show-depends raid456 >/dev/null 2>&1 \
-    && modules="$(echo $modules | sed -e 's,raid[456],raid456,g')"
-
-  modules="$(uniquify $modules | tr '\n' ' ')"
-  echo "MD_MODULES='${modules% }'" >> $DESTCONFIG
 
   if [ "$INITRDSTART" = all ]; then
     info "will start all available MD arrays from the initial ramdisk."
@@ -299,7 +263,6 @@ if [ "$INITRDSTART" != none ] && [ -n "$devpairs" ]; then
 
 else
   echo "MD_DEVS=none" >> $DESTCONFIG
-  echo "MD_MODULES=''" >> $DESTCONFIG
   info "no MD arrays will be started from the initial ramdisk."
 fi
 
