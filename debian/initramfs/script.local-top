@@ -33,7 +33,7 @@ verbose()
 }
 
 MD_DEVS=all
-[ -s /conf/md ] && . /conf/md
+[ -s /conf/mdadm ] && . /conf/mdadm
 
 if [ "$MD_DEVS" = none ]; then
   verbose &&

@@ -2,6 +2,7 @@ mdadm (3.2.5-3) UNRELEASED; urgency=low
 
   * revert "Drop unused debconf templates" change -- the templates
     are actually being (indirectly) used in debian/mdadm.config
+  * fix initramfs-script config name (slipped in the initramfs fixes)
 
  -- Michael Tokarev <mjt@tls.msk.ru>  Sat, 25 Aug 2012 23:09:48 +0400
 
