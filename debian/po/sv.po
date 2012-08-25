@@ -14,7 +14,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: mdadm_2.6.7-3_sv\n"
 "Report-Msgid-Bugs-To: mdadm@packages.debian.org\n"
-"POT-Creation-Date: 2012-06-22 12:10+0400\n"
+"POT-Creation-Date: 2012-05-22 00:50+0100\n"
 "PO-Revision-Date: 2008-07-23 18:34+0200\n"
 "Last-Translator: Martin Ågren <martin.agren@gmail.com>\n"
 "Language-Team: Swedish <debian-l10n-swedish@lists.debian.org>\n"
@@ -41,15 +41,84 @@ msgstr ""
 "Ange \"all\", \"none\" eller en blankstegsseparerad lista på enheter, såsom "
 "\"md0 md1\" eller \"md/1 md/0\" (det inledande \"/dev\" kan uteslutas)."
 
-#. Type: boolean
+#. Type: text
 #. Description
 #: ../mdadm.templates:3001
+msgid "for internal use - only the long description is needed."
+msgstr "för intern användning - endast den långa beskrivningen behövs."
+
+#. Type: text
+#. Description
+#: ../mdadm.templates:3001
+msgid ""
+"If the system's root file system is located on an MD array (RAID), it needs "
+"to be started early during the boot sequence. If it is located on a logical "
+"volume (LVM), which is on MD, all constituent arrays need to be started."
+msgstr ""
+"Om ditt system har sitt rotfilsystem på en MD-kedja (RAID) behöver den "
+"startas upp tidigt under uppstartssekvensen. Om ditt rotfilsystem finns på "
+"en logisk volym (LVM), vilket är på MD, behöver alla bestående kedjor "
+"startas."
+
+#. Type: text
+#. Description
+#: ../mdadm.templates:3001
+msgid ""
+"If you know exactly which arrays are needed to bring up the root file "
+"system, and you want to postpone starting all other arrays to a later point "
+"in the boot sequence, enter the arrays to start here. Alternatively, enter "
+"'all' to simply start all available arrays."
+msgstr ""
+"Om du vet exakt vilka kedjor som behövs för att ta upp rotfilsystemet, och "
+"du vill skjuta upp uppstarten för alla andra kedjor till en senare tidspunkt "
+"i uppstartssekvensen, ange vilka kedjor som ska starta här. Alternativt, "
+"ange \"all\" för att helt enkelt starta alla tillgängliga kedjor."
+
+#. Type: text
+#. Description
+#: ../mdadm.templates:3001
+msgid ""
+"If you do not need or want to start any arrays for the root file system, "
+"leave the answer blank (or enter 'none'). This may be the case if you are "
+"using kernel autostart or do not need any arrays to boot."
+msgstr ""
+"Om du inte behöver eller vill starta några kedjor för rotfilsystemet, lämna "
+"svaret blankt (eller ange \"none\"). Detta kan vara fallet om du använder "
+"kärnans automatstart eller inte behöver några kedjor för att starta upp."
+
+#. Type: text
+#. Description
+#: ../mdadm.templates:4001
+msgid "An error occurred: device node does not exist"
+msgstr "Ett fel inträffade: enhetsnoden finns inte"
+
+#. Type: text
+#. Description
+#: ../mdadm.templates:5001
+msgid "An error occurred: not a block device"
+msgstr "Ett fel inträffade: inte en blockenhet"
+
+#. Type: text
+#. Description
+#: ../mdadm.templates:6001
+msgid "An error occurred: not an MD array"
+msgstr "Ett fel inträffade: inte en MD-kedja"
+
+#. Type: text
+#. Description
+#: ../mdadm.templates:7001
+msgid "An error occurred: array not listed in mdadm.conf file"
+msgstr "Ett fel inträffade: kedjan är inte listad i filen mdadm.conf"
+
+#. Type: boolean
+#. Description
+#: ../mdadm.templates:8001
 msgid "Start arrays not listed in mdadm.conf?"
 msgstr "Starta kedjor som inte är listade i mdadm.conf?"
 
 #. Type: boolean
 #. Description
-#: ../mdadm.templates:3001
+#: ../mdadm.templates:8001
 msgid ""
 "The specified array (${array}) is not listed in the configuration file "
 "(${config}). Therefore, it cannot be started during boot, unless you correct "
@@ -61,7 +130,7 @@ msgstr ""
 
 #. Type: boolean
 #. Description
-#: ../mdadm.templates:3001
+#: ../mdadm.templates:8001
 msgid ""
 "This warning is only relevant if you need arrays to be started from the "
 "initial ramdisk to be able to boot. If you use kernel autostarting, or do "
@@ -78,13 +147,13 @@ msgstr ""
 
 #. Type: boolean
 #. Description
-#: ../mdadm.templates:4001
+#: ../mdadm.templates:9001
 msgid "Do you want to start MD arrays automatically?"
 msgstr "Vill du starta MD-kedjor automatiskt?"
 
 #. Type: boolean
 #. Description
-#: ../mdadm.templates:4001
+#: ../mdadm.templates:9001
 msgid ""
 "Once the base system has booted, mdadm can start all MD arrays (RAIDs) "
 "specified in /etc/mdadm/mdadm.conf which have not yet been started. This is "
@@ -100,13 +169,13 @@ msgstr ""
 
 #. Type: boolean
 #. Description
-#: ../mdadm.templates:5001
+#: ../mdadm.templates:10001
 msgid "Should mdadm run monthly redundancy checks of the MD arrays?"
 msgstr "Ska mdadm köra månatliga redundanskontroller av MD-kedjorna?"
 
 #. Type: boolean
 #. Description
-#: ../mdadm.templates:5001
+#: ../mdadm.templates:10001
 msgid ""
 "If the kernel supports it (versions greater than 2.6.14), mdadm can "
 "periodically check the redundancy of MD arrays (RAIDs). This may be a "
@@ -125,7 +194,7 @@ msgstr ""
 
 #. Type: boolean
 #. Description
-#: ../mdadm.templates:5001
+#: ../mdadm.templates:10001
 msgid ""
 "The default, if turned on, is to check on the first Sunday of every month at "
 "01:06."
@@ -135,13 +204,13 @@ msgstr ""
 
 #. Type: boolean
 #. Description
-#: ../mdadm.templates:6001
+#: ../mdadm.templates:11001
 msgid "Do you want to start the MD monitoring daemon?"
 msgstr "Vill du starta MD-övervakningsdemonen?"
 
 #. Type: boolean
 #. Description
-#: ../mdadm.templates:6001
+#: ../mdadm.templates:11001
 msgid ""
 "The MD (RAID) monitor daemon sends email notifications in response to "
 "important MD events (such as a disk failure)."
@@ -151,73 +220,25 @@ msgstr ""
 
 #. Type: boolean
 #. Description
-#: ../mdadm.templates:6001
+#: ../mdadm.templates:11001
 msgid "Enabling this option is recommended."
 msgstr "Att aktivera denna funktion rekommenderas."
 
 #. Type: string
 #. Description
-#: ../mdadm.templates:7001
+#: ../mdadm.templates:12001
 msgid "Recipient for email notifications:"
 msgstr "Mottagare av e-postnotifieringar:"
 
 #. Type: string
 #. Description
-#: ../mdadm.templates:7001
+#: ../mdadm.templates:12001
 msgid ""
 "Please enter the email address of the user who should get the email "
 "notifications for important MD events."
 msgstr ""
 "Ange e-postadressen till den användare som ska ta emot e-postnotifieringar "
 "för dessa viktiga MD-händelser."
-
-#~ msgid "for internal use - only the long description is needed."
-#~ msgstr "för intern användning - endast den långa beskrivningen behövs."
-
-#~ msgid ""
-#~ "If the system's root file system is located on an MD array (RAID), it "
-#~ "needs to be started early during the boot sequence. If it is located on a "
-#~ "logical volume (LVM), which is on MD, all constituent arrays need to be "
-#~ "started."
-#~ msgstr ""
-#~ "Om ditt system har sitt rotfilsystem på en MD-kedja (RAID) behöver den "
-#~ "startas upp tidigt under uppstartssekvensen. Om ditt rotfilsystem finns "
-#~ "på en logisk volym (LVM), vilket är på MD, behöver alla bestående kedjor "
-#~ "startas."
-
-#~ msgid ""
-#~ "If you know exactly which arrays are needed to bring up the root file "
-#~ "system, and you want to postpone starting all other arrays to a later "
-#~ "point in the boot sequence, enter the arrays to start here. "
-#~ "Alternatively, enter 'all' to simply start all available arrays."
-#~ msgstr ""
-#~ "Om du vet exakt vilka kedjor som behövs för att ta upp rotfilsystemet, "
-#~ "och du vill skjuta upp uppstarten för alla andra kedjor till en senare "
-#~ "tidspunkt i uppstartssekvensen, ange vilka kedjor som ska starta här. "
-#~ "Alternativt, ange \"all\" för att helt enkelt starta alla tillgängliga "
-#~ "kedjor."
-
-#~ msgid ""
-#~ "If you do not need or want to start any arrays for the root file system, "
-#~ "leave the answer blank (or enter 'none'). This may be the case if you are "
-#~ "using kernel autostart or do not need any arrays to boot."
-#~ msgstr ""
-#~ "Om du inte behöver eller vill starta några kedjor för rotfilsystemet, "
-#~ "lämna svaret blankt (eller ange \"none\"). Detta kan vara fallet om du "
-#~ "använder kärnans automatstart eller inte behöver några kedjor för att "
-#~ "starta upp."
-
-#~ msgid "An error occurred: device node does not exist"
-#~ msgstr "Ett fel inträffade: enhetsnoden finns inte"
-
-#~ msgid "An error occurred: not a block device"
-#~ msgstr "Ett fel inträffade: inte en blockenhet"
-
-#~ msgid "An error occurred: not an MD array"
-#~ msgstr "Ett fel inträffade: inte en MD-kedja"
-
-#~ msgid "An error occurred: array not listed in mdadm.conf file"
-#~ msgstr "Ett fel inträffade: kedjan är inte listad i filen mdadm.conf"
 
 #~ msgid ""
 #~ "Please refer to /usr/share/doc/mdadm/README.upgrading-2.5.3.gz if you "

@@ -15,7 +15,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: mdadm\n"
 "Report-Msgid-Bugs-To: mdadm@packages.debian.org\n"
-"POT-Creation-Date: 2012-06-22 12:10+0400\n"
+"POT-Creation-Date: 2012-05-22 00:50+0100\n"
 "PO-Revision-Date: 2006-09-24 19:22-0300\n"
 "Last-Translator: Felipe Augusto van de Wiel (faw) <faw@cathedrallabs.org>\n"
 "Language-Team: l10n portuguese <debian-l10n-portuguese@lists.debian.org>\n"
@@ -49,9 +49,97 @@ msgstr ""
 "'none'. Você pode omitir a parte inicial '/dev/' e apenas informar, por "
 "exemplo, \"md0 md1\", ou \"md/1 md/d0\"."
 
-#. Type: boolean
+#. Type: text
 #. Description
 #: ../mdadm.templates:3001
+msgid "for internal use - only the long description is needed."
+msgstr "para uso interno - apenas a descrição longa é necessária."
+
+#. Type: text
+#. Description
+#: ../mdadm.templates:3001
+#, fuzzy
+#| msgid ""
+#| "If your system has its root filesystem on an MD array (RAID), it needs to "
+#| "be started early during the boot sequence. If your root filesystem is on "
+#| "a logical volume (LVM), which is on MD, all constituent arrays need to be "
+#| "started."
+msgid ""
+"If the system's root file system is located on an MD array (RAID), it needs "
+"to be started early during the boot sequence. If it is located on a logical "
+"volume (LVM), which is on MD, all constituent arrays need to be started."
+msgstr ""
+"Se o seu sistema tem o sistema de arquivos raiz em um dispositivo MD (RAID), "
+"este precisa ser iniciado mais cedo durante a seqüência de inicialização. Se "
+"o sistema de arquivos raiz está em um volume lógico (LVM), que está em um "
+"MD, todos os dispositivos que o constituem precisam ser iniciados."
+
+#. Type: text
+#. Description
+#: ../mdadm.templates:3001
+#, fuzzy
+#| msgid ""
+#| "If you know exactly which arrays are needed to bring up the root "
+#| "filesystem, and you want to postpone starting all other arrays to a later "
+#| "point in the boot sequence, enter the arrays to start here. "
+#| "Alternatively, enter 'all' to simply start all available arrays."
+msgid ""
+"If you know exactly which arrays are needed to bring up the root file "
+"system, and you want to postpone starting all other arrays to a later point "
+"in the boot sequence, enter the arrays to start here. Alternatively, enter "
+"'all' to simply start all available arrays."
+msgstr ""
+"Se você sabe exatamente quais dispositivos são necessários para ativar o "
+"sistema de arquivos raiz, e você deseja adiar o início de todos os outros "
+"dispositivos para um ponto posterior na seqüência de inicialização, informe "
+"os dispositivos a serem iniciados aqui. Como alternativa, informe 'all' para "
+"simplesmente iniciar todos os dispositivos disponíveis."
+
+#. Type: text
+#. Description
+#: ../mdadm.templates:3001
+#, fuzzy
+#| msgid ""
+#| "If you do not need or want to start any arrays for the root filesystem, "
+#| "leave the answer blank (or enter 'none'). This may be the case if you are "
+#| "using kernel autostart or do not need any arrays to boot."
+msgid ""
+"If you do not need or want to start any arrays for the root file system, "
+"leave the answer blank (or enter 'none'). This may be the case if you are "
+"using kernel autostart or do not need any arrays to boot."
+msgstr ""
+"Se você não precisa ou não quer iniciar quaisquer dispositivos para o "
+"sistema de arquivos raiz, deixe a resposta em branco (ou informe 'none'). "
+"Este pode ser o caso se você está usando \"kernel autostart\" ou não precisa "
+"de quaisquer dispositivos para a inicialização."
+
+#. Type: text
+#. Description
+#: ../mdadm.templates:4001
+msgid "An error occurred: device node does not exist"
+msgstr "Um erro ocorreu: o dispositivo (\"device node\") não existe"
+
+#. Type: text
+#. Description
+#: ../mdadm.templates:5001
+msgid "An error occurred: not a block device"
+msgstr "Um erro ocorreu: não é um dispositivo de blocos"
+
+#. Type: text
+#. Description
+#: ../mdadm.templates:6001
+msgid "An error occurred: not an MD array"
+msgstr "Um erro ocorreu: não é um dispositivo MD"
+
+#. Type: text
+#. Description
+#: ../mdadm.templates:7001
+msgid "An error occurred: array not listed in mdadm.conf file"
+msgstr "Um erro ocorreu: dispositivo não listado no arquivo mdadm.conf"
+
+#. Type: boolean
+#. Description
+#: ../mdadm.templates:8001
 #, fuzzy
 #| msgid "Proceed with starting arrays not listed in mdadm.conf?"
 msgid "Start arrays not listed in mdadm.conf?"
@@ -59,7 +147,7 @@ msgstr "Continuar com o início de dispositivos não listados no mdadm.conf?"
 
 #. Type: boolean
 #. Description
-#: ../mdadm.templates:3001
+#: ../mdadm.templates:8001
 #, fuzzy
 #| msgid ""
 #| "The array you have specified (${array}) is not listed in the "
@@ -78,7 +166,7 @@ msgstr ""
 
 #. Type: boolean
 #. Description
-#: ../mdadm.templates:3001
+#: ../mdadm.templates:8001
 msgid ""
 "This warning is only relevant if you need arrays to be started from the "
 "initial ramdisk to be able to boot. If you use kernel autostarting, or do "
@@ -96,13 +184,13 @@ msgstr ""
 
 #. Type: boolean
 #. Description
-#: ../mdadm.templates:4001
+#: ../mdadm.templates:9001
 msgid "Do you want to start MD arrays automatically?"
 msgstr "Você deseja iniciar os dispositivos MD automaticamente?"
 
 #. Type: boolean
 #. Description
-#: ../mdadm.templates:4001
+#: ../mdadm.templates:9001
 #, fuzzy
 #| msgid ""
 #| "Once the base system has come up, mdadm can start all MD arrays (RAIDs) "
@@ -127,7 +215,7 @@ msgstr ""
 
 #. Type: boolean
 #. Description
-#: ../mdadm.templates:5001
+#: ../mdadm.templates:10001
 msgid "Should mdadm run monthly redundancy checks of the MD arrays?"
 msgstr ""
 "O mdadm deve, mensalmente, executar checagens de redundância dos "
@@ -135,7 +223,7 @@ msgstr ""
 
 #. Type: boolean
 #. Description
-#: ../mdadm.templates:5001
+#: ../mdadm.templates:10001
 #, fuzzy
 #| msgid ""
 #| "If your kernel supports it (>> 2.6.14), mdadm can periodically check the "
@@ -162,7 +250,7 @@ msgstr ""
 
 #. Type: boolean
 #. Description
-#: ../mdadm.templates:5001
+#: ../mdadm.templates:10001
 #, fuzzy
 #| msgid ""
 #| "The default, if turned on, is to run the checks on the first Sunday of "
@@ -176,13 +264,13 @@ msgstr ""
 
 #. Type: boolean
 #. Description
-#: ../mdadm.templates:6001
+#: ../mdadm.templates:11001
 msgid "Do you want to start the MD monitoring daemon?"
 msgstr "Você deseja iniciar o \"daemon\" de monitoramento MD?"
 
 #. Type: boolean
 #. Description
-#: ../mdadm.templates:6001
+#: ../mdadm.templates:11001
 #, fuzzy
 #| msgid ""
 #| "The MD (RAID) monitor daemon sends email notifications in response to "
@@ -198,19 +286,19 @@ msgstr ""
 
 #. Type: boolean
 #. Description
-#: ../mdadm.templates:6001
+#: ../mdadm.templates:11001
 msgid "Enabling this option is recommended."
 msgstr ""
 
 #. Type: string
 #. Description
-#: ../mdadm.templates:7001
+#: ../mdadm.templates:12001
 msgid "Recipient for email notifications:"
 msgstr "Destinatário para os e-mails de notificações:"
 
 #. Type: string
 #. Description
-#: ../mdadm.templates:7001
+#: ../mdadm.templates:12001
 #, fuzzy
 #| msgid ""
 #| "Please enter the email address of the user who should get the email "
@@ -221,72 +309,6 @@ msgid ""
 msgstr ""
 "Por favor, informe o endereço de e-mail do usuário que deverá receber os e-"
 "mails de notificações para estes eventos MD importantes."
-
-#~ msgid "for internal use - only the long description is needed."
-#~ msgstr "para uso interno - apenas a descrição longa é necessária."
-
-#, fuzzy
-#~| msgid ""
-#~| "If your system has its root filesystem on an MD array (RAID), it needs "
-#~| "to be started early during the boot sequence. If your root filesystem is "
-#~| "on a logical volume (LVM), which is on MD, all constituent arrays need "
-#~| "to be started."
-#~ msgid ""
-#~ "If the system's root file system is located on an MD array (RAID), it "
-#~ "needs to be started early during the boot sequence. If it is located on a "
-#~ "logical volume (LVM), which is on MD, all constituent arrays need to be "
-#~ "started."
-#~ msgstr ""
-#~ "Se o seu sistema tem o sistema de arquivos raiz em um dispositivo MD "
-#~ "(RAID), este precisa ser iniciado mais cedo durante a seqüência de "
-#~ "inicialização. Se o sistema de arquivos raiz está em um volume lógico "
-#~ "(LVM), que está em um MD, todos os dispositivos que o constituem precisam "
-#~ "ser iniciados."
-
-#, fuzzy
-#~| msgid ""
-#~| "If you know exactly which arrays are needed to bring up the root "
-#~| "filesystem, and you want to postpone starting all other arrays to a "
-#~| "later point in the boot sequence, enter the arrays to start here. "
-#~| "Alternatively, enter 'all' to simply start all available arrays."
-#~ msgid ""
-#~ "If you know exactly which arrays are needed to bring up the root file "
-#~ "system, and you want to postpone starting all other arrays to a later "
-#~ "point in the boot sequence, enter the arrays to start here. "
-#~ "Alternatively, enter 'all' to simply start all available arrays."
-#~ msgstr ""
-#~ "Se você sabe exatamente quais dispositivos são necessários para ativar o "
-#~ "sistema de arquivos raiz, e você deseja adiar o início de todos os outros "
-#~ "dispositivos para um ponto posterior na seqüência de inicialização, "
-#~ "informe os dispositivos a serem iniciados aqui. Como alternativa, informe "
-#~ "'all' para simplesmente iniciar todos os dispositivos disponíveis."
-
-#, fuzzy
-#~| msgid ""
-#~| "If you do not need or want to start any arrays for the root filesystem, "
-#~| "leave the answer blank (or enter 'none'). This may be the case if you "
-#~| "are using kernel autostart or do not need any arrays to boot."
-#~ msgid ""
-#~ "If you do not need or want to start any arrays for the root file system, "
-#~ "leave the answer blank (or enter 'none'). This may be the case if you are "
-#~ "using kernel autostart or do not need any arrays to boot."
-#~ msgstr ""
-#~ "Se você não precisa ou não quer iniciar quaisquer dispositivos para o "
-#~ "sistema de arquivos raiz, deixe a resposta em branco (ou informe 'none'). "
-#~ "Este pode ser o caso se você está usando \"kernel autostart\" ou não "
-#~ "precisa de quaisquer dispositivos para a inicialização."
-
-#~ msgid "An error occurred: device node does not exist"
-#~ msgstr "Um erro ocorreu: o dispositivo (\"device node\") não existe"
-
-#~ msgid "An error occurred: not a block device"
-#~ msgstr "Um erro ocorreu: não é um dispositivo de blocos"
-
-#~ msgid "An error occurred: not an MD array"
-#~ msgstr "Um erro ocorreu: não é um dispositivo MD"
-
-#~ msgid "An error occurred: array not listed in mdadm.conf file"
-#~ msgstr "Um erro ocorreu: dispositivo não listado no arquivo mdadm.conf"
 
 #~ msgid ""
 #~ "Please refer to /usr/share/doc/mdadm/README.upgrading-2.5.3.gz if you "

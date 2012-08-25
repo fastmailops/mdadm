@@ -9,7 +9,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: mdadm 3.2.2-1\n"
 "Report-Msgid-Bugs-To: mdadm@packages.debian.org\n"
-"POT-Creation-Date: 2012-06-22 12:10+0400\n"
+"POT-Creation-Date: 2012-05-22 00:50+0100\n"
 "PO-Revision-Date: 2011-09-18 11:22+0200\n"
 "Last-Translator: Slavko <linux@slavino.sk>\n"
 "Language-Team: Slovak <debian-l10n-slovak@lists.debian.org>\n"
@@ -35,15 +35,84 @@ msgstr ""
 "Prosím, zadajte „all”, „none” alebo medzerou oddelený zoznam zariadení, "
 "napr. „md0 md1” alebo „md/1 md/d0” (počiatočné „/dev/” môže byť vynechané)."
 
-#. Type: boolean
+#. Type: text
 #. Description
 #: ../mdadm.templates:3001
+msgid "for internal use - only the long description is needed."
+msgstr "na interné použitie – potrebný je len dlhý popis."
+
+#. Type: text
+#. Description
+#: ../mdadm.templates:3001
+msgid ""
+"If the system's root file system is located on an MD array (RAID), it needs "
+"to be started early during the boot sequence. If it is located on a logical "
+"volume (LVM), which is on MD, all constituent arrays need to be started."
+msgstr ""
+"Ak je koreň súborového systému umiestnený na poli MD (RAID), musí byť "
+"spustený počas zavádzania systému. Ak je koreň umiestnený na logickom zväzku "
+"(LVM), ktorý je na MD, musia byť spustené všetky súvisiace polia."
+
+#. Type: text
+#. Description
+#: ../mdadm.templates:3001
+msgid ""
+"If you know exactly which arrays are needed to bring up the root file "
+"system, and you want to postpone starting all other arrays to a later point "
+"in the boot sequence, enter the arrays to start here. Alternatively, enter "
+"'all' to simply start all available arrays."
+msgstr ""
+"Ak viete presne, ktoré polia sú potrebné na pripojenie koreňa súborového "
+"systému a chcete odložiť štart všetkých ostatných polí na neskorší okamih "
+"zavádzania, zadajte tu polia, ktoré majú byť spustené. Alebo zadajte „all”, "
+"čím budú jednoducho spustené všetky dostupné polia."
+
+#. Type: text
+#. Description
+#: ../mdadm.templates:3001
+msgid ""
+"If you do not need or want to start any arrays for the root file system, "
+"leave the answer blank (or enter 'none'). This may be the case if you are "
+"using kernel autostart or do not need any arrays to boot."
+msgstr ""
+"Ak pre koreň súborového systému nepotrebujete alebo nechcete spúšťať žiadne "
+"polia, nechajte odpoveď prázdnu (alebo zadajte „none”). Tento prípad môže "
+"nastať, ak používate automatický štart polí priamo v jadre alebo "
+"nepotrebujete pri zavádzaní žiadne polia."
+
+#. Type: text
+#. Description
+#: ../mdadm.templates:4001
+msgid "An error occurred: device node does not exist"
+msgstr "Nastala chyba: uzol zariadenia neexistuje"
+
+#. Type: text
+#. Description
+#: ../mdadm.templates:5001
+msgid "An error occurred: not a block device"
+msgstr "Nastala chyba: nie je blokové zariadenie"
+
+#. Type: text
+#. Description
+#: ../mdadm.templates:6001
+msgid "An error occurred: not an MD array"
+msgstr "Nastala chyba: nie je pole MD"
+
+#. Type: text
+#. Description
+#: ../mdadm.templates:7001
+msgid "An error occurred: array not listed in mdadm.conf file"
+msgstr "Nastala chyba: pole nie je uvedené v súbore mdadm.conf"
+
+#. Type: boolean
+#. Description
+#: ../mdadm.templates:8001
 msgid "Start arrays not listed in mdadm.conf?"
 msgstr "Spustiť polia, ktoré nie sú uvedené v mdadm.conf?"
 
 #. Type: boolean
 #. Description
-#: ../mdadm.templates:3001
+#: ../mdadm.templates:8001
 msgid ""
 "The specified array (${array}) is not listed in the configuration file "
 "(${config}). Therefore, it cannot be started during boot, unless you correct "
@@ -55,7 +124,7 @@ msgstr ""
 
 #. Type: boolean
 #. Description
-#: ../mdadm.templates:3001
+#: ../mdadm.templates:8001
 msgid ""
 "This warning is only relevant if you need arrays to be started from the "
 "initial ramdisk to be able to boot. If you use kernel autostarting, or do "
@@ -72,13 +141,13 @@ msgstr ""
 
 #. Type: boolean
 #. Description
-#: ../mdadm.templates:4001
+#: ../mdadm.templates:9001
 msgid "Do you want to start MD arrays automatically?"
 msgstr "Chcete spúšťať polia MD automaticky?"
 
 #. Type: boolean
 #. Description
-#: ../mdadm.templates:4001
+#: ../mdadm.templates:9001
 msgid ""
 "Once the base system has booted, mdadm can start all MD arrays (RAIDs) "
 "specified in /etc/mdadm/mdadm.conf which have not yet been started. This is "
@@ -94,13 +163,13 @@ msgstr ""
 
 #. Type: boolean
 #. Description
-#: ../mdadm.templates:5001
+#: ../mdadm.templates:10001
 msgid "Should mdadm run monthly redundancy checks of the MD arrays?"
 msgstr "Má mdadm spúšťať mesačnú kontrolu redundancie polí MD?"
 
 #. Type: boolean
 #. Description
-#: ../mdadm.templates:5001
+#: ../mdadm.templates:10001
 msgid ""
 "If the kernel supports it (versions greater than 2.6.14), mdadm can "
 "periodically check the redundancy of MD arrays (RAIDs). This may be a "
@@ -118,7 +187,7 @@ msgstr ""
 
 #. Type: boolean
 #. Description
-#: ../mdadm.templates:5001
+#: ../mdadm.templates:10001
 msgid ""
 "The default, if turned on, is to check on the first Sunday of every month at "
 "01:06."
@@ -128,13 +197,13 @@ msgstr ""
 
 #. Type: boolean
 #. Description
-#: ../mdadm.templates:6001
+#: ../mdadm.templates:11001
 msgid "Do you want to start the MD monitoring daemon?"
 msgstr "Chcete spustiť démona monitorovania MD?"
 
 #. Type: boolean
 #. Description
-#: ../mdadm.templates:6001
+#: ../mdadm.templates:11001
 msgid ""
 "The MD (RAID) monitor daemon sends email notifications in response to "
 "important MD events (such as a disk failure)."
@@ -144,71 +213,25 @@ msgstr ""
 
 #. Type: boolean
 #. Description
-#: ../mdadm.templates:6001
+#: ../mdadm.templates:11001
 msgid "Enabling this option is recommended."
 msgstr "Povolenie tejto možnosti je odporúčané."
 
 #. Type: string
 #. Description
-#: ../mdadm.templates:7001
+#: ../mdadm.templates:12001
 msgid "Recipient for email notifications:"
 msgstr "Príjemca emailových upozornení:"
 
 #. Type: string
 #. Description
-#: ../mdadm.templates:7001
+#: ../mdadm.templates:12001
 msgid ""
 "Please enter the email address of the user who should get the email "
 "notifications for important MD events."
 msgstr ""
 "Prosím, zadajte emailovú adresu používateľa, ktorý má dostávať emailové "
 "upozornenia na dôležité udalosti MD."
-
-#~ msgid "for internal use - only the long description is needed."
-#~ msgstr "na interné použitie – potrebný je len dlhý popis."
-
-#~ msgid ""
-#~ "If the system's root file system is located on an MD array (RAID), it "
-#~ "needs to be started early during the boot sequence. If it is located on a "
-#~ "logical volume (LVM), which is on MD, all constituent arrays need to be "
-#~ "started."
-#~ msgstr ""
-#~ "Ak je koreň súborového systému umiestnený na poli MD (RAID), musí byť "
-#~ "spustený počas zavádzania systému. Ak je koreň umiestnený na logickom "
-#~ "zväzku (LVM), ktorý je na MD, musia byť spustené všetky súvisiace polia."
-
-#~ msgid ""
-#~ "If you know exactly which arrays are needed to bring up the root file "
-#~ "system, and you want to postpone starting all other arrays to a later "
-#~ "point in the boot sequence, enter the arrays to start here. "
-#~ "Alternatively, enter 'all' to simply start all available arrays."
-#~ msgstr ""
-#~ "Ak viete presne, ktoré polia sú potrebné na pripojenie koreňa súborového "
-#~ "systému a chcete odložiť štart všetkých ostatných polí na neskorší okamih "
-#~ "zavádzania, zadajte tu polia, ktoré majú byť spustené. Alebo zadajte "
-#~ "„all”, čím budú jednoducho spustené všetky dostupné polia."
-
-#~ msgid ""
-#~ "If you do not need or want to start any arrays for the root file system, "
-#~ "leave the answer blank (or enter 'none'). This may be the case if you are "
-#~ "using kernel autostart or do not need any arrays to boot."
-#~ msgstr ""
-#~ "Ak pre koreň súborového systému nepotrebujete alebo nechcete spúšťať "
-#~ "žiadne polia, nechajte odpoveď prázdnu (alebo zadajte „none”). Tento "
-#~ "prípad môže nastať, ak používate automatický štart polí priamo v jadre "
-#~ "alebo nepotrebujete pri zavádzaní žiadne polia."
-
-#~ msgid "An error occurred: device node does not exist"
-#~ msgstr "Nastala chyba: uzol zariadenia neexistuje"
-
-#~ msgid "An error occurred: not a block device"
-#~ msgstr "Nastala chyba: nie je blokové zariadenie"
-
-#~ msgid "An error occurred: not an MD array"
-#~ msgstr "Nastala chyba: nie je pole MD"
-
-#~ msgid "An error occurred: array not listed in mdadm.conf file"
-#~ msgstr "Nastala chyba: pole nie je uvedené v súbore mdadm.conf"
 
 #~ msgid ""
 #~ "Please refer to /usr/share/doc/mdadm/README.upgrading-2.5.3.gz if you "

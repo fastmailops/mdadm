@@ -1,3 +1,10 @@
+mdadm (3.2.5-3) UNRELEASED; urgency=low
+
+  * revert "Drop unused debconf templates" change -- the templates
+    are actually being (indirectly) used in debian/mdadm.config
+
+ -- Michael Tokarev <mjt@tls.msk.ru>  Sat, 25 Aug 2012 23:09:48 +0400
+
 mdadm (3.2.5-2) unstable; urgency=low
 
   [ Sergey B Kirpichev ]
