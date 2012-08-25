@@ -1,4 +1,4 @@
-mdadm (3.2.5-2) UNRELEASED; urgency=low
+mdadm (3.2.5-2) unstable; urgency=low
 
   [ Sergey B Kirpichev ]
   * Fix mdadm.lintian-overrides
@@ -26,7 +26,7 @@ mdadm (3.2.5-2) UNRELEASED; urgency=low
   * Copy local administrator's modified udev rules as well as the system
     one. (Closes: #678973)
 
- -- Dmitrijs Ledkovs <xnox@debian.org>  Mon, 25 Jun 2012 14:31:23 +0100
+ -- Michael Tokarev <mjt@tls.msk.ru>  Sat, 25 Aug 2012 16:25:37 +0400
 
 mdadm (3.2.5-1) unstable; urgency=low
 
