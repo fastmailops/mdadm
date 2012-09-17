@@ -21,7 +21,7 @@ mdadm (3.2.5-2) unstable; urgency=low
   * some cleanups for checkarray:
    - change --help printing and shorten/simplify the text
    - make --quiet cumulative and stop documenting --real-quiet
-   - do not prduce help in case of incorrect usage, and exit with 1
+   - do not produce help in case of incorrect usage, and exit with 1
   * fixes for initramfs integration (Closes: #644389, #678262, #685161):
    - check INITRDSTART=none early
    - do not explicitly load raid level modules (modprobe/kmod does this)
