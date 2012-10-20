@@ -249,7 +249,7 @@ case "${1:-}" in
     ;;
 
   status)
-    if [ -f /proc/mdstat ]; then
+    if [ ! -f /proc/mdstat ]; then
       log_problem "no MD subsystem loaded"
       exit 1
     else
