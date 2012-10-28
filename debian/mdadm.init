@@ -9,7 +9,7 @@
 ### BEGIN INIT INFO
 # Provides:          mdadm
 # Required-Start:    $local_fs $syslog mdadm-raid
-# Required-Stop:     $local_fs $syslog mdadm-raid
+# Required-Stop:     $local_fs $syslog sendsigs mdadm-raid
 # Default-Start:     2 3 4 5
 # Default-Stop:      0 1 6
 # Short-Description: MD monitoring daemon
@@ -22,6 +22,7 @@
 set -eu
 
 MDADM=/sbin/mdadm
+MDMON=/sbin/mdmon
 RUNDIR=/run/mdadm
 PIDFILE=$RUNDIR/monitor.pid
 DEBIANCONFIG=/etc/default/mdadm
@@ -54,6 +55,13 @@ case "${1:-}" in
       log_end_msg $?
       set -e
     fi
+    if [ "$(echo $RUNDIR/md[0-9]*.pid)" != "$RUNDIR/md[0-9]*.pid" ]; then
+      log_daemon_msg "Restarting MD external metadata monitor" "mdmon --takeover --all"
+      set +e
+      $MDMON --takeover --all
+      log_end_msg $?
+      set -e
+    fi
     ;;
   stop)
     if [ -f $PIDFILE ] ; then
@@ -64,6 +72,10 @@ case "${1:-}" in
       log_end_msg $?
       set -e
     fi
+    for file in $RUNDIR/md[0-9]*.pid ; do
+      [ ! -f "$file" ] && continue
+      ln -sf $file /run/sendsigs.omit.d/mdmon-${file##*/}
+    done
     ;;
   status)
     status_of_proc -p $PIDFILE "$MDADM" "mdadm" && exit 0 || exit $?

@@ -18,6 +18,21 @@ mdadm (3.2.5-4) UNRELEASED; urgency=low
     - allow --takeover when original was started with --offroot
     - fix arg parsing.
     - fix arg processing for -a
+  * Changes based on a patch by Miquel van Smoorenburg (Closes: #684708):
+    - install mdmon in udeb and initramfs, so imsm arrays can work.
+      mdadm runs mdmon automatically when needed (currently for imsm
+      arrays), and mdmon is required to make such arrays read-write
+      (they're read-only by default) so merely presence of mdmon is
+      enough to be able to use imsm arrays.
+    - /etc/init.d/mdadm start: if a mdmon pidfile is found in /run/mdadm,
+      restart mdmon (--takeover --all)
+    - /etc/init.d/mdadm stop: link pidfiles of mdmon processes into
+      /run/sendsigs.omit.d, and make sure that happens before sendsigs runs.
+    - stop mdadm before sendsigs, so that the above code works
+    - add script mdadm-waitidle that runs just before reboot/halt.
+      For each array that is still running, it sets sync_action to idle,
+      and uses mdadm --wait-clean to wait for all arrays to go idle
+      (it has a short timeout).
 
  -- Michael Tokarev <mjt@tls.msk.ru>  Sat, 20 Oct 2012 19:20:12 +0400
 
