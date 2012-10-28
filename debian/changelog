@@ -11,6 +11,9 @@ mdadm (3.2.5-4) UNRELEASED; urgency=low
     (Closes: #691668).
   * fix segfaults in Detail() - mdadm --detail may segfault if a drive
     has been removed from the array (Closes: #691670)
+  * super0: do not override uuid with homehost.  The bug prevented
+    re-creating an array with v0.90 superblock with the specified uuid
+    when homehost is also specified.  (Closes: #686703)
 
  -- Michael Tokarev <mjt@tls.msk.ru>  Sat, 20 Oct 2012 19:20:12 +0400
 
