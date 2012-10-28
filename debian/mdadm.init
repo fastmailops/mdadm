@@ -22,7 +22,7 @@
 set -eu
 
 MDADM=/sbin/mdadm
-RUNDIR=/var/run/mdadm
+RUNDIR=/run/mdadm
 PIDFILE=$RUNDIR/monitor.pid
 DEBIANCONFIG=/etc/default/mdadm
 

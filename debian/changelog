@@ -1,6 +1,11 @@
 mdadm (3.2.5-4) UNRELEASED; urgency=low
 
   * fix `/etc/init.d/mdadm-raid status' inverse logic (Closes: #686100)
+  * /etc/init.d/mdadm: change RUNDIR to /run instead of /var/run.
+    Mdadm itself uses /run internally, we properly depend on initscripts
+    version which creates /run, and the initscript itself is started
+    after local_fs is processed, so this is merely a no-op, but let's
+    do it for consistency.
 
  -- Michael Tokarev <mjt@tls.msk.ru>  Sat, 20 Oct 2012 19:20:12 +0400
 
