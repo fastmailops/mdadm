@@ -14,6 +14,10 @@ mdadm (3.2.5-4) UNRELEASED; urgency=low
   * super0: do not override uuid with homehost.  The bug prevented
     re-creating an array with v0.90 superblock with the specified uuid
     when homehost is also specified.  (Closes: #686703)
+  * several fixes for mdmon argument processing (Closes: #691671):
+    - allow --takeover when original was started with --offroot
+    - fix arg parsing.
+    - fix arg processing for -a
 
  -- Michael Tokarev <mjt@tls.msk.ru>  Sat, 20 Oct 2012 19:20:12 +0400
 
