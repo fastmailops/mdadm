@@ -9,6 +9,8 @@ mdadm (3.2.5-4) UNRELEASED; urgency=low
   * Fix 'enough' function for RAID10, to prevent starting of a RAID10
     array which does not have required minimum of component devices.
     (Closes: #691668).
+  * fix segfaults in Detail() - mdadm --detail may segfault if a drive
+    has been removed from the array (Closes: #691670)
 
  -- Michael Tokarev <mjt@tls.msk.ru>  Sat, 20 Oct 2012 19:20:12 +0400
 

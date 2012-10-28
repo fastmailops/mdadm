@@ -4,3 +4,4 @@ debian-no-Werror.diff
 sha1-includes.diff
 spelling-and-manpages.patch
 fix-enough-function-for-RAID10.patch
+fix-segfaults-in-detail.patch
