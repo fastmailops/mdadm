@@ -22,7 +22,8 @@ test -f /proc/mdstat || exit 0
 
 case "${1:-}" in
 
-  start)
+  start|restart|force-reload)
+    # nothing, the only reason the script is here is to stop arrays
     ;;
 
   stop)

@@ -1,3 +1,11 @@
+mdadm (3.2.5-5) UNRELEASED; urgency=low
+
+  * add (empty) restart and force-reload actions to mdadm-waitidle
+    script -- this script is used only when the system needs to be
+    shut down or rebooted, there's nothing to start or restart.
+
+ -- Michael Tokarev <mjt@tls.msk.ru>  Thu, 24 Jan 2013 17:03:21 +0400
+
 mdadm (3.2.5-4+mdmon) experimental; urgency=low
 
   * fix `/etc/init.d/mdadm-raid status' inverse logic (Closes: #686100)
