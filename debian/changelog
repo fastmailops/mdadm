@@ -1,4 +1,4 @@
-mdadm (3.2.5-4) UNRELEASED; urgency=low
+mdadm (3.2.5-4+mdmon) experimental; urgency=low
 
   * fix `/etc/init.d/mdadm-raid status' inverse logic (Closes: #686100)
   * /etc/init.d/mdadm: change RUNDIR to /run instead of /var/run.
