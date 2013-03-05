@@ -1,3 +1,16 @@
+mdadm (3.2.5-6) unstable; urgency=low
+
+  * replace home-grown and not-working-since-etch udevsettle call
+    in initramfs script with proper wait_for_udev function (from
+    common initramfs functions).  This unbreaks situations when
+    the underlying device needs some udev magic to happen before
+    being available, which includes stacked devices (md on lvm)
+    and other cases.  Thanks to Thomas Parmelan and Dave Whitla
+    for finding the root cause of breakage and for providing
+    the fix.  (Closes: #644876)
+
+ -- Michael Tokarev <mjt@tls.msk.ru>  Tue, 05 Mar 2013 13:32:21 +0400
+
 mdadm (3.2.5-5) unstable; urgency=low
 
   * add (empty) restart and force-reload actions to mdadm-waitidle

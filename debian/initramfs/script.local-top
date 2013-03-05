@@ -97,11 +97,7 @@ else
   done
 fi
 
-if [ -x "$(command -v udevsettle)" ]; then
-  verbose && log_begin_msg "Waiting for udev to process events"
-  udevsettle 10
-  verbose && log_end_msg
-fi
+wait_for_udev 10
 
 maybe_break post-mdadm
 
