@@ -1,3 +1,10 @@
+mdadm (3.2.5-5ubuntu1) UNRELEASED; urgency=low
+
+  * Properly remove 65-mdadm.vol_id.rules, instead of trying to remove a
+    never-existed 65_mdadm.vol_id.rules (note the 65- vs 65_).
+
+ -- Dmitrijs Ledkovs <dmitrij.ledkov@ubuntu.com>  Wed, 27 Mar 2013 11:10:10 +0000
+
 mdadm (3.2.5-5) unstable; urgency=low
 
   * add (empty) restart and force-reload actions to mdadm-waitidle
