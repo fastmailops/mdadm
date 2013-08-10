@@ -1,3 +1,10 @@
+mdadm (3.2.5-7) UNRELEASED; urgency=low
+
+  * remove Martin F. Krafft from uploaders per his request.
+    Thank you for your contributions!
+
+ -- Michael Tokarev <mjt@tls.msk.ru>  Sat, 10 Aug 2013 11:27:40 +0400
+
 mdadm (3.2.5-6) unstable; urgency=low
 
   * replace home-grown and not-working-since-etch udevsettle call
