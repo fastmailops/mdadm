@@ -43,7 +43,8 @@ case "$1" in
       $MDADM -Esc /var/backups/mdadm-Es_v1.dump >> /var/backups/mdadm-Es_v1.dump || :
     fi
 
-    rm_conffile /etc/udev/rules.d/65_mdadm.vol_id.rules
+    # Used incorrect name s/_/-/, keep all throughout until after jessie is released.
+    rm_conffile /etc/udev/rules.d/65-mdadm.vol_id.rules
     ;;
 
   *) :;;
