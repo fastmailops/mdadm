@@ -20,7 +20,8 @@ endif
 configure:
 
 debian/mdadm-startall.8: debian/mdadm-startall.sgml
-	docbook-to-man $< > $@
+	docbook-to-man $< > $@.tmp
+	mv $@.tmp $@
 
 build: configure build-stamp
 build-stamp: debian/mdadm-startall.8
