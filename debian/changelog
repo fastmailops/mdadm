@@ -26,8 +26,8 @@ mdadm (3.3-1) UNRELEASED; urgency=low
     newly introduced bashism
   * remove debian/source/options, there's no need to set compression
     options for debian.tar.gz.
-  * remove outdated debian/docs/md_superblock_formats.txt
-    (Closes: #714977)
+  * remove outdated debian/docs/md_superblock_formats.txt and
+    debian/docs/md.txt (Closes: #714977, #714978)
   * ship ANNOUNCE-*, external-reshape-design.txt, mdmon-design.txt
     files as documentation (Closes: #715324)
 
