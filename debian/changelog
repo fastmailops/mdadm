@@ -24,6 +24,8 @@ mdadm (3.3-1) UNRELEASED; urgency=low
     Thank you for your contributions!
   * added remove-bashism-from-makefile.patch patch to work around
     newly introduced bashism
+  * remove debian/source/options, there's no need to set compression
+    options for debian.tar.gz.
 
   [ Dmitrijs Ledkovs ]
   * Properly remove 65-mdadm.vol_id.rules, instead of trying to remove a
