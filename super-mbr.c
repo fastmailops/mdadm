@@ -81,25 +81,23 @@ static int load_super_mbr(struct supertype *st, int fd, char *devname)
 	free_mbr(st);
 
 	if (posix_memalign((void**)&super, 512, 512) != 0) {
-		fprintf(stderr, Name ": %s could not allocate superblock\n",
+		pr_err("%s could not allocate superblock\n",
 			__func__);
 		return 1;
 	}
 
-	ioctl(fd, BLKFLSBUF, 0); /* make sure we read current data */
-
 	lseek(fd, 0, 0);
 	if (read(fd, super, sizeof(*super)) != sizeof(*super)) {
 		if (devname)
-			fprintf(stderr, Name ": Cannot read partition table on %s\n",
+			pr_err("Cannot read partition table on %s\n",
 				devname);
 		free(super);
 		return 1;
 	}
- 
+
 	if (super->magic != MBR_SIGNATURE_MAGIC) {
 		if (devname)
-			fprintf(stderr, Name ": No partition table found on %s\n",
+			pr_err("No partition table found on %s\n",
 				devname);
 		free(super);
 		return 1;
@@ -121,12 +119,10 @@ static int store_mbr(struct supertype *st, int fd)
 	struct MBR *old, *super;
 
 	if (posix_memalign((void**)&old, 512, 512) != 0) {
-		fprintf(stderr, Name ": %s could not allocate superblock\n",
+		pr_err("%s could not allocate superblock\n",
 			__func__);
 		return 1;
 	}
-
-	ioctl(fd, BLKFLSBUF, 0); /* make sure we read current data */
 
 	lseek(fd, 0, 0);
 	if (read(fd, old, sizeof(*old)) != sizeof(*old)) {
@@ -158,7 +154,7 @@ static void getinfo_mbr(struct supertype *st, struct mdinfo *info, char *map)
 
 	for (i = 0; i < MBR_PARTITIONS ; i++)
 		if (sb->parts[i].blocks_num) {
-			unsigned long last = 
+			unsigned long last =
 				(unsigned long)__le32_to_cpu(sb->parts[i].blocks_num)
 				+ (unsigned long)__le32_to_cpu(sb->parts[i].first_sect_lba);
 			if (last > info->component_size)
@@ -174,9 +170,7 @@ static struct supertype *match_metadata_desc(char *arg)
 	if (strcmp(arg, "mbr") != 0)
 		return NULL;
 
-	st = malloc(sizeof(*st));
-	if (!st)
-		return st;
+	st = xmalloc(sizeof(*st));
 	st->ss = &mbr;
 	st->info = NULL;
 	st->minor_version = 0;
@@ -189,10 +183,11 @@ static struct supertype *match_metadata_desc(char *arg)
 static int validate_geometry(struct supertype *st, int level,
 			     int layout, int raiddisks,
 			     int *chunk, unsigned long long size,
+			     unsigned long long data_offset,
 			     char *subdev, unsigned long long *freesize,
 			     int verbose)
 {
-	fprintf(stderr, Name ": mbr metadata cannot be used this way\n");
+	pr_err("mbr metadata cannot be used this way\n");
 	return 0;
 }
 #endif

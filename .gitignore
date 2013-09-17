@@ -4,7 +4,15 @@
 /mdadm
 /mdadm.8
 /mdadm.udeb
+/mdassemble
 /mdmon
 /swap_super
 /test_stripe
 /TAGS
+/mdadm.O2
+/mdadm.Os
+/mdadm.static
+/mdassemble.auto
+/mdassemble.static
+/mdmon.O2
+/raid6check

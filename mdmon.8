@@ -1,11 +1,11 @@
 .\" See file COPYING in distribution for details.
-.TH MDMON 8 "" v3.2.5
+.TH MDMON 8 "" v3.3
 .SH NAME
 mdmon \- monitor MD external metadata arrays
 
 .SH SYNOPSIS
 
-.BI mdmon " [--all] [--takeover] [--offroot] CONTAINER"
+.BI mdmon " [--all] [--takeover] [--foreground] CONTAINER"
 
 .SH OVERVIEW
 The 2.6.27 kernel brings the ability to support external metadata arrays.
@@ -101,8 +101,8 @@ call is still required.
 External metadata formats, like DDF, differ from the native MD metadata
 formats in that they define a set of disks and a series of sub-arrays
 within those disks.  MD metadata in comparison defines a 1:1
-relationship between a set of block devices and a raid array.  For
-example to create 2 arrays at different raid levels on a single
+relationship between a set of block devices and a RAID array.  For
+example to create 2 arrays at different RAID levels on a single
 set of disks, MD metadata requires the disks be partitioned and then
 each array can be created with a subset of those partitions.  The
 supported external formats perform this disk carving internally.
@@ -130,6 +130,14 @@ The
 .B container
 device to monitor.  It can be a full path like /dev/md/container, or a
 simple md device name like md127.
+.TP
+.B \-\-foreground
+Normally,
+.I mdmon
+will fork and continue in the background.  Adding this option will
+skip that step and run
+.I mdmon
+in the foreground.
 .TP
 .B \-\-takeover
 This instructs
@@ -166,15 +174,6 @@ containers with names longer than 5 characters, this argument can be
 arbitrarily extended, e.g. to
 .BR \-\-all-active-arrays .
 .TP
-.BR \-\-offroot
-Set first character of argv[0] to @ to indicate mdmon was launched
-from initrd/initramfs and should not be shutdown by systemd as part of
-the regular shutdown process. This option is normally only used by
-the system's initscripts. Please see here for more details on how
-systemd handled argv[0]:
-.IP
-.B http://www.freedesktop.org/wiki/Software/systemd/RootStorageDaemons
-.PP
 
 .PP
 Note that

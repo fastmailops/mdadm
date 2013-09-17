@@ -30,13 +30,12 @@
 #include <sys/stat.h>
 #include <limits.h>
 
-
 static int devpath_to_ll(const char *dev_path, const char *entry,
 			 unsigned long long *val);
 
 static __u16 devpath_to_vendor(const char *dev_path);
 
-void free_sys_dev(struct sys_dev **list)
+static void free_sys_dev(struct sys_dev **list)
 {
 	while (*list) {
 		struct sys_dev *next = (*list)->next;
@@ -102,10 +101,10 @@ struct sys_dev *find_driver_devices(const char *bus, const char *driver)
 
 		/* start / add list entry */
 		if (!head) {
-			head = malloc(sizeof(*head));
+			head = xmalloc(sizeof(*head));
 			list = head;
 		} else {
-			list->next = malloc(sizeof(*head));
+			list->next = xmalloc(sizeof(*head));
 			list = list->next;
 		}
 
@@ -116,7 +115,7 @@ struct sys_dev *find_driver_devices(const char *bus, const char *driver)
 
 		list->dev_id = (__u16) dev_id;
 		list->type = type;
-		list->path = canonicalize_file_name(path);
+		list->path = realpath(path, NULL);
 		list->next = NULL;
 		if ((list->pci_id = strrchr(list->path, '/')) != NULL)
 			list->pci_id++;
@@ -125,8 +124,8 @@ struct sys_dev *find_driver_devices(const char *bus, const char *driver)
 	return head;
 }
 
-
 static struct sys_dev *intel_devices=NULL;
+static time_t valid_time = 0;
 
 static enum sys_dev_type device_type_by_id(__u16 device_id)
 {
@@ -153,7 +152,6 @@ static int devpath_to_ll(const char *dev_path, const char *entry, unsigned long 
 	close(fd);
 	return n;
 }
-
 
 static __u16 devpath_to_vendor(const char *dev_path)
 {
@@ -183,6 +181,12 @@ struct sys_dev *find_intel_devices(void)
 {
 	struct sys_dev *ahci, *isci;
 
+	if (valid_time > time(0) - 10)
+		return intel_devices;
+
+	if (intel_devices)
+		free_sys_dev(&intel_devices);
+
 	isci = find_driver_devices("pci", "isci");
 	ahci = find_driver_devices("pci", "ahci");
 
@@ -194,7 +198,9 @@ struct sys_dev *find_intel_devices(void)
 			elem = elem->next;
 		elem->next = isci;
 	}
-	return ahci;
+	intel_devices = ahci;
+	valid_time = time(0);
+	return intel_devices;
 }
 
 /*
@@ -245,7 +251,6 @@ static int scan(const void *start, const void *end, const void *data)
 	return 0;
 }
 
-
 const struct imsm_orom *imsm_platform_test(enum sys_dev_type hba_id, int *populated,
 					   struct imsm_orom *imsm_orom)
 {
@@ -280,8 +285,6 @@ const struct imsm_orom *imsm_platform_test(enum sys_dev_type hba_id, int *popula
 	return imsm_orom;
 }
 
-
-
 static const struct imsm_orom *find_imsm_hba_orom(enum sys_dev_type hba_id)
 {
 	unsigned long align;
@@ -297,7 +300,7 @@ static const struct imsm_orom *find_imsm_hba_orom(enum sys_dev_type hba_id)
 	}
 	if (check_env("IMSM_TEST_OROM")) {
 		dprintf("OROM CAP: %p,  pid: %d pop: %d\n",
-                     &imsm_orom[hba_id], (int) getpid(), populated_orom[hba_id]);
+			&imsm_orom[hba_id], (int) getpid(), populated_orom[hba_id]);
 		return imsm_platform_test(hba_id, &populated_orom[hba_id], &imsm_orom[hba_id]);
 	}
 	/* return empty OROM capabilities in EFI test mode */
@@ -305,11 +308,7 @@ static const struct imsm_orom *find_imsm_hba_orom(enum sys_dev_type hba_id)
 	    check_env("IMSM_TEST_SCU_EFI"))
 		return NULL;
 
-
-	if (intel_devices != NULL)
-		free_sys_dev(&intel_devices);
-
-	intel_devices = find_intel_devices();
+	find_intel_devices();
 
 	if (intel_devices == NULL)
 		return NULL;
@@ -326,10 +325,6 @@ static const struct imsm_orom *find_imsm_hba_orom(enum sys_dev_type hba_id)
 	scan_adapter_roms(scan);
 	probe_roms_exit();
 
-	if (intel_devices != NULL)
-		free_sys_dev(&intel_devices);
-	intel_devices = NULL;
-
 	if (populated_orom[hba_id])
 		return &imsm_orom[hba_id];
 	return NULL;
@@ -344,7 +339,6 @@ static const struct imsm_orom *find_imsm_hba_orom(enum sys_dev_type hba_id)
   (b) & 0xff, ((b) >> 8) & 0xff, \
   (c) & 0xff, ((c) >> 8) & 0xff, \
   (d0), (d1), (d2), (d3), (d4), (d5), (d6), (d7) }})
-
 
 #define SYS_EFI_VAR_PATH "/sys/firmware/efi/vars"
 #define SCU_PROP "RstScuV"
@@ -381,7 +375,7 @@ int read_efi_variable(void *buffer, ssize_t buf_size, char *variable_name, struc
 	errno = 0;
 	var_data_len = strtoul(buf, NULL, 16);
 	if ((errno == ERANGE && (var_data_len == LONG_MAX))
-            || (errno != 0 && var_data_len == 0))
+	    || (errno != 0 && var_data_len == 0))
 		return 1;
 
 	/* get data */
@@ -446,7 +440,6 @@ const struct imsm_orom *find_imsm_capability(enum sys_dev_type hba_id)
 {
 	const struct imsm_orom *cap=NULL;
 
-
 	if ((cap = find_imsm_efi(hba_id)) != NULL)
 		return cap;
 	if ((cap = find_imsm_hba_orom(hba_id)) != NULL)
@@ -459,7 +452,7 @@ char *devt_to_devpath(dev_t dev)
 	char device[46];
 
 	sprintf(device, "/sys/dev/block/%d:%d/device", major(dev), minor(dev));
-	return canonicalize_file_name(device);
+	return realpath(device, NULL);
 }
 
 char *diskfd_to_devpath(int fd)

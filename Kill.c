@@ -29,7 +29,7 @@
 #include	"md_u.h"
 #include	"md_p.h"
 
-int Kill(char *dev, struct supertype *st, int force, int quiet, int noexcl)
+int Kill(char *dev, struct supertype *st, int force, int verbose, int noexcl)
 {
 	/*
 	 * Nothing fancy about Kill.  It just zeroes out a superblock
@@ -46,16 +46,16 @@ int Kill(char *dev, struct supertype *st, int force, int quiet, int noexcl)
 		noexcl = 1;
 	fd = open(dev, O_RDWR|(noexcl ? 0 : O_EXCL));
 	if (fd < 0) {
-		if (!quiet)
-			fprintf(stderr, Name ": Couldn't open %s for write - not zeroing\n",
+		if (verbose >= 0)
+			pr_err("Couldn't open %s for write - not zeroing\n",
 				dev);
 		return 2;
 	}
 	if (st == NULL)
 		st = guess_super(fd);
 	if (st == NULL || st->ss->init_super == NULL) {
-		if (!quiet)
-			fprintf(stderr, Name ": Unrecognised md component device - %s\n", dev);
+		if (verbose >= 0)
+			pr_err("Unrecognised md component device - %s\n", dev);
 		close(fd);
 		return 2;
 	}
@@ -63,15 +63,16 @@ int Kill(char *dev, struct supertype *st, int force, int quiet, int noexcl)
 	rv = st->ss->load_super(st, fd, dev);
 	if (rv == 0 || (force && rv >= 2)) {
 		st->ss->free_super(st);
-		st->ss->init_super(st, NULL, 0, "", NULL, NULL);
+		st->ss->init_super(st, NULL, 0, "", NULL, NULL,
+				   INVALID_SECTORS);
 		if (st->ss->store_super(st, fd)) {
-			if (!quiet)
-				fprintf(stderr, Name ": Could not zero superblock on %s\n",
+			if (verbose >= 0)
+				pr_err("Could not zero superblock on %s\n",
 					dev);
 			rv = 1;
 		} else if (rv) {
-			if (!quiet)
-				fprintf(stderr, Name ": superblock zeroed anyway\n");
+			if (verbose >= 0)
+				pr_err("superblock zeroed anyway\n");
 			rv = 0;
 		}
 	}
@@ -79,7 +80,7 @@ int Kill(char *dev, struct supertype *st, int force, int quiet, int noexcl)
 	return rv;
 }
 
-int Kill_subarray(char *dev, char *subarray, int quiet)
+int Kill_subarray(char *dev, char *subarray, int verbose)
 {
 	/* Delete a subarray out of a container, the subarry must be
 	 * inactive.  The subarray string must be a subarray index
@@ -95,36 +96,33 @@ int Kill_subarray(char *dev, char *subarray, int quiet)
 
 	memset(st, 0, sizeof(*st));
 
-	fd = open_subarray(dev, subarray, st, quiet);
+	fd = open_subarray(dev, subarray, st, verbose < 0);
 	if (fd < 0)
 		return 2;
 
 	if (!st->ss->kill_subarray) {
-		if (!quiet)
-			fprintf(stderr,
-				Name ": Operation not supported for %s metadata\n",
-				st->ss->name);
+		if (verbose >= 0)
+			pr_err("Operation not supported for %s metadata\n",
+			       st->ss->name);
 		goto free_super;
 	}
 
-	if (is_subarray_active(subarray, st->devname)) {
-		if (!quiet)
-			fprintf(stderr,
-				Name ": Subarray-%s still active, aborting\n",
-				subarray);
+	if (is_subarray_active(subarray, st->devnm)) {
+		if (verbose >= 0)
+			pr_err("Subarray-%s still active, aborting\n",
+			       subarray);
 		goto free_super;
 	}
 
-	if (mdmon_running(st->devnum))
+	if (mdmon_running(st->devnm))
 		st->update_tail = &st->updates;
 
 	/* ok we've found our victim, drop the axe */
 	rv = st->ss->kill_subarray(st);
 	if (rv) {
-		if (!quiet)
-			fprintf(stderr,
-				Name ": Failed to delete subarray-%s from %s\n",
-				subarray, dev);
+		if (verbose >= 0)
+			pr_err("Failed to delete subarray-%s from %s\n",
+			       subarray, dev);
 		goto free_super;
 	}
 
@@ -134,10 +132,9 @@ int Kill_subarray(char *dev, char *subarray, int quiet)
 	else
 		st->ss->sync_metadata(st);
 
-	if (!quiet)
-		fprintf(stderr,
-			Name ": Deleted subarray-%s from %s, UUIDs may have changed\n",
-			subarray, dev);
+	if (verbose >= 0)
+		pr_err("Deleted subarray-%s from %s, UUIDs may have changed\n",
+		       subarray, dev);
 
 	rv = 0;
 

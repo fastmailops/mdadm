@@ -46,7 +46,6 @@
 #include	<sys/file.h>
 #include	<ctype.h>
 
-
 #define MAP_READ 0
 #define MAP_NEW 1
 #define MAP_LOCK 2
@@ -88,10 +87,7 @@ int map_write(struct map_ent *mel)
 	for (; mel; mel = mel->next) {
 		if (mel->bad)
 			continue;
-		if (mel->devnum < 0)
-			fprintf(f, "mdp%d ", -1-mel->devnum);
-		else
-			fprintf(f, "md%d ", mel->devnum);
+		fprintf(f, "%s ", mel->devnm);
 		fprintf(f, "%s ", mel->metadata);
 		fprintf(f, "%08x:%08x:%08x:%08x ", mel->uuid[0],
 			mel->uuid[1], mel->uuid[2], mel->uuid[3]);
@@ -107,7 +103,6 @@ int map_write(struct map_ent *mel)
 	return rename(mapname[1],
 		      mapname[0]) == 0;
 }
-
 
 static FILE *lf = NULL;
 int map_lock(struct map_ent **melp)
@@ -164,14 +159,14 @@ void map_fork(void)
 }
 
 void map_add(struct map_ent **melp,
-	    int devnum, char *metadata, int uuid[4], char *path)
+	     char * devnm, char *metadata, int uuid[4], char *path)
 {
-	struct map_ent *me = malloc(sizeof(*me));
+	struct map_ent *me = xmalloc(sizeof(*me));
 
-	me->devnum = devnum;
+	strcpy(me->devnm, devnm);
 	strcpy(me->metadata, metadata);
 	memcpy(me->uuid, uuid, 16);
-	me->path = path ? strdup(path) : NULL;
+	me->path = path ? xstrdup(path) : NULL;
 	me->next = *melp;
 	me->bad = 0;
 	*melp = me;
@@ -182,9 +177,9 @@ void map_read(struct map_ent **melp)
 	FILE *f;
 	char buf[8192];
 	char path[200];
-	int devnum, uuid[4];
+	int uuid[4];
+	char devnm[32];
 	char metadata[30];
-	char nam[4];
 
 	*melp = NULL;
 
@@ -198,14 +193,10 @@ void map_read(struct map_ent **melp)
 
 	while (fgets(buf, sizeof(buf), f)) {
 		path[0] = 0;
-		if (sscanf(buf, " %3[mdp]%d %s %x:%x:%x:%x %200s",
-			   nam, &devnum, metadata, uuid, uuid+1,
+		if (sscanf(buf, " %s %s %x:%x:%x:%x %200s",
+			   devnm, metadata, uuid, uuid+1,
 			   uuid+2, uuid+3, path) >= 7) {
-			if (strncmp(nam, "md", 2) != 0)
-				continue;
-			if (nam[2] == 'p')
-				devnum = -1 - devnum;
-			map_add(melp, devnum, metadata, uuid, path);
+			map_add(melp, devnm, metadata, uuid, path);
 		}
 	}
 	fclose(f);
@@ -221,7 +212,7 @@ void map_free(struct map_ent *map)
 	}
 }
 
-int map_update(struct map_ent **mpp, int devnum, char *metadata,
+int map_update(struct map_ent **mpp, char *devnm, char *metadata,
 	       int *uuid, char *path)
 {
 	struct map_ent *map, *mp;
@@ -233,16 +224,16 @@ int map_update(struct map_ent **mpp, int devnum, char *metadata,
 		map_read(&map);
 
 	for (mp = map ; mp ; mp=mp->next)
-		if (mp->devnum == devnum) {
+		if (strcmp(mp->devnm, devnm) == 0) {
 			strcpy(mp->metadata, metadata);
 			memcpy(mp->uuid, uuid, 16);
 			free(mp->path);
-			mp->path = path ? strdup(path) : NULL;
+			mp->path = path ? xstrdup(path) : NULL;
 			mp->bad = 0;
 			break;
 		}
 	if (!mp)
-		map_add(&map, devnum, metadata, uuid, path);
+		map_add(&map, devnm, metadata, uuid, path);
 	if (mpp)
 		*mpp = NULL;
 	rv = map_write(map);
@@ -250,7 +241,7 @@ int map_update(struct map_ent **mpp, int devnum, char *metadata,
 	return rv;
 }
 
-void map_delete(struct map_ent **mapp, int devnum)
+void map_delete(struct map_ent **mapp, char *devnm)
 {
 	struct map_ent *mp;
 
@@ -258,7 +249,7 @@ void map_delete(struct map_ent **mapp, int devnum)
 		map_read(mapp);
 
 	for (mp = *mapp; mp; mp = *mapp) {
-		if (mp->devnum == devnum) {
+		if (strcmp(mp->devnm, devnm) == 0) {
 			*mapp = mp->next;
 			free(mp->path);
 			free(mp);
@@ -267,12 +258,12 @@ void map_delete(struct map_ent **mapp, int devnum)
 	}
 }
 
-void map_remove(struct map_ent **mapp, int devnum)
+void map_remove(struct map_ent **mapp, char *devnm)
 {
-	if (devnum == NoMdDev)
+	if (devnm[0] == 0)
 		return;
 
-	map_delete(mapp, devnum);
+	map_delete(mapp, devnm);
 	map_write(*mapp);
 	map_free(*mapp);
 }
@@ -286,7 +277,7 @@ struct map_ent *map_by_uuid(struct map_ent **map, int uuid[4])
 	for (mp = *map ; mp ; mp = mp->next) {
 		if (memcmp(uuid, mp->uuid, 16) != 0)
 			continue;
-		if (!mddev_busy(mp->devnum)) {
+		if (!mddev_busy(mp->devnm)) {
 			mp->bad = 1;
 			continue;
 		}
@@ -295,16 +286,16 @@ struct map_ent *map_by_uuid(struct map_ent **map, int uuid[4])
 	return NULL;
 }
 
-struct map_ent *map_by_devnum(struct map_ent **map, int devnum)
+struct map_ent *map_by_devnm(struct map_ent **map, char *devnm)
 {
 	struct map_ent *mp;
 	if (!*map)
 		map_read(map);
 
 	for (mp = *map ; mp ; mp = mp->next) {
-		if (mp->devnum != devnum)
+		if (strcmp(mp->devnm, devnm) != 0)
 			continue;
-		if (!mddev_busy(mp->devnum)) {
+		if (!mddev_busy(mp->devnm)) {
 			mp->bad = 1;
 			continue;
 		}
@@ -326,7 +317,7 @@ struct map_ent *map_by_name(struct map_ent **map, char *name)
 			continue;
 		if (strcmp(mp->path+8, name) != 0)
 			continue;
-		if (!mddev_busy(mp->devnum)) {
+		if (!mddev_busy(mp->devnm)) {
 			mp->bad = 1;
 			continue;
 		}
@@ -360,7 +351,6 @@ void RebuildMap(void)
 	struct mdstat_ent *mdstat = mdstat_read(0, 0);
 	struct mdstat_ent *md;
 	struct map_ent *map = NULL;
-	int mdp = get_mdp_major();
 	int require_homehost;
 	char sys_hostname[256];
 	char *homehost = conf_get_homehost(&require_homehost);
@@ -373,7 +363,7 @@ void RebuildMap(void)
 	}
 
 	for (md = mdstat ; md ; md = md->next) {
-		struct mdinfo *sra = sysfs_read(-1, md->devnum, GET_DEVS);
+		struct mdinfo *sra = sysfs_read(-1, md->devnm, GET_DEVS);
 		struct mdinfo *sd;
 
 		if (!sra)
@@ -384,6 +374,7 @@ void RebuildMap(void)
 			char dn[30];
 			int dfd;
 			int ok;
+			int devid;
 			struct supertype *st;
 			char *subarray = NULL;
 			char *path;
@@ -403,28 +394,31 @@ void RebuildMap(void)
 			close(dfd);
 			if (ok != 0)
 				continue;
-			info = st->ss->container_content(st, subarray);
+			if (subarray)
+				info = st->ss->container_content(st, subarray);
+			else {
+				info = xmalloc(sizeof(*info));
+				st->ss->getinfo_super(st, info, NULL);
+			}
 			if (!info)
 				continue;
 
-			if (md->devnum >= 0)
-				path = map_dev(MD_MAJOR, md->devnum, 0);
-			else
-				path = map_dev(mdp, (-1-md->devnum)<< 6, 0);
+			devid = devnm2devid(md->devnm);
+			path = map_dev(major(devid), minor(devid), 0);
 			if (path == NULL ||
 			    strncmp(path, "/dev/md/", 8) != 0) {
 				/* We would really like a name that provides
 				 * an MD_DEVNAME for udev.
 				 * The name needs to be unique both in /dev/md/
 				 * and in this mapfile.
-				 * It needs to match watch -I or -As would come
+				 * It needs to match what -I or -As would come
 				 * up with.
 				 * That means:
-				 *   Check if array is in mdadm.conf 
+				 *   Check if array is in mdadm.conf
 				 *        - if so use that.
 				 *   determine trustworthy from homehost etc
 				 *   find a unique name based on metadata name.
-				 *   
+				 *
 				 */
 				struct mddev_ident *match = conf_match(st, info,
 								       NULL, 0,
@@ -484,7 +478,7 @@ void RebuildMap(void)
 					path = namebuf;
 				}
 			}
-			map_add(&map, md->devnum,
+			map_add(&map, md->devnm,
 				info->text_version,
 				info->uuid, path);
 			st->ss->free_super(st);
@@ -496,7 +490,7 @@ void RebuildMap(void)
 	/* Only trigger a change if we wrote a new map file */
 	if (map_write(map))
 		for (md = mdstat ; md ; md = md->next) {
-			struct mdinfo *sra = sysfs_read(-1, md->devnum,
+			struct mdinfo *sra = sysfs_read(-1, md->devnm,
 							GET_VERSION);
 			if (sra)
 				sysfs_uevent(sra, "change");

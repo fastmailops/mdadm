@@ -84,6 +84,8 @@
 				   * dire need
 				   */
 
+#define MD_DISK_REPLACEMENT	17
+
 typedef struct mdp_device_descriptor_s {
 	__u32 number;		/* 0 Device number in the entire set	      */
 	__u32 major;		/* 1 Device major number		      */
@@ -110,7 +112,7 @@ typedef struct mdp_superblock_s {
 	/*
 	 * Constant generic information
 	 */
-	__u32 md_magic;		/*  0 MD identifier 			      */
+	__u32 md_magic;		/*  0 MD identifier			      */
 	__u32 major_version;	/*  1 major version to which the set conforms */
 	__u32 minor_version;	/*  2 minor version ...			      */
 	__u32 patch_version;	/*  3 patchlevel version ...		      */
@@ -194,4 +196,3 @@ static inline __u64 md_event(mdp_super_t *sb) {
 }
 
 #endif
-

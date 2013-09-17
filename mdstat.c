@@ -103,7 +103,7 @@ static int add_member_devname(struct dev_member **m, char *name)
 		/* not a device */
 		return 0;
 
-	new = malloc(sizeof(*new));
+	new = xmalloc(sizeof(*new));
 	new->name = strndup(name, t - name);
 	new->next = *m;
 	*m = new;
@@ -152,9 +152,8 @@ struct mdstat_ent *mdstat_read(int hold, int start)
 	for (; (line = conf_line(f)) ; free_line(line)) {
 		struct mdstat_ent *ent;
 		char *w;
-		int devnum;
+		char devnm[32];
 		int in_devs = 0;
-		char *ep;
 
 		if (strcmp(line, "Personalities")==0)
 			continue;
@@ -164,28 +163,15 @@ struct mdstat_ent *mdstat_read(int hold, int start)
 			continue;
 		insert_here = NULL;
 		/* Better be an md line.. */
-		if (strncmp(line, "md", 2)!= 0)
+		if (strncmp(line, "md", 2)!= 0 || strlen(line) >= 32
+		    || (line[2] != '_' && !isdigit(line[2])))
 			continue;
-		if (strncmp(line, "md_d", 4) == 0)
-			devnum = -1-strtoul(line+4, &ep, 10);
-		else if (strncmp(line, "md", 2) == 0)
-			devnum = strtoul(line+2, &ep, 10);
-		else
-			continue;
-		if (ep == NULL || *ep ) {
-			/* fprintf(stderr, Name ": bad /proc/mdstat line starts: %s\n", line); */
-			continue;
-		}
+		strcpy(devnm, line);
 
-		ent = malloc(sizeof(*ent));
-		if (!ent) {
-			fprintf(stderr, Name ": malloc failed reading /proc/mdstat.\n");
-			free_line(line);
-			break;
-		}
+		ent = xmalloc(sizeof(*ent));
 		ent->dev = ent->level = ent->pattern= NULL;
 		ent->next = NULL;
-		ent->percent = -1;
+		ent->percent = RESYNC_NONE;
 		ent->active = -1;
 		ent->resync = 0;
 		ent->metadata_version = NULL;
@@ -193,8 +179,8 @@ struct mdstat_ent *mdstat_read(int hold, int start)
 		ent->devcnt = 0;
 		ent->members = NULL;
 
-		ent->dev = strdup(line);
-		ent->devnum = devnum;
+		ent->dev = xstrdup(line);
+		strcpy(ent->devnm, devnm);
 
 		for (w=dl_next(line); w!= line ; w=dl_next(w)) {
 			int l = strlen(w);
@@ -207,40 +193,41 @@ struct mdstat_ent *mdstat_read(int hold, int start)
 			} else if (ent->active > 0 &&
 				 ent->level == NULL &&
 				 w[0] != '(' /*readonly*/) {
-				ent->level = strdup(w);
+				ent->level = xstrdup(w);
 				in_devs = 1;
 			} else if (in_devs && strcmp(w, "blocks")==0)
 				in_devs = 0;
 			else if (in_devs) {
+				char *ep = strchr(w, '[');
 				ent->devcnt +=
 					add_member_devname(&ent->members, w);
-				if (strncmp(w, "md", 2)==0) {
+				if (ep && strncmp(w, "md", 2)==0) {
 					/* This has an md device as a component.
 					 * If that device is already in the
 					 * list, make sure we insert before
 					 * there.
 					 */
 					struct mdstat_ent **ih;
-					int dn2 = devname2devnum(w);
 					ih = &all;
 					while (ih != insert_here && *ih &&
-					       (*ih)->devnum != dn2)
+					       ((int)strlen((*ih)->devnm) != ep-w
+						|| strncmp((*ih)->devnm, w, ep-w) != 0))
 						ih = & (*ih)->next;
 					insert_here = ih;
 				}
 			} else if (strcmp(w, "super") == 0 &&
 				   dl_next(w) != line) {
 				w = dl_next(w);
-				ent->metadata_version = strdup(w);
+				ent->metadata_version = xstrdup(w);
 			} else if (w[0] == '[' && isdigit(w[1])) {
 				ent->raid_disks = atoi(w+1);
 			} else if (!ent->pattern &&
 				 w[0] == '[' &&
 				 (w[1] == 'U' || w[1] == '_')) {
-				ent->pattern = strdup(w+1);
+				ent->pattern = xstrdup(w+1);
 				if (ent->pattern[l-2]==']')
 					ent->pattern[l-2] = '\0';
-			} else if (ent->percent == -1 &&
+			} else if (ent->percent == RESYNC_NONE &&
 				   strncmp(w, "re", 2)== 0 &&
 				   w[l-1] == '%' &&
 				   (eq=strchr(w, '=')) != NULL ) {
@@ -251,7 +238,7 @@ struct mdstat_ent *mdstat_read(int hold, int start)
 					ent->resync = 2;
 				else
 					ent->resync = 0;
-			} else if (ent->percent == -1 &&
+			} else if (ent->percent == RESYNC_NONE &&
 				   (w[0] == 'r' || w[0] == 'c')) {
 				if (strncmp(w, "resync", 4)==0)
 					ent->resync = 1;
@@ -263,10 +250,10 @@ struct mdstat_ent *mdstat_read(int hold, int start)
 					ent->resync = 3;
 
 				if (l > 8 && strcmp(w+l-8, "=DELAYED") == 0)
-					ent->percent = PROCESS_DELAYED;
+					ent->percent = RESYNC_DELAYED;
 				if (l > 8 && strcmp(w+l-8, "=PENDING") == 0)
-					ent->percent = PROCESS_PENDING;
-			} else if (ent->percent == -1 &&
+					ent->percent = RESYNC_PENDING;
+			} else if (ent->percent == RESYNC_NONE &&
 				   w[0] >= '0' &&
 				   w[0] <= '9' &&
 				   w[l-1] == '%') {
@@ -300,6 +287,13 @@ struct mdstat_ent *mdstat_read(int hold, int start)
 		}
 	} else rv = all;
 	return rv;
+}
+
+void mdstat_close(void)
+{
+	if (mdstat_fd >= 0)
+		close(mdstat_fd);
+	mdstat_fd = -1;
 }
 
 void mdstat_wait(int seconds)
@@ -350,13 +344,13 @@ void mdstat_wait_fd(int fd, const sigset_t *sigmask)
 		NULL, sigmask);
 }
 
-int mddev_busy(int devnum)
+int mddev_busy(char *devnm)
 {
 	struct mdstat_ent *mdstat = mdstat_read(0, 0);
 	struct mdstat_ent *me;
 
 	for (me = mdstat ; me ; me = me->next)
-		if (me->devnum == devnum)
+		if (strcmp(me->devnm, devnm) == 0)
 			break;
 	free_mdstat(mdstat);
 	return me != NULL;
@@ -389,35 +383,34 @@ struct mdstat_ent *mdstat_by_component(char *name)
 	return NULL;
 }
 
-struct mdstat_ent *mdstat_by_subdev(char *subdev, int container)
+struct mdstat_ent *mdstat_by_subdev(char *subdev, char *container)
 {
 	struct mdstat_ent *mdstat = mdstat_read(0, 0);
+	struct mdstat_ent *ent = NULL;
 
 	while (mdstat) {
-		struct mdstat_ent *ent;
-		char *pos;
 		/* metadata version must match:
-		 *   external:[/-]md%d/%s
-		 * where %d is 'container' and %s is 'subdev'
+		 *   external:[/-]%s/%s
+		 * where first %s is 'container' and second %s is 'subdev'
 		 */
-		if (mdstat->metadata_version &&
-		    strncmp(mdstat->metadata_version, "external:", 9) == 0 &&
-		    strchr("/-", mdstat->metadata_version[9]) != NULL &&
-		    strncmp(mdstat->metadata_version+10, "md", 2) == 0 &&
-		    strtoul(mdstat->metadata_version+12, &pos, 10)
-		    == (unsigned)container &&
-		    pos > mdstat->metadata_version+12 &&
-		    *pos == '/' &&
-		    strcmp(pos+1, subdev) == 0
-			) {
-			free_mdstat(mdstat->next);
-			mdstat->next = NULL;
-			return mdstat;
-		}
+		if (ent)
+			free_mdstat(ent);
 		ent = mdstat;
 		mdstat = mdstat->next;
 		ent->next = NULL;
-		free_mdstat(ent);
+
+		if (ent->metadata_version == NULL ||
+		    strncmp(ent->metadata_version, "external:", 9) != 0)
+			continue;
+
+		if (!metadata_container_matches(ent->metadata_version+9,
+					       container) ||
+		    !metadata_subdev_matches(ent->metadata_version+9,
+					     subdev))
+			continue;
+
+		free_mdstat(mdstat);
+		return ent;
 	}
 	return NULL;
 }

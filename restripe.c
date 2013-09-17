@@ -83,7 +83,6 @@ int geo_map(int block, unsigned long long stripe, int raid_disks,
 	case 500 + ALGORITHM_PARITY_0:
 		return block + 1;
 
-
 	case 600 + ALGORITHM_PARITY_N_6:
 		if (block == -2)
 			return raid_disks - 1;
@@ -131,7 +130,6 @@ int geo_map(int block, unsigned long long stripe, int raid_disks,
 			return raid_disks - 1;
 		return block + 1;
 
-
 	case 600 + ALGORITHM_PARITY_0:
 		if (block == -1)
 			return 0;
@@ -173,7 +171,6 @@ int geo_map(int block, unsigned long long stripe, int raid_disks,
 		if (block == -2) return (pd+1) % raid_disks;
 		return (pd + 2 + block) % raid_disks;
 
-
 	case 600 + ALGORITHM_ROTATING_N_RESTART:
 		/* Same a left_asymmetric, by first stripe is
 		 * D D D P Q  rather than
@@ -210,8 +207,7 @@ static int is_ddf(int layout)
 	}
 }
 
-
-static void xor_blocks(char *target, char **sources, int disks, int size)
+void xor_blocks(char *target, char **sources, int disks, int size)
 {
 	int i, j;
 	/* Amazingly inefficient... */
@@ -242,7 +238,6 @@ void qsyndrome(uint8_t *p, uint8_t *q, uint8_t **sources, int disks, int size)
 		q[d] = wq0;
 	}
 }
-
 
 /*
  * The following was taken from linux/drivers/md/mktables.c, and modified
@@ -335,6 +330,17 @@ void make_tables(void)
 
 uint8_t *zero;
 int zero_size;
+
+void ensure_zero_has_size(int chunk_size)
+{
+	if (zero == NULL || chunk_size > zero_size) {
+		if (zero)
+			free(zero);
+		zero = xcalloc(1, chunk_size);
+		zero_size = chunk_size;
+	}
+}
+
 /* Following was taken from linux/drivers/md/raid6recov.c */
 
 /* Recover two failed data blocks. */
@@ -425,10 +431,8 @@ int raid6_check_disks(int data_disks, int start, int chunk_size,
 		if((Px != 0) && (Qx == 0))
 			curr_broken_disk = diskP;
 
-
 		if((Px == 0) && (Qx != 0))
 			curr_broken_disk = diskQ;
-
 
 		if((Px != 0) && (Qx != 0)) {
 			data_id = (raid6_gflog[Qx] - raid6_gflog[Px]);
@@ -510,15 +514,7 @@ int save_stripes(int *source, unsigned long long *offsets,
 
 	if (!tables_ready)
 		make_tables();
-
-	if (zero == NULL || chunk_size > zero_size) {
-		if (zero)
-			free(zero);
-		zero = malloc(chunk_size);
-		if (zero)
-			memset(zero, 0, chunk_size);
-		zero_size = chunk_size;
-	}
+	ensure_zero_has_size(chunk_size);
 
 	len = data_disks * chunk_size;
 	length_test = length / len;
@@ -684,8 +680,8 @@ int restore_stripes(int *dest, unsigned long long *offsets,
 		    char *src_buf)
 {
 	char *stripe_buf;
-	char **stripes = malloc(raid_disks * sizeof(char*));
-	char **blocks = malloc(raid_disks * sizeof(char*));
+	char **stripes = xmalloc(raid_disks * sizeof(char*));
+	char **blocks = xmalloc(raid_disks * sizeof(char*));
 	int i;
 	int rv;
 
@@ -697,9 +693,7 @@ int restore_stripes(int *dest, unsigned long long *offsets,
 	if (zero == NULL || chunk_size > zero_size) {
 		if (zero)
 			free(zero);
-		zero = malloc(chunk_size);
-		if (zero)
-			memset(zero, 0, chunk_size);
+		zero = xcalloc(1, chunk_size);
 		zero_size = chunk_size;
 	}
 
@@ -779,7 +773,7 @@ int restore_stripes(int *dest, unsigned long long *offsets,
 				syndrome_disks = data_disks;
 			}
 			qsyndrome((uint8_t*)stripes[disk],
-				  (uint8_t*)stripes[qdisk], 
+				  (uint8_t*)stripes[qdisk],
 				  (uint8_t**)blocks,
 				  syndrome_disks, chunk_size);
 			break;
@@ -816,11 +810,11 @@ int test_stripes(int *source, unsigned long long *offsets,
 		 unsigned long long start, unsigned long long length)
 {
 	/* ready the data and p (and q) blocks, and check we got them right */
-	char *stripe_buf = malloc(raid_disks * chunk_size);
-	char **stripes = malloc(raid_disks * sizeof(char*));
-	char **blocks = malloc(raid_disks * sizeof(char*));
-	char *p = malloc(chunk_size);
-	char *q = malloc(chunk_size);
+	char *stripe_buf = xmalloc(raid_disks * chunk_size);
+	char **stripes = xmalloc(raid_disks * sizeof(char*));
+	char **blocks = xmalloc(raid_disks * sizeof(char*));
+	char *p = xmalloc(chunk_size);
+	char *q = xmalloc(chunk_size);
 
 	int i;
 	int diskP, diskQ;
@@ -935,9 +929,8 @@ main(int argc, char *argv[])
 			raid_disks, argc-9);
 		exit(2);
 	}
-	fds = malloc(raid_disks * sizeof(*fds));
-	offsets = malloc(raid_disks * sizeof(*offsets));
-	memset(offsets, 0, raid_disks * sizeof(*offsets));
+	fds = xmalloc(raid_disks * sizeof(*fds));
+	offsets = xcalloc(raid_disks, sizeof(*offsets));
 
 	storefd = open(file, O_RDWR);
 	if (storefd < 0) {
@@ -953,7 +946,7 @@ main(int argc, char *argv[])
 			*p++ = '\0';
 			offsets[i] = atoll(p) * 512;
 		}
-			
+
 		fds[i] = open(argv[9+i], O_RDWR);
 		if (fds[i] < 0) {
 			perror(argv[9+i]);
@@ -962,7 +955,7 @@ main(int argc, char *argv[])
 		}
 	}
 
-	buf = malloc(raid_disks * chunk_size);
+	buf = xmalloc(raid_disks * chunk_size);
 
 	if (save == 1) {
 		int rv = save_stripes(fds, offsets,

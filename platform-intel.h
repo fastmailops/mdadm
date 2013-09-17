@@ -133,7 +133,6 @@ static inline int imsm_orom_has_chunk(const struct imsm_orom *orom, int chunk)
 	return !!(orom->sss & (1 << (fs - 1)));
 }
 
-
 /**
  * fls - find last (most-significant) bit set
  * @x: the word to search
@@ -202,11 +201,9 @@ static inline char *guid_str(char *buf, struct efi_guid guid)
 char *diskfd_to_devpath(int fd);
 struct sys_dev *find_driver_devices(const char *bus, const char *driver);
 struct sys_dev *find_intel_devices(void);
-void free_sys_dev(struct sys_dev **list);
 const struct imsm_orom *find_imsm_capability(enum sys_dev_type hba_id);
 const struct imsm_orom *find_imsm_orom(void);
 int disk_attached_to_hba(int fd, const char *hba_path);
 char *devt_to_devpath(dev_t dev);
 int path_attached_to_hba(const char *disk_path, const char *hba_path);
 const char *get_sys_dev_type(enum sys_dev_type);
-

@@ -23,6 +23,7 @@
  */
 
 #include	"mdadm.h"
+#include	"dlink.h"
 #include	<ctype.h>
 
 /* This fill contains various 'library' style function.  They
@@ -57,75 +58,86 @@ static int mdp_major = -1;
 	return mdp_major;
 }
 
-
-void fmt_devname(char *name, int num)
-{
-	if (num >= 0)
-		sprintf(name, "md%d", num);
-	else
-		sprintf(name, "md_d%d", -1-num);
-}
-
-char *devnum2devname(int num)
-{
-	char name[100];
-	fmt_devname(name,num);
-	return strdup(name);
-}
-
-int devname2devnum(char *name)
-{
-	char *ep;
-	int num;
-	if (strncmp(name, "md_d", 4)==0)
-		num = -1-strtoul(name+4, &ep, 10);
-	else
-		num = strtoul(name+2, &ep, 10);
-	return num;
-}
-
-int stat2devnum(struct stat *st)
+char *devid2kname(int devid)
 {
 	char path[30];
 	char link[200];
+	static char devnm[32];
 	char *cp;
 	int n;
 
-	if ((S_IFMT & st->st_mode) == S_IFBLK) {
-		if (major(st->st_rdev) == MD_MAJOR)
-			return minor(st->st_rdev);
-		else if (major(st->st_rdev) == (unsigned)get_mdp_major())
-			return -1- (minor(st->st_rdev)>>MdpMinorShift);
-
-		/* must be an extended-minor partition. Look at the
-		 * /sys/dev/block/%d:%d link which must look like
-		 * ../../block/mdXXX/mdXXXpYY
-		 */
-		sprintf(path, "/sys/dev/block/%d:%d", major(st->st_rdev),
-			minor(st->st_rdev));
-		n = readlink(path, link, sizeof(link)-1);
-		if (n <= 0)
-			return NoMdDev;
+	/* Look at the
+	 * /sys/dev/block/%d:%d link which must look like
+	 * and take the last component.
+	 */
+	sprintf(path, "/sys/dev/block/%d:%d", major(devid),
+		minor(devid));
+	n = readlink(path, link, sizeof(link)-1);
+	if (n > 0) {
 		link[n] = 0;
 		cp = strrchr(link, '/');
-		if (cp) *cp = 0;
-		cp = strrchr(link, '/');
-		if (cp && strncmp(cp, "/md", 3) == 0)
-			return devname2devnum(cp+1);
+		if (cp) {
+			strcpy(devnm, cp+1);
+			return devnm;
+		}
 	}
-	return NoMdDev;
-
+	return NULL;
 }
 
-int fd2devnum(int fd)
+char *devid2devnm(int devid)
+{
+	char path[30];
+	char link[200];
+	static char devnm[32];
+	char *cp, *ep;
+	int n;
+
+	/* Might be an extended-minor partition or a
+	 * named md device. Look at the
+	 * /sys/dev/block/%d:%d link which must look like
+	 *    ../../block/mdXXX/mdXXXpYY
+	 * or
+	 *    ...../block/md_FOO
+	 */
+	sprintf(path, "/sys/dev/block/%d:%d", major(devid),
+		minor(devid));
+	n = readlink(path, link, sizeof(link)-1);
+	if (n > 0) {
+		link[n] = 0;
+		cp = strstr(link, "/block/");
+		if (cp) {
+			cp += 7;
+			ep = strchr(cp, '/');
+			if (ep)
+				*ep = 0;
+			strcpy(devnm, cp);
+			return devnm;
+		}
+	}
+	if (major(devid) == MD_MAJOR)
+		sprintf(devnm,"md%d", minor(devid));
+	else if (major(devid) == (unsigned)get_mdp_major())
+		sprintf(devnm,"md_d%d",
+			(minor(devid)>>MdpMinorShift));
+	else
+		return NULL;
+	return devnm;
+}
+
+char *stat2devnm(struct stat *st)
+{
+	if ((S_IFMT & st->st_mode) != S_IFBLK)
+		return NULL;
+	return devid2devnm(st->st_rdev);
+}
+
+char *fd2devnm(int fd)
 {
 	struct stat stb;
 	if (fstat(fd, &stb) == 0)
-		return stat2devnum(&stb);
-	return NoMdDev;
+		return stat2devnm(&stb);
+	return NULL;
 }
-
-
 
 /*
  * convert a major/minor pair for a block device into a name in /dev, if possible.
@@ -133,9 +145,9 @@ int fd2devnum(int fd)
  * Put them in a simple linked listfor now.
  */
 struct devmap {
-    int major, minor;
-    char *name;
-    struct devmap *next;
+	int major, minor;
+	char *name;
+	struct devmap *next;
 } *devlist = NULL;
 int devlist_ready = 0;
 
@@ -150,8 +162,8 @@ int add_dev(const char *name, const struct stat *stb, int flag, struct FTW *s)
 	}
 
 	if ((stb->st_mode&S_IFMT)== S_IFBLK) {
-		char *n = strdup(name);
-		struct devmap *dm = malloc(sizeof(*dm));
+		char *n = xstrdup(name);
+		struct devmap *dm = xmalloc(sizeof(*dm));
 		if (strncmp(n, "/dev/./", 7)==0)
 			strcpy(n+4, name+6);
 		if (dm) {
@@ -246,8 +258,6 @@ char *map_dev_preferred(int major, int minor, int create,
 	return preferred ? preferred : regular;
 }
 
-
-
 /* conf_word gets one word from the conf file.
  * if "allow_key", then accept words at the start of a line,
  * otherwise stop when such a word is found.
@@ -262,9 +272,7 @@ char *conf_word(FILE *file, int allow_key)
 	int c;
 	int quote;
 	int wordfound = 0;
-	char *word = malloc(wsize);
-
-	if (!word) abort();
+	char *word = xmalloc(wsize);
 
 	while (wordfound==0) {
 		/* at the end of a word.. */
@@ -294,8 +302,7 @@ char *conf_word(FILE *file, int allow_key)
 				else {
 					if (len == wsize-1) {
 						wsize += 100;
-						word = realloc(word, wsize);
-						if (!word) abort();
+						word = xrealloc(word, wsize);
 					}
 					word[len++] = c;
 				}
@@ -324,4 +331,145 @@ char *conf_word(FILE *file, int allow_key)
 		word = NULL;
 	}
 	return word;
+}
+
+void print_quoted(char *str)
+{
+	/* Printf the string with surrounding quotes
+	 * iff needed.
+	 * If no space, tab, or quote - leave unchanged.
+	 * Else print surrounded by " or ', swapping quotes
+	 * when we find one that will cause confusion.
+	 */
+
+	char first_quote = 0, q;
+	char *c;
+
+	for (c = str; *c; c++) {
+		switch(*c) {
+		case '\'':
+		case '"':
+			first_quote = *c;
+			break;
+		case ' ':
+		case '\t':
+			first_quote = *c;
+			continue;
+		default:
+			continue;
+		}
+		break;
+	}
+	if (!first_quote) {
+		printf("%s", str);
+		return;
+	}
+
+	if (first_quote == '"')
+		q = '\'';
+	else
+		q = '"';
+	putchar(q);
+	for (c = str; *c; c++) {
+		if (*c == q) {
+			putchar(q);
+			q ^= '"' ^ '\'';
+			putchar(q);
+		}
+		putchar(*c);
+	}
+	putchar(q);
+}
+
+void print_escape(char *str)
+{
+	/* print str, but change space and tab to '_'
+	 * as is suitable for device names
+	 */
+	for (; *str ; str++) {
+		switch (*str) {
+		case ' ':
+		case '\t':
+			putchar('_');
+			break;
+		case '/':
+			putchar('-');
+			break;
+		default:
+			putchar(*str);
+		}
+	}
+}
+
+int check_env(char *name)
+{
+	char *val = getenv(name);
+
+	if (val && atoi(val) == 1)
+		return 1;
+
+	return 0;
+}
+
+int use_udev(void)
+{
+	static int use = -1;
+	struct stat stb;
+
+	if (use < 0) {
+		use = ((stat("/dev/.udev", &stb) == 0
+			|| stat("/run/udev", &stb) == 0)
+		       && check_env("MDADM_NO_UDEV") == 0);
+	}
+	return use;
+}
+
+unsigned long GCD(unsigned long a, unsigned long b)
+{
+	while (a != b) {
+		if (a < b)
+			b -= a;
+		if (b < a)
+			a -= b;
+	}
+	return a;
+}
+
+/*
+ * conf_line reads one logical line from the conffile or mdstat.
+ * It skips comments and continues until it finds a line that starts
+ * with a non blank/comment.  This character is pushed back for the next call
+ * A doubly linked list of words is returned.
+ * the first word will be a keyword.  Other words will have had quotes removed.
+ */
+
+char *conf_line(FILE *file)
+{
+	char *w;
+	char *list;
+
+	w = conf_word(file, 1);
+	if (w == NULL) return NULL;
+
+	list = dl_strdup(w);
+	free(w);
+	dl_init(list);
+
+	while ((w = conf_word(file,0))){
+		char *w2 = dl_strdup(w);
+		free(w);
+		dl_add(list, w2);
+	}
+/*    printf("got a line\n");*/
+	return list;
+}
+
+void free_line(char *line)
+{
+	char *w;
+	for (w=dl_next(line); w != line; w=dl_next(line)) {
+		dl_del(w);
+		dl_free(w);
+	}
+	dl_free(line);
 }

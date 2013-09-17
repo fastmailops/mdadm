@@ -38,8 +38,17 @@ static int write_attr(char *attr, int fd)
 
 static void add_fd(fd_set *fds, int *maxfd, int fd)
 {
+	struct stat st;
 	if (fd < 0)
 		return;
+	if (fstat(fd, &st) == -1) {
+		dprintf("%s: Invalid fd %d\n", __func__, fd);
+		return;
+	}
+	if (st.st_nlink == 0) {
+		dprintf("%s: fd %d was deleted\n", __func__, fd);
+		return;
+	}
 	if (fd > *maxfd)
 		*maxfd = fd;
 	FD_SET(fd, fds);
@@ -66,18 +75,21 @@ static int read_attr(char *buf, int len, int fd)
 	return n;
 }
 
-static unsigned long long read_resync_start(int fd)
+static void read_resync_start(int fd, unsigned long long *v)
 {
 	char buf[30];
 	int n;
 
 	n = read_attr(buf, 30, fd);
-	if (n <= 0)
-		return 0;
+	if (n <= 0) {
+		dprintf("%s: Failed to read resync_start (%d)\n",
+			__func__, fd);
+		return;
+	}
 	if (strncmp(buf, "none", 4) == 0)
-		return MaxSector;
+		*v = MaxSector;
 	else
-		return strtoull(buf, NULL, 10);
+		*v = strtoull(buf, NULL, 10);
 }
 
 static unsigned long long read_sync_completed(int fd)
@@ -222,22 +234,41 @@ static int read_and_act(struct active_array *a)
 	struct mdinfo *mdi;
 	int ret = 0;
 	int count = 0;
+	struct timeval tv;
 
 	a->next_state = bad_word;
 	a->next_action = bad_action;
 
 	a->curr_state = read_state(a->info.state_fd);
 	a->curr_action = read_action(a->action_fd);
-	a->info.resync_start = read_resync_start(a->resync_start_fd);
+	if (a->curr_state != clear)
+		/*
+		 * In "clear" state, resync_start may wrongly be set to "0"
+		 * when the kernel called md_clean but didn't remove the
+		 * sysfs attributes yet
+		 */
+		read_resync_start(a->resync_start_fd, &a->info.resync_start);
 	sync_completed = read_sync_completed(a->sync_completed_fd);
 	for (mdi = a->info.devs; mdi ; mdi = mdi->next) {
 		mdi->next_state = 0;
 		mdi->curr_state = 0;
 		if (mdi->state_fd >= 0) {
-			mdi->recovery_start = read_resync_start(mdi->recovery_fd);
+			read_resync_start(mdi->recovery_fd,
+					  &mdi->recovery_start);
 			mdi->curr_state = read_dev_state(mdi->state_fd);
 		}
 	}
+
+	gettimeofday(&tv, NULL);
+	dprintf("%s(%d): %ld.%06ld state:%s prev:%s action:%s prev: %s start:%llu\n",
+		__func__, a->info.container_member,
+		tv.tv_sec, tv.tv_usec,
+		array_states[a->curr_state],
+		array_states[a->prev_state],
+		sync_actions[a->curr_action],
+		sync_actions[a->prev_action],
+		a->info.resync_start
+		);
 
 	if (a->curr_state > inactive &&
 	    a->prev_state == inactive) {
@@ -246,7 +277,7 @@ static int read_and_act(struct active_array *a)
 		 */
 		a->container->ss->set_array_state(a, 0);
 	}
-	if (a->curr_state <= inactive &&
+	if ((a->curr_state == bad_word || a->curr_state <= inactive) &&
 	    a->prev_state > inactive) {
 		/* array has been stopped */
 		a->container->ss->set_array_state(a, 1);
@@ -269,8 +300,7 @@ static int read_and_act(struct active_array *a)
 		a->container->ss->set_array_state(a, 1);
 	}
 	if (a->curr_state == active ||
-	    a->curr_state == suspended ||
-	    a->curr_state == bad_word)
+	    a->curr_state == suspended)
 		ret |= ARRAY_DIRTY;
 	if (a->curr_state == readonly) {
 		/* Well, I'm ready to handle things.  If readonly
@@ -398,7 +428,8 @@ static int read_and_act(struct active_array *a)
 	if (sync_completed > a->last_checkpoint)
 		a->last_checkpoint = sync_completed;
 
-	a->container->ss->sync_metadata(a->container);
+	if (deactivate || a->curr_state >= clean)
+		a->container->ss->sync_metadata(a->container);
 	dprintf("%s(%d): state:%s action:%s next(", __func__, a->info.container_member,
 		array_states[a->curr_state], sync_actions[a->curr_action]);
 
@@ -573,9 +604,9 @@ static int wait_and_act(struct supertype *container, int nowait)
 		 */
 		int fd;
 		if (sigterm)
-			fd = open_dev_excl(container->devnum);
+			fd = open_dev_excl(container->devnm);
 		else
-			fd = open_dev_flags(container->devnum, O_RDONLY|O_EXCL);
+			fd = open_dev_flags(container->devnm, O_RDONLY|O_EXCL);
 		if (fd >= 0 || errno != EBUSY) {
 			/* OK, we are safe to leave */
 			if (sigterm && !dirty_arrays)
@@ -586,7 +617,7 @@ static int wait_and_act(struct supertype *container, int nowait)
 				/* On SIGTERM, someone (the take-over mdmon) will
 				 * clean up
 				 */
-				remove_pidfile(container->devname);
+				remove_pidfile(container->devnm);
 			exit_now = 1;
 			signal_manager();
 			close(fd);
@@ -609,10 +640,17 @@ static int wait_and_act(struct supertype *container, int nowait)
 		monitor_loop_cnt |= 1;
 		rv = pselect(maxfd+1, NULL, NULL, &rfds, &ts, &set);
 		monitor_loop_cnt += 1;
-		if (rv == -1 && errno == EINTR)
-			rv = 0;
+		if (rv == -1) {
+			if (errno == EINTR) {
+				rv = 0;
+				dprintf("monitor: caught signal\n");
+			} else
+				dprintf("monitor: error %d in pselect\n",
+					errno);
+		}
 		#ifdef DEBUG
-		dprint_wake_reasons(&rfds);
+		else
+			dprint_wake_reasons(&rfds);
 		#endif
 		container->retry_soon = 0;
 	}

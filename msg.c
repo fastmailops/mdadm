@@ -1,7 +1,7 @@
 /*
  * Copyright (C) 2008 Intel Corporation
  *
- * 	mdmon socket / message handling
+ *	mdmon socket / message handling
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms and conditions of the GNU General Public License,
@@ -78,7 +78,6 @@ static int recv_buf(int fd, void* buf, int len, int tmo)
 	return 0;
 }
 
-
 int send_message(int fd, struct metadata_update *msg, int tmo)
 {
 	__s32 len = msg->len;
@@ -106,9 +105,7 @@ int receive_message(int fd, struct metadata_update *msg, int tmo)
 	if (rv < 0 || len > MSG_MAX_LEN)
 		return -1;
 	if (len > 0) {
-		msg->buf = malloc(len);
-		if (msg->buf == NULL)
-			return -1;
+		msg->buf = xmalloc(len);
 		rv = recv_buf(fd, msg->buf, len, tmo);
 		if (rv < 0) {
 			free(msg->buf);
@@ -218,20 +215,6 @@ int ping_monitor(char *devname)
 	return err;
 }
 
-/* ping monitor using device number */
-int ping_monitor_by_id(int devnum)
-{
-	int err = -1;
-	char *container = devnum2devname(devnum);
-
-	if (container) {
-		err = ping_monitor(container);
-		free(container);
-	}
-
-	return err;
-}
-
 static char *ping_monitor_version(char *devname)
 {
 	int sfd = connect_monitor(devname);
@@ -293,9 +276,8 @@ int block_subarray(struct mdinfo *sra)
 int check_mdmon_version(char *container)
 {
 	char *version = NULL;
-	int devnum = devname2devnum(container);
 
-	if (!mdmon_running(devnum)) {
+	if (!mdmon_running(container)) {
 		/* if mdmon is not active we assume that any instance that is
 		 * later started will match the current mdadm version, if this
 		 * assumption is violated we may inadvertantly rebuild an array
@@ -310,9 +292,8 @@ int check_mdmon_version(char *container)
 		ver = version ? mdadm_version(version) : -1;
 		free(version);
 		if (ver < 3002000) {
-			fprintf(stderr, Name
-				": mdmon instance for %s cannot be disabled\n",
-				container);
+			pr_err("mdmon instance for %s cannot be disabled\n",
+			       container);
 			return -1;
 		}
 	}
@@ -351,8 +332,7 @@ int block_monitor(char *container, const int freeze)
 
 	ent = mdstat_read(0, 0);
 	if (!ent) {
-		fprintf(stderr, Name
-			": failed to read /proc/mdstat while disabling mdmon\n");
+		pr_err("failed to read /proc/mdstat while disabling mdmon\n");
 		return -1;
 	}
 
@@ -361,11 +341,10 @@ int block_monitor(char *container, const int freeze)
 		if (!is_container_member(e, container))
 			continue;
 		sysfs_free(sra);
-		sra = sysfs_read(-1, e->devnum, GET_VERSION);
+		sra = sysfs_read(-1, e->devnm, GET_VERSION);
 		if (!sra) {
-			fprintf(stderr, Name
-				": failed to read sysfs for subarray%s\n",
-				to_subarray(e, container));
+			pr_err("failed to read sysfs for subarray%s\n",
+			       to_subarray(e, container));
 			break;
 		}
 		/* can't reshape an array that we can't monitor */
@@ -398,7 +377,7 @@ int block_monitor(char *container, const int freeze)
 		 * or part-spares
 		 */
 		sysfs_free(sra);
-		sra = sysfs_read(-1, e->devnum, GET_DEVS | GET_STATE);
+		sra = sysfs_read(-1, e->devnm, GET_DEVS | GET_STATE);
 		if (sra && sra->array.spare_disks > 0) {
 			unblock_subarray(sra, freeze);
 			break;
@@ -406,7 +385,7 @@ int block_monitor(char *container, const int freeze)
 	}
 
 	if (e) {
-		fprintf(stderr, Name ": failed to freeze subarray%s\n",
+		pr_err("failed to freeze subarray%s\n",
 			to_subarray(e, container));
 
 		/* thaw the partially frozen container */
@@ -414,9 +393,9 @@ int block_monitor(char *container, const int freeze)
 			if (!is_container_member(e2, container))
 				continue;
 			sysfs_free(sra);
-			sra = sysfs_read(-1, e2->devnum, GET_VERSION);
+			sra = sysfs_read(-1, e2->devnm, GET_VERSION);
 			if (unblock_subarray(sra, freeze))
-				fprintf(stderr, Name ": Failed to unfreeze %s\n", e2->dev);
+				pr_err("Failed to unfreeze %s\n", e2->dev);
 		}
 
 		ping_monitor(container); /* cleared frozen */
@@ -437,8 +416,7 @@ void unblock_monitor(char *container, const int unfreeze)
 
 	ent = mdstat_read(0, 0);
 	if (!ent) {
-		fprintf(stderr, Name
-			": failed to read /proc/mdstat while unblocking container\n");
+		pr_err("failed to read /proc/mdstat while unblocking container\n");
 		return;
 	}
 
@@ -447,13 +425,13 @@ void unblock_monitor(char *container, const int unfreeze)
 		if (!is_container_member(e, container))
 			continue;
 		sysfs_free(sra);
-		sra = sysfs_read(-1, e->devnum, GET_VERSION|GET_LEVEL);
+		sra = sysfs_read(-1, e->devnm, GET_VERSION|GET_LEVEL);
 		if (!sra)
 			continue;
 		if (sra->array.level > 0)
 			to_ping++;
 		if (unblock_subarray(sra, unfreeze))
-			fprintf(stderr, Name ": Failed to unfreeze %s\n", e->dev);
+			pr_err("Failed to unfreeze %s\n", e->dev);
 	}
 	if (to_ping)
 		ping_monitor(container);
@@ -461,8 +439,6 @@ void unblock_monitor(char *container, const int unfreeze)
 	sysfs_free(sra);
 	free_mdstat(ent);
 }
-
-
 
 /* give the manager a chance to view the updated container state.  This
  * would naturally happen due to the manager noticing a change in

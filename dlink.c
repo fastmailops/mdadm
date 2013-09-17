@@ -8,8 +8,8 @@
 #ifdef __dietlibc__
 char *strncpy(char *dest, const char *src, size_t n) __THROW;
 #endif
+void *xcalloc(size_t num, size_t size);
 #include	"dlink.h"
-
 
 void *dl_head()
 {
@@ -63,14 +63,9 @@ char *dl_strndup(char *s, int l)
     if (s == NULL)
 	return NULL;
     n = dl_newv(char, l+1);
-    if (n == NULL)
-	return NULL;
-    else
-    {
-	strncpy(n, s, l);
-	n[l] = 0;
-	return n;
-    }
+    strncpy(n, s, l);
+    n[l] = 0;
+    return n;
 }
 
 char *dl_strdup(char *s)

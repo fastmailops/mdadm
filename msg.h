@@ -1,7 +1,7 @@
 /*
  * Copyright (C) 2008 Intel Corporation
  *
- * 	mdmon socket / message handling
+ *	mdmon socket / message handling
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms and conditions of the GNU General Public License,
@@ -17,7 +17,6 @@
  * 51 Franklin St - Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
-
 struct mdinfo;
 struct metadata_update;
 
@@ -27,7 +26,6 @@ extern int ack(int fd, int tmo);
 extern int wait_reply(int fd, int tmo);
 extern int connect_monitor(char *devname);
 extern int ping_monitor(char *devname);
-extern int ping_monitor_by_id(int devnum);
 extern int block_subarray(struct mdinfo *sra);
 extern int unblock_subarray(struct mdinfo *sra, const int unfreeze);
 extern int block_monitor(char *container, const int freeze);

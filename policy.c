@@ -43,7 +43,7 @@
 static void pol_new(struct dev_policy **pol, char *name, const char *val,
 		    const char *metadata)
 {
-	struct dev_policy *n = malloc(sizeof(*n));
+	struct dev_policy *n = xmalloc(sizeof(*n));
 	const char *real_metadata = NULL;
 	int i;
 
@@ -67,7 +67,7 @@ static void pol_new(struct dev_policy **pol, char *name, const char *val,
 		if (!real_metadata) {
 			static const char *prev = NULL;
 			if (prev != metadata) {
-				fprintf(stderr, Name ": metadata=%s unrecognised - ignoring rule\n",
+				pr_err("metadata=%s unrecognised - ignoring rule\n",
 					metadata);
 				prev = metadata;
 			}
@@ -217,7 +217,7 @@ static char *disk_path(struct mdinfo *disk)
 		if (stb.st_rdev != makedev(disk->disk.major, disk->disk.minor))
 			continue;
 		closedir(by_path);
-		return strdup(ent->d_name);
+		return xstrdup(ent->d_name);
 	}
 	closedir(by_path);
 	/* A NULL path isn't really acceptable - use the devname.. */
@@ -228,9 +228,9 @@ static char *disk_path(struct mdinfo *disk)
 		nm[rv] = 0;
 		dname = strrchr(nm, '/');
 		if (dname)
-			return strdup(dname + 1);
+			return xstrdup(dname + 1);
 	}
-	return strdup("unknown");
+	return xstrdup("unknown");
 }
 
 char type_part[] = "part";
@@ -401,7 +401,6 @@ void pol_add(struct dev_policy **pol,
 	pol_dedup(*pol);
 }
 
-
 /*
  * disk_policy() gathers policy information for the
  * disk described in the given mdinfo (disk.{major,minor}).
@@ -421,7 +420,7 @@ struct dev_policy *disk_policy(struct mdinfo *disk)
 	return pol;
 }
 
-struct dev_policy *devnum_policy(int dev)
+struct dev_policy *devid_policy(int dev)
 {
 	struct mdinfo disk;
 	disk.disk.major = major(dev);
@@ -451,10 +450,10 @@ static int try_rule(char *w, char *name, struct rule **rp)
 	if (strncmp(w, name, len) != 0 ||
 	    w[len] != '=')
 		return 0;
-	r = malloc(sizeof(*r));
+	r = xmalloc(sizeof(*r));
 	r->next = *rp;
 	r->name = name;
-	r->value = strdup(w+len+1);
+	r->value = xstrdup(w+len+1);
 	r->dups = NULL;
 	*rp = r;
 	return 1;
@@ -468,7 +467,7 @@ void policyline(char *line, char *type)
 	if (config_rules_end == NULL)
 		config_rules_end = &config_rules;
 
-	pr = malloc(sizeof(*pr));
+	pr = xmalloc(sizeof(*pr));
 	pr->type = type;
 	pr->rule = NULL;
 	for (w = dl_next(line); w != line ; w = dl_next(w)) {
@@ -479,7 +478,7 @@ void policyline(char *line, char *type)
 			 ! try_rule(w, pol_act, &pr->rule) &&
 			 ! try_rule(w, pol_domain, &pr->rule) &&
 			 ! try_rule(w, pol_auto, &pr->rule))
-			fprintf(stderr, Name ": policy rule %s unrecognised and ignored\n",
+			pr_err("policy rule %s unrecognised and ignored\n",
 				w);
 	}
 	pr->next = config_rules;
@@ -492,7 +491,7 @@ void policy_add(char *type, ...)
 	struct pol_rule *pr;
 	char *name, *val;
 
-	pr = malloc(sizeof(*pr));
+	pr = xmalloc(sizeof(*pr));
 	pr->type = type;
 	pr->rule = NULL;
 
@@ -501,10 +500,10 @@ void policy_add(char *type, ...)
 		struct rule *r;
 
 		val = va_arg(ap, char*);
-		r = malloc(sizeof(*r));
+		r = xmalloc(sizeof(*r));
 		r->next = pr->rule;
 		r->name = name;
-		r->value = strdup(val);
+		r->value = xstrdup(val);
 		r->dups = NULL;
 		pr->rule = r;
 	}
@@ -592,7 +591,6 @@ int disk_action_allows(struct mdinfo *disk, const char *metadata, enum policy_ac
 	return rv;
 }
 
-
 /* Domain policy:
  * Any device can have a list of domains asserted by different policy
  * statements.
@@ -618,7 +616,7 @@ static struct domainlist **domain_merge_one(struct domainlist **domp,
 		dom = *domp;
 	}
 	if (dom == NULL || strcmp(dom->dom, domain) != 0) {
-		dom = malloc(sizeof(*dom));
+		dom = xmalloc(sizeof(*dom));
 		dom->next = *domp;
 		dom->dom = domain;
 		*domp = dom;
@@ -677,9 +675,9 @@ int domain_test(struct domainlist *dom, struct dev_policy *pol,
 	return found_any;
 }
 
-void domainlist_add_dev(struct domainlist **dom, int devnum, const char *metadata)
+void domainlist_add_dev(struct domainlist **dom, int devid, const char *metadata)
 {
-	struct dev_policy *pol = devnum_policy(devnum);
+	struct dev_policy *pol = devid_policy(devid);
 	domain_merge(dom, pol, metadata);
 	dev_policy_free(pol);
 }
@@ -702,7 +700,6 @@ void domain_add(struct domainlist **domp, char *domain)
 {
 	domain_merge_one(domp, domain);
 }
-
 
 void domain_free(struct domainlist *dl)
 {
@@ -731,7 +728,7 @@ void policy_save_path(char *id_path, struct map_ent *array)
 	FILE *f = NULL;
 
 	if (mkdir(FAILED_SLOTS_DIR, S_IRWXU) < 0 && errno != EEXIST) {
-		fprintf(stderr, Name ": can't create file to save path "
+		pr_err("can't create file to save path "
 			"to old disk: %s\n", strerror(errno));
 		return;
 	}
@@ -739,7 +736,7 @@ void policy_save_path(char *id_path, struct map_ent *array)
 	snprintf(path, PATH_MAX, FAILED_SLOTS_DIR "/%s", id_path);
 	f = fopen(path, "w");
 	if (!f) {
-		fprintf(stderr, Name ": can't create file to"
+		pr_err("can't create file to"
 			" save path to old disk: %s\n",
 			strerror(errno));
 		return;
@@ -749,8 +746,8 @@ void policy_save_path(char *id_path, struct map_ent *array)
 		    array->metadata,
 		    array->uuid[0], array->uuid[1],
 		    array->uuid[2], array->uuid[3]) <= 0)
-		fprintf(stderr, Name ": Failed to write to "
-			"<id_path> cookie\n");
+		pr_err("Failed to write to "
+		       "<id_path> cookie\n");
 
 	fclose(f);
 }
@@ -791,13 +788,13 @@ char udev_template_start[] =
 /* find rule named rule_type and return its value */
 char *find_rule(struct rule *rule, char *rule_type)
 {
-       while (rule) {
-               if (rule->name == rule_type)
-                       return rule->value;
+	while (rule) {
+		if (rule->name == rule_type)
+			return rule->value;
 
-               rule = rule->next;
-       }
-       return NULL;
+		rule = rule->next;
+	}
+	return NULL;
 }
 
 #define UDEV_RULE_FORMAT \
@@ -834,44 +831,44 @@ int write_rule(struct rule *rule, int fd, int force_part)
  */
 int generate_entries(int fd)
 {
-       struct pol_rule *loop, *dup;
-       char *loop_value, *dup_value;
-       int duplicate;
+	struct pol_rule *loop, *dup;
+	char *loop_value, *dup_value;
+	int duplicate;
 
-       for (loop = config_rules; loop; loop = loop->next) {
-               if (loop->type != rule_policy && loop->type != rule_part)
-                       continue;
-               duplicate = 0;
+	for (loop = config_rules; loop; loop = loop->next) {
+		if (loop->type != rule_policy && loop->type != rule_part)
+			continue;
+		duplicate = 0;
 
-               /* only policies with paths and with actions supporting
-                * bare disks are considered */
-               loop_value = find_rule(loop->rule, pol_act);
-               if (!loop_value || map_act(loop_value) < act_spare_same_slot)
-                       continue;
-               loop_value = find_rule(loop->rule, rule_path);
-               if (!loop_value)
-                       continue;
-               for (dup = config_rules; dup != loop; dup = dup->next) {
-                       if (dup->type != rule_policy && loop->type != rule_part)
-                               continue;
-                       dup_value = find_rule(dup->rule, pol_act);
-                       if (!dup_value || map_act(dup_value) < act_spare_same_slot)
-                               continue;
-                       dup_value = find_rule(dup->rule, rule_path);
-                       if (!dup_value)
-                               continue;
-                       if (strcmp(loop_value, dup_value) == 0) {
-                               duplicate = 1;
-                               break;
-                       }
-               }
+		/* only policies with paths and with actions supporting
+		 * bare disks are considered */
+		loop_value = find_rule(loop->rule, pol_act);
+		if (!loop_value || map_act(loop_value) < act_spare_same_slot)
+			continue;
+		loop_value = find_rule(loop->rule, rule_path);
+		if (!loop_value)
+			continue;
+		for (dup = config_rules; dup != loop; dup = dup->next) {
+			if (dup->type != rule_policy && loop->type != rule_part)
+				continue;
+			dup_value = find_rule(dup->rule, pol_act);
+			if (!dup_value || map_act(dup_value) < act_spare_same_slot)
+				continue;
+			dup_value = find_rule(dup->rule, rule_path);
+			if (!dup_value)
+				continue;
+			if (strcmp(loop_value, dup_value) == 0) {
+				duplicate = 1;
+				break;
+			}
+		}
 
-               /* not a dup or first occurrence */
-               if (!duplicate)
-                       if (!write_rule(loop->rule, fd, loop->type == rule_part) )
-                               return 0;
-       }
-       return 1;
+		/* not a dup or first occurrence */
+		if (!duplicate)
+			if (!write_rule(loop->rule, fd, loop->type == rule_part) )
+				return 0;
+	}
+	return 1;
 }
 
 /* Write_rules routine creates dynamic udev rules used to handle
@@ -879,40 +876,40 @@ int generate_entries(int fd)
  */
 int Write_rules(char *rule_name)
 {
-       int fd;
-       char udev_rule_file[PATH_MAX];
+	int fd;
+	char udev_rule_file[PATH_MAX];
 
-       if (rule_name) {
-	       strncpy(udev_rule_file, rule_name, sizeof(udev_rule_file) - 6);
-	       udev_rule_file[sizeof(udev_rule_file) - 6] = '\0';
-	       strcat(udev_rule_file, ".temp");
-               fd = creat(udev_rule_file,
-                          S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
-	       if (fd == -1)
-		       return 1;
-       } else
-               fd = 1;
+	if (rule_name) {
+		strncpy(udev_rule_file, rule_name, sizeof(udev_rule_file) - 6);
+		udev_rule_file[sizeof(udev_rule_file) - 6] = '\0';
+		strcat(udev_rule_file, ".temp");
+		fd = creat(udev_rule_file,
+			   S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+		if (fd == -1)
+			return 1;
+	} else
+		fd = 1;
 
-       /* write static invocation */
-       if (write(fd, udev_template_start,
-		 sizeof(udev_template_start) - 1)
-	   != (int)sizeof(udev_template_start)-1)
-	       goto abort;
+	/* write static invocation */
+	if (write(fd, udev_template_start,
+		  sizeof(udev_template_start) - 1)
+	    != (int)sizeof(udev_template_start)-1)
+		goto abort;
 
-       /* iterate, if none created or error occurred, remove file */
-       if (generate_entries(fd) < 0)
-	       goto abort;
+	/* iterate, if none created or error occurred, remove file */
+	if (generate_entries(fd) < 0)
+		goto abort;
 
-       fsync(fd);
-       if (rule_name) {
-	       close(fd);
-	       rename(udev_rule_file, rule_name);
-       }
-       return 0;
+	fsync(fd);
+	if (rule_name) {
+		close(fd);
+		rename(udev_rule_file, rule_name);
+	}
+	return 0;
 abort:
-       if (rule_name) {
-	       close(fd);
-	       unlink(udev_rule_file);
-       }
-       return 1;
+	if (rule_name) {
+		close(fd);
+		unlink(udev_rule_file);
+	}
+	return 1;
 }

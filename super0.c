@@ -36,7 +36,6 @@
  * .. other stuff
  */
 
-
 static unsigned long calc_sb0_csum(mdp_super_t *super)
 {
 	unsigned long csum = super->sb_csum;
@@ -46,7 +45,6 @@ static unsigned long calc_sb0_csum(mdp_super_t *super)
 	super->sb_csum = csum;
 	return newcsum;
 }
-
 
 static void super0_swap_endian(struct mdp_superblock_s *sb)
 {
@@ -281,6 +279,51 @@ static void export_examine_super0(struct supertype *st)
 	       + sb->events_lo);
 }
 
+static int copy_metadata0(struct supertype *st, int from, int to)
+{
+	/* Read 64K from the appropriate offset of 'from'
+	 * and if it looks a little like a 0.90 superblock,
+	 * write it to the same offset of 'to'
+	 */
+	void *buf;
+	unsigned long long dsize, offset;
+	const int bufsize = 64*1024;
+	mdp_super_t *super;
+
+	if (posix_memalign(&buf, 4096, bufsize) != 0)
+		return 1;
+
+	if (!get_dev_size(from, NULL, &dsize))
+		goto err;
+
+	if (dsize < MD_RESERVED_SECTORS*512)
+		goto err;
+
+	offset = MD_NEW_SIZE_SECTORS(dsize>>9);
+
+	offset *= 512;
+
+	if (lseek64(from, offset, 0) < 0LL)
+		goto err;
+	if (read(from, buf, bufsize) != bufsize)
+		goto err;
+
+	if (lseek64(to, offset, 0) < 0LL)
+		goto err;
+	super = buf;
+	if (super->md_magic != MD_SB_MAGIC ||
+	    super->major_version != 0 ||
+	    calc_sb0_csum(super) != super->sb_csum)
+		goto err;
+	if (write(to, buf, bufsize) != bufsize)
+		goto err;
+	free(buf);
+	return 0;
+err:
+	free(buf);
+	return 1;
+}
+
 static void detail_super0(struct supertype *st, char *homehost)
 {
 	mdp_super_t *sb = st->sb;
@@ -418,7 +461,7 @@ static struct mdinfo *container_content0(struct supertype *st, char *subarray)
 	if (subarray)
 		return NULL;
 
-	info = malloc(sizeof(*info));
+	info = xmalloc(sizeof(*info));
 	getinfo_super0(st, info, NULL);
 	return info;
 }
@@ -435,6 +478,18 @@ static int update_super0(struct supertype *st, struct mdinfo *info,
 	int rv = 0;
 	int uuid[4];
 	mdp_super_t *sb = st->sb;
+
+	if (strcmp(update, "homehost") == 0 &&
+	    homehost) {
+		/* note that 'homehost' is special as it is really
+		 * a "uuid" update.
+		 */
+		uuid_set = 0;
+		update = "uuid";
+		info->uuid[0] = sb->set_uuid0;
+		info->uuid[1] = sb->set_uuid1;
+	}
+
 	if (strcmp(update, "sparc2.2")==0 ) {
 		/* 2.2 sparc put the events in the wrong place
 		 * So we copy the tail of the superblock
@@ -445,12 +500,12 @@ static int update_super0(struct supertype *st, struct mdinfo *info,
 		       sb32+MD_SB_GENERIC_CONSTANT_WORDS+7+1,
 		       (MD_SB_WORDS - (MD_SB_GENERIC_CONSTANT_WORDS+7+1))*4);
 		if (verbose >= 0)
-			fprintf (stderr, Name ": adjusting superblock of %s for 2.2/sparc compatability.\n",
-				 devname);
+			pr_err("adjusting superblock of %s for 2.2/sparc compatibility.\n",
+			       devname);
 	} else if (strcmp(update, "super-minor") ==0) {
 		sb->md_minor = info->array.md_minor;
 		if (verbose > 0)
-			fprintf(stderr, Name ": updating superblock of %s with minor number %d\n",
+			pr_err("updating superblock of %s with minor number %d\n",
 				devname, info->array.md_minor);
 	} else if (strcmp(update, "summaries") == 0) {
 		unsigned int i;
@@ -551,12 +606,6 @@ static int update_super0(struct supertype *st, struct mdinfo *info,
 		/* make sure resync happens */
 		sb->state &= ~(1<<MD_SB_CLEAN);
 		sb->recovery_cp = 0;
-	} else if (strcmp(update, "homehost") == 0 &&
-		   homehost) {
-		uuid_set = 0;
-		update = "uuid";
-		info->uuid[0] = sb->set_uuid0;
-		info->uuid[1] = sb->set_uuid1;
 	} else if (strcmp(update, "uuid") == 0) {
 		if (!uuid_set && homehost) {
 			char buf[20];
@@ -574,6 +623,58 @@ static int update_super0(struct supertype *st, struct mdinfo *info,
 			bm = (struct bitmap_super_s*)(sb+1);
 			uuid_from_super0(st, uuid);
 			memcpy(bm->uuid, uuid, 16);
+		}
+	} else if (strcmp(update, "metadata") == 0) {
+		/* Create some v1.0 metadata to match ours but make the
+		 * ctime bigger.  Also update info->array.*_version.
+		 * We need to arrange that store_super writes out
+		 * the v1.0 metadata.
+		 * Not permitted for unclean array, or array with
+		 * bitmap.
+		 */
+		if (info->bitmap_offset) {
+			pr_err("Cannot update metadata when bitmap is present\n");
+			rv = -2;
+		} else if (info->array.state != 1) {
+			pr_err("Cannot update metadata on unclean array\n");
+			rv = -2;
+		} else {
+			info->array.major_version = 1;
+			info->array.minor_version = 0;
+			uuid_from_super0(st, info->uuid);
+			st->other = super1_make_v0(st, info, st->sb);
+		}
+	} else if (strcmp(update, "revert-reshape") == 0) {
+		rv = -2;
+		if (sb->minor_version <= 90)
+			pr_err("No active reshape to revert on %s\n",
+			       devname);
+		else if (sb->delta_disks == 0)
+			pr_err("%s: Can only revert reshape which changes number of devices\n",
+			       devname);
+		else {
+			int tmp;
+			int parity = sb->level == 6 ? 2 : 1;
+			rv = 0;
+
+			if (sb->level >= 4 && sb->level <= 6 &&
+			    sb->reshape_position % (
+				    sb->new_chunk/512 *
+				    (sb->raid_disks - sb->delta_disks - parity))) {
+				pr_err("Reshape position is not suitably aligned.\n");
+				pr_err("Try normal assembly and stop again\n");
+				return -2;
+			}
+			sb->raid_disks -= sb->delta_disks;
+			sb->delta_disks = -sb->delta_disks;
+
+			tmp = sb->new_layout;
+			sb->new_layout = sb->layout;
+			sb->layout = tmp;
+
+			tmp = sb->new_chunk;
+			sb->new_chunk = sb->chunk_size;
+			sb->chunk_size = tmp;
 		}
 	} else if (strcmp(update, "no-bitmap") == 0) {
 		sb->state &= ~(1<<MD_SB_BITMAP_PRESENT);
@@ -598,17 +699,21 @@ static int update_super0(struct supertype *st, struct mdinfo *info,
  * host name
  */
 
-
 static int init_super0(struct supertype *st, mdu_array_info_t *info,
 		       unsigned long long size, char *ignored_name, char *homehost,
-		       int *uuid)
+		       int *uuid, unsigned long long data_offset)
 {
 	mdp_super_t *sb;
 	int spares;
 
+	if (data_offset != INVALID_SECTORS) {
+		pr_err("data-offset not support for 0.90\n");
+		return 0;
+	}
+
 	if (posix_memalign((void**)&sb, 4096,
 			   MD_SB_BYTES + ROUND_UP(sizeof(bitmap_super_t), 4096)) != 0) {
-		fprintf(stderr, Name ": %s could not allocate superblock\n", __func__);
+		pr_err("%s could not allocate superblock\n", __func__);
 		return 0;
 	}
 	memset(sb, 0, MD_SB_BYTES + sizeof(bitmap_super_t));
@@ -621,7 +726,7 @@ static int init_super0(struct supertype *st, mdu_array_info_t *info,
 
 	spares = info->working_disks - info->active_disks;
 	if (info->raid_disks + spares  > MD_SB_DISKS) {
-		fprintf(stderr, Name ": too many devices requested: %d+%d > %d\n",
+		pr_err("too many devices requested: %d+%d > %d\n",
 			info->raid_disks , spares, MD_SB_DISKS);
 		return 0;
 	}
@@ -633,9 +738,9 @@ static int init_super0(struct supertype *st, mdu_array_info_t *info,
 	sb->gvalid_words = 0; /* ignored */
 	sb->ctime = time(0);
 	sb->level = info->level;
-	if (size != (unsigned long long)info->size)
+	sb->size = size;
+	if (size != (unsigned long long)sb->size)
 		return 0;
-	sb->size = info->size;
 	sb->nr_disks = info->nr_disks;
 	sb->raid_disks = info->raid_disks;
 	sb->md_minor = info->md_minor;
@@ -657,7 +762,7 @@ static int init_super0(struct supertype *st, mdu_array_info_t *info,
 		if (rfd >= 0)
 			close(rfd);
 	}
-	if (homehost) {
+	if (homehost && !uuid) {
 		char buf[20];
 		char *hash = sha1_buffer(homehost,
 					 strlen(homehost),
@@ -690,7 +795,7 @@ struct devinfo {
 #ifndef MDASSEMBLE
 /* Add a device to the superblock being created */
 static int add_to_super0(struct supertype *st, mdu_disk_info_t *dinfo,
-			  int fd, char *devname)
+			 int fd, char *devname, unsigned long long data_offset)
 {
 	mdp_super_t *sb = st->sb;
 	mdp_disk_t *dk = &sb->disks[dinfo->number];
@@ -710,7 +815,7 @@ static int add_to_super0(struct supertype *st, mdu_disk_info_t *dinfo,
 	dip = (struct devinfo **)&st->info;
 	while (*dip)
 		dip = &(*dip)->next;
-	di = malloc(sizeof(struct devinfo));
+	di = xmalloc(sizeof(struct devinfo));
 	di->fd = fd;
 	di->devname = devname;
 	di->disk = *dinfo;
@@ -733,6 +838,24 @@ static int store_super0(struct supertype *st, int fd)
 	if (dsize < MD_RESERVED_SECTORS*512)
 		return 2;
 
+	if (st->other) {
+		/* Writing out v1.0 metadata for --update=metadata */
+		int ret = 0;
+
+		offset = dsize/512 - 8*2;
+		offset &= ~(4*2-1);
+		offset *= 512;
+		if (lseek64(fd, offset, 0)< 0LL)
+			ret = 3;
+		else if (write(fd, st->other, 1024) != 1024)
+			ret = 4;
+		else
+			fsync(fd);
+		free(st->other);
+		st->other = NULL;
+		return ret;
+	}
+
 	offset = MD_NEW_SIZE_SECTORS(dsize>>9);
 
 	offset *= 512;
@@ -746,7 +869,7 @@ static int store_super0(struct supertype *st, int fd)
 	if (super->state & (1<<MD_SB_BITMAP_PRESENT)) {
 		struct bitmap_super_s * bm = (struct bitmap_super_s*)(super+1);
 		if (__le32_to_cpu(bm->magic) == BITMAP_MAGIC)
-			if (write(fd, bm, ROUND_UP(sizeof(*bm),4096)) != 
+			if (write(fd, bm, ROUND_UP(sizeof(*bm),4096)) !=
 			    ROUND_UP(sizeof(*bm),4096))
 			    return 5;
 	}
@@ -768,7 +891,7 @@ static int write_init_super0(struct supertype *st)
 			continue;
 		if (di->fd == -1)
 			continue;
-		while (Kill(di->devname, NULL, 0, 1, 1) == 0)
+		while (Kill(di->devname, NULL, 0, -1, 1) == 0)
 			;
 
 		sb->disks[di->disk.number].state &= ~(1<<MD_DISK_FAULTY);
@@ -781,9 +904,8 @@ static int write_init_super0(struct supertype *st)
 			rv = st->ss->write_bitmap(st, di->fd);
 
 		if (rv)
-			fprintf(stderr,
-				Name ": failed to write superblock to %s\n",
-				di->devname);
+			pr_err("failed to write superblock to %s\n",
+			       di->devname);
 	}
 	return rv;
 }
@@ -806,10 +928,9 @@ static int compare_super0(struct supertype *st, struct supertype *tst)
 		return 1;
 	if (!first) {
 		if (posix_memalign((void**)&first, 4096,
-			     MD_SB_BYTES + 
+			     MD_SB_BYTES +
 			     ROUND_UP(sizeof(struct bitmap_super_s), 4096)) != 0) {
-			fprintf(stderr, Name
-				": %s could not allocate superblock\n", __func__);
+			pr_err("%s could not allocate superblock\n", __func__);
 			return 1;
 		}
 		memcpy(first, second, MD_SB_BYTES + sizeof(struct bitmap_super_s));
@@ -834,7 +955,6 @@ static int compare_super0(struct supertype *st, struct supertype *tst)
 	return 0;
 }
 
-
 static void free_super0(struct supertype *st);
 
 static int load_super0(struct supertype *st, int fd, char *devname)
@@ -858,21 +978,19 @@ static int load_super0(struct supertype *st, int fd, char *devname)
 
 	if (dsize < MD_RESERVED_SECTORS*512) {
 		if (devname)
-			fprintf(stderr, Name
-			    ": %s is too small for md: size is %llu sectors.\n",
-				devname, dsize);
+			pr_err("%s is too small for md: size is %llu sectors.\n",
+			       devname, dsize);
 		return 1;
 	}
+	st->devsize = dsize;
 
 	offset = MD_NEW_SIZE_SECTORS(dsize>>9);
 
 	offset *= 512;
 
-	ioctl(fd, BLKFLSBUF, 0); /* make sure we read current data */
-
 	if (lseek64(fd, offset, 0)< 0LL) {
 		if (devname)
-			fprintf(stderr, Name ": Cannot seek to superblock on %s: %s\n",
+			pr_err("Cannot seek to superblock on %s: %s\n",
 				devname, strerror(errno));
 		return 1;
 	}
@@ -880,14 +998,13 @@ static int load_super0(struct supertype *st, int fd, char *devname)
 	if (posix_memalign((void**)&super, 4096,
 			   MD_SB_BYTES +
 			   ROUND_UP(sizeof(bitmap_super_t), 4096)) != 0) {
-		fprintf(stderr, Name
-			": %s could not allocate superblock\n", __func__);
+		pr_err("%s could not allocate superblock\n", __func__);
 		return 1;
 	}
 
 	if (read(fd, super, sizeof(*super)) != MD_SB_BYTES) {
 		if (devname)
-			fprintf(stderr, Name ": Cannot read superblock on %s\n",
+			pr_err("Cannot read superblock on %s\n",
 				devname);
 		free(super);
 		return 1;
@@ -898,7 +1015,7 @@ static int load_super0(struct supertype *st, int fd, char *devname)
 
 	if (super->md_magic != MD_SB_MAGIC) {
 		if (devname)
-			fprintf(stderr, Name ": No super block found on %s (Expected magic %08x, got %08x)\n",
+			pr_err("No super block found on %s (Expected magic %08x, got %08x)\n",
 				devname, MD_SB_MAGIC, super->md_magic);
 		free(super);
 		return 2;
@@ -906,7 +1023,7 @@ static int load_super0(struct supertype *st, int fd, char *devname)
 
 	if (super->major_version != 0) {
 		if (devname)
-			fprintf(stderr, Name ": Cannot interpret superblock on %s - version is %d\n",
+			pr_err("Cannot interpret superblock on %s - version is %d\n",
 				devname, super->major_version);
 		free(super);
 		return 2;
@@ -946,11 +1063,9 @@ static int load_super0(struct supertype *st, int fd, char *devname)
 
 static struct supertype *match_metadata_desc0(char *arg)
 {
-	struct supertype *st = calloc(1, sizeof(*st));
-	if (!st)
-		return st;
+	struct supertype *st = xcalloc(1, sizeof(*st));
 
-	st->container_dev = NoMdDev;
+	st->container_devnm[0] = 0;
 	st->ss = &super0;
 	st->info = NULL;
 	st->minor_version = 90;
@@ -981,8 +1096,11 @@ static struct supertype *match_metadata_desc0(char *arg)
 	return NULL;
 }
 
-static __u64 avail_size0(struct supertype *st, __u64 devsize)
+static __u64 avail_size0(struct supertype *st, __u64 devsize,
+			 unsigned long long data_offset)
 {
+	if (data_offset != 0 && data_offset != INVALID_SECTORS)
+		return 0ULL;
 	if (devsize < MD_RESERVED_SECTORS)
 		return 0ULL;
 	return MD_NEW_SIZE_SECTORS(devsize);
@@ -1006,7 +1124,6 @@ static int add_internal_bitmap0(struct supertype *st, int *chunkp,
 	mdp_super_t *sb = st->sb;
 	bitmap_super_t *bms = (bitmap_super_t*)(((char*)sb) + MD_SB_BYTES);
 	int uuid[4];
-
 
 	min_chunk = 4096; /* sub-page chunks don't work yet.. */
 	bits = (size * 512) / min_chunk + 1;
@@ -1038,7 +1155,6 @@ static int add_internal_bitmap0(struct supertype *st, int *chunkp,
 	*chunkp = chunk;
 	return 1;
 }
-
 
 static void locate_bitmap0(struct supertype *st, int fd)
 {
@@ -1127,6 +1243,7 @@ static void free_super0(struct supertype *st)
 static int validate_geometry0(struct supertype *st, int level,
 			      int layout, int raiddisks,
 			      int *chunk, unsigned long long size,
+			      unsigned long long data_offset,
 			      char *subdev, unsigned long long *freesize,
 			      int verbose)
 {
@@ -1142,22 +1259,22 @@ static int validate_geometry0(struct supertype *st, int level,
 
 	if (level == LEVEL_CONTAINER) {
 		if (verbose)
-			fprintf(stderr, Name ": 0.90 metadata does not support containers\n");
+			pr_err("0.90 metadata does not support containers\n");
 		return 0;
 	}
 	if (raiddisks > MD_SB_DISKS) {
 		if (verbose)
-			fprintf(stderr, Name ": 0.90 metadata supports at most %d devices per array\n",
+			pr_err("0.90 metadata supports at most %d devices per array\n",
 				MD_SB_DISKS);
 		return 0;
 	}
 	if (size >= tbmax * 2ULL*1024*1024*1024) {
 		if (verbose)
-			fprintf(stderr, Name ": 0.90 metadata supports at most "
-				"%d terabytes per device\n", tbmax);
+			pr_err("0.90 metadata supports at most "
+			       "%d terabytes per device\n", tbmax);
 		return 0;
 	}
-	if (chunk && *chunk == UnSet)
+	if (*chunk == UnSet)
 		*chunk = DEFAULT_CHUNK;
 
 	if (!subdev)
@@ -1166,7 +1283,7 @@ static int validate_geometry0(struct supertype *st, int level,
 	fd = open(subdev, O_RDONLY|O_EXCL, 0);
 	if (fd < 0) {
 		if (verbose)
-			fprintf(stderr, Name ": super0.90 cannot open %s: %s\n",
+			pr_err("super0.90 cannot open %s: %s\n",
 				subdev, strerror(errno));
 		return 0;
 	}
@@ -1194,6 +1311,7 @@ struct superswitch super0 = {
 	.write_init_super = write_init_super0,
 	.validate_geometry = validate_geometry0,
 	.add_to_super = add_to_super0,
+	.copy_metadata = copy_metadata0,
 #endif
 	.match_home = match_home0,
 	.uuid_from_super = uuid_from_super0,

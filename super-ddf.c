@@ -44,6 +44,13 @@ unsigned long crc32(
 	const unsigned char *buf,
 	unsigned len);
 
+#define DDF_NOTFOUND (~0U)
+#define DDF_CONTAINER (DDF_NOTFOUND-1)
+
+/* Default for safe_mode_delay. Same value as for IMSM.
+ */
+static const int DDF_SAFE_MODE_DELAY = 4000;
+
 /* The DDF metadata handling.
  * DDF metadata lives at the end of the device.
  * The last 512 byte block provides an 'anchor' which is used to locate
@@ -54,6 +61,46 @@ unsigned long crc32(
  *  - all strings are space padded.
  *
  */
+
+typedef struct __be16 {
+	__u16 _v16;
+} be16;
+#define be16_eq(x, y) ((x)._v16 == (y)._v16)
+#define be16_and(x, y) ((x)._v16 & (y)._v16)
+#define be16_or(x, y) ((x)._v16 | (y)._v16)
+#define be16_clear(x, y) ((x)._v16 &= ~(y)._v16)
+#define be16_set(x, y) ((x)._v16 |= (y)._v16)
+
+typedef struct __be32 {
+	__u32 _v32;
+} be32;
+#define be32_eq(x, y) ((x)._v32 == (y)._v32)
+
+typedef struct __be64 {
+	__u64 _v64;
+} be64;
+#define be64_eq(x, y) ((x)._v64 == (y)._v64)
+
+#define be16_to_cpu(be) __be16_to_cpu((be)._v16)
+static inline be16 cpu_to_be16(__u16 x)
+{
+	be16 be = { ._v16 = __cpu_to_be16(x) };
+	return be;
+}
+
+#define be32_to_cpu(be) __be32_to_cpu((be)._v32)
+static inline be32 cpu_to_be32(__u32 x)
+{
+	be32 be = { ._v32 = __cpu_to_be32(x) };
+	return be;
+}
+
+#define be64_to_cpu(be) __be64_to_cpu((be)._v64)
+static inline be64 cpu_to_be64(__u64 x)
+{
+	be64 be = { ._v64 = __cpu_to_be64(x) };
+	return be;
+}
 
 /* Primary Raid Level (PRL) */
 #define	DDF_RAID0	0x00
@@ -92,28 +139,28 @@ unsigned long crc32(
 #define	DDF_2SPANNED	0x03	/* This is also weird - be careful */
 
 /* Magic numbers */
-#define	DDF_HEADER_MAGIC	__cpu_to_be32(0xDE11DE11)
-#define	DDF_CONTROLLER_MAGIC	__cpu_to_be32(0xAD111111)
-#define	DDF_PHYS_RECORDS_MAGIC	__cpu_to_be32(0x22222222)
-#define	DDF_PHYS_DATA_MAGIC	__cpu_to_be32(0x33333333)
-#define	DDF_VIRT_RECORDS_MAGIC	__cpu_to_be32(0xDDDDDDDD)
-#define	DDF_VD_CONF_MAGIC	__cpu_to_be32(0xEEEEEEEE)
-#define	DDF_SPARE_ASSIGN_MAGIC	__cpu_to_be32(0x55555555)
-#define	DDF_VU_CONF_MAGIC	__cpu_to_be32(0x88888888)
-#define	DDF_VENDOR_LOG_MAGIC	__cpu_to_be32(0x01dBEEF0)
-#define	DDF_BBM_LOG_MAGIC	__cpu_to_be32(0xABADB10C)
+#define	DDF_HEADER_MAGIC	cpu_to_be32(0xDE11DE11)
+#define	DDF_CONTROLLER_MAGIC	cpu_to_be32(0xAD111111)
+#define	DDF_PHYS_RECORDS_MAGIC	cpu_to_be32(0x22222222)
+#define	DDF_PHYS_DATA_MAGIC	cpu_to_be32(0x33333333)
+#define	DDF_VIRT_RECORDS_MAGIC	cpu_to_be32(0xDDDDDDDD)
+#define	DDF_VD_CONF_MAGIC	cpu_to_be32(0xEEEEEEEE)
+#define	DDF_SPARE_ASSIGN_MAGIC	cpu_to_be32(0x55555555)
+#define	DDF_VU_CONF_MAGIC	cpu_to_be32(0x88888888)
+#define	DDF_VENDOR_LOG_MAGIC	cpu_to_be32(0x01dBEEF0)
+#define	DDF_BBM_LOG_MAGIC	cpu_to_be32(0xABADB10C)
 
 #define	DDF_GUID_LEN	24
 #define DDF_REVISION_0	"01.00.00"
 #define DDF_REVISION_2	"01.02.00"
 
 struct ddf_header {
-	__u32	magic;		/* DDF_HEADER_MAGIC */
-	__u32	crc;
+	be32	magic;		/* DDF_HEADER_MAGIC */
+	be32	crc;
 	char	guid[DDF_GUID_LEN];
 	char	revision[8];	/* 01.02.00 */
-	__u32	seq;		/* starts at '1' */
-	__u32	timestamp;
+	be32	seq;		/* starts at '1' */
+	be32	timestamp;
 	__u8	openflag;
 	__u8	foreignflag;
 	__u8	enforcegroups;
@@ -121,38 +168,38 @@ struct ddf_header {
 	__u8	pad1[12];	/* 12 * 0xff */
 	/* 64 bytes so far */
 	__u8	header_ext[32];	/* reserved: fill with 0xff */
-	__u64	primary_lba;
-	__u64	secondary_lba;
+	be64	primary_lba;
+	be64	secondary_lba;
 	__u8	type;
 	__u8	pad2[3];	/* 0xff */
-	__u32	workspace_len;	/* sectors for vendor space -
+	be32	workspace_len;	/* sectors for vendor space -
 				 * at least 32768(sectors) */
-	__u64	workspace_lba;
-	__u16	max_pd_entries;	/* one of 15, 63, 255, 1023, 4095 */
-	__u16	max_vd_entries; /* 2^(4,6,8,10,12)-1 : i.e. as above */
-	__u16	max_partitions; /* i.e. max num of configuration
+	be64	workspace_lba;
+	be16	max_pd_entries;	/* one of 15, 63, 255, 1023, 4095 */
+	be16	max_vd_entries; /* 2^(4,6,8,10,12)-1 : i.e. as above */
+	be16	max_partitions; /* i.e. max num of configuration
 				   record entries per disk */
-	__u16	config_record_len; /* 1 +ROUNDUP(max_primary_element_entries
+	be16	config_record_len; /* 1 +ROUNDUP(max_primary_element_entries
 				                 *12/512) */
-	__u16	max_primary_element_entries; /* 16, 64, 256, 1024, or 4096 */
+	be16	max_primary_element_entries; /* 16, 64, 256, 1024, or 4096 */
 	__u8	pad3[54];	/* 0xff */
 	/* 192 bytes so far */
-	__u32	controller_section_offset;
-	__u32	controller_section_length;
-	__u32	phys_section_offset;
-	__u32	phys_section_length;
-	__u32	virt_section_offset;
-	__u32	virt_section_length;
-	__u32	config_section_offset;
-	__u32	config_section_length;
-	__u32	data_section_offset;
-	__u32	data_section_length;
-	__u32	bbm_section_offset;
-	__u32	bbm_section_length;
-	__u32	diag_space_offset;
-	__u32	diag_space_length;
-	__u32	vendor_offset;
-	__u32	vendor_length;
+	be32	controller_section_offset;
+	be32	controller_section_length;
+	be32	phys_section_offset;
+	be32	phys_section_length;
+	be32	virt_section_offset;
+	be32	virt_section_length;
+	be32	config_section_offset;
+	be32	config_section_length;
+	be32	data_section_offset;
+	be32	data_section_length;
+	be32	bbm_section_offset;
+	be32	bbm_section_length;
+	be32	diag_space_offset;
+	be32	diag_space_length;
+	be32	vendor_offset;
+	be32	vendor_length;
 	/* 256 bytes so far */
 	__u8	pad4[256];	/* 0xff */
 };
@@ -164,14 +211,14 @@ struct ddf_header {
 
 /* The content of the 'controller section' - global scope */
 struct ddf_controller_data {
-	__u32	magic;			/* DDF_CONTROLLER_MAGIC */
-	__u32	crc;
+	be32	magic;			/* DDF_CONTROLLER_MAGIC */
+	be32	crc;
 	char	guid[DDF_GUID_LEN];
 	struct controller_type {
-		__u16 vendor_id;
-		__u16 device_id;
-		__u16 sub_vendor_id;
-		__u16 sub_device_id;
+		be16 vendor_id;
+		be16 device_id;
+		be16 sub_vendor_id;
+		be16 sub_device_id;
 	} type;
 	char	product_id[16];
 	__u8	pad[8];	/* 0xff */
@@ -180,17 +227,17 @@ struct ddf_controller_data {
 
 /* The content of phys_section - global scope */
 struct phys_disk {
-	__u32	magic;		/* DDF_PHYS_RECORDS_MAGIC */
-	__u32	crc;
-	__u16	used_pdes;
-	__u16	max_pdes;
+	be32	magic;		/* DDF_PHYS_RECORDS_MAGIC */
+	be32	crc;
+	be16	used_pdes;
+	be16	max_pdes;
 	__u8	pad[52];
 	struct phys_disk_entry {
 		char	guid[DDF_GUID_LEN];
-		__u32	refnum;
-		__u16	type;
-		__u16	state;
-		__u64	config_size; /* DDF structures must be after here */
+		be32	refnum;
+		be16	type;
+		be16	state;
+		be64	config_size; /* DDF structures must be after here */
 		char	path[18];	/* another horrible structure really */
 		__u8	pad[6];
 	} entries[0];
@@ -221,17 +268,17 @@ struct phys_disk {
 
 /* The content of the virt_section global scope */
 struct virtual_disk {
-	__u32	magic;		/* DDF_VIRT_RECORDS_MAGIC */
-	__u32	crc;
-	__u16	populated_vdes;
-	__u16	max_vdes;
+	be32	magic;		/* DDF_VIRT_RECORDS_MAGIC */
+	be32	crc;
+	be16	populated_vdes;
+	be16	max_vdes;
 	__u8	pad[52];
 	struct virtual_entry {
 		char	guid[DDF_GUID_LEN];
-		__u16	unit;
+		be16	unit;
 		__u16	pad0;	/* 0xffff */
-		__u16	guid_crc;
-		__u16	type;
+		be16	guid_crc;
+		be16	type;
 		__u8	state;
 		__u8	init_state;
 		__u8	pad1[14];
@@ -275,25 +322,25 @@ struct virtual_disk {
  */
 
 struct vd_config {
-	__u32	magic;		/* DDF_VD_CONF_MAGIC */
-	__u32	crc;
+	be32	magic;		/* DDF_VD_CONF_MAGIC */
+	be32	crc;
 	char	guid[DDF_GUID_LEN];
-	__u32	timestamp;
-	__u32	seqnum;
+	be32	timestamp;
+	be32	seqnum;
 	__u8	pad0[24];
-	__u16	prim_elmnt_count;
+	be16	prim_elmnt_count;
 	__u8	chunk_shift;	/* 0 == 512, 1==1024 etc */
 	__u8	prl;
 	__u8	rlq;
 	__u8	sec_elmnt_count;
 	__u8	sec_elmnt_seq;
 	__u8	srl;
-	__u64	blocks;		/* blocks per component could be different
+	be64	blocks;		/* blocks per component could be different
 				 * on different component devices...(only
 				 * for concat I hope) */
-	__u64	array_blocks;	/* blocks in array */
+	be64	array_blocks;	/* blocks in array */
 	__u8	pad1[8];
-	__u32	spare_refs[8];
+	be32	spare_refs[8];
 	__u8	cache_pol[8];
 	__u8	bg_rate;
 	__u8	pad2[3];
@@ -304,10 +351,11 @@ struct vd_config {
 	__u8	v2[16];	/* reserved- 0xff */
 	__u8	v3[16];	/* reserved- 0xff */
 	__u8	vendor[32];
-	__u32	phys_refnum[0];	/* refnum of each disk in sequence */
+	be32	phys_refnum[0];	/* refnum of each disk in sequence */
       /*__u64	lba_offset[0];  LBA offset in each phys.  Note extents in a
 				bvd are always the same size */
 };
+#define LBA_OFFSET(ddf, vd) ((be64 *) &(vd)->phys_refnum[(ddf)->mppe])
 
 /* vd_config.cache_pol[7] is a bitmap */
 #define	DDF_cache_writeback	1	/* else writethrough */
@@ -319,17 +367,17 @@ struct vd_config {
 #define	DDF_cache_rallowed	64	/* enable read caching */
 
 struct spare_assign {
-	__u32	magic;		/* DDF_SPARE_ASSIGN_MAGIC */
-	__u32	crc;
-	__u32	timestamp;
+	be32	magic;		/* DDF_SPARE_ASSIGN_MAGIC */
+	be32	crc;
+	be32	timestamp;
 	__u8	reserved[7];
 	__u8	type;
-	__u16	populated;	/* SAEs used */
-	__u16	max;		/* max SAEs */
+	be16	populated;	/* SAEs used */
+	be16	max;		/* max SAEs */
 	__u8	pad[8];
 	struct spare_assign_entry {
 		char	guid[DDF_GUID_LEN];
-		__u16	secondary_element;
+		be16	secondary_element;
 		__u8	pad[6];
 	} spare_ents[0];
 };
@@ -341,10 +389,10 @@ struct spare_assign {
 
 /* The data_section contents - local scope */
 struct disk_data {
-	__u32	magic;		/* DDF_PHYS_DATA_MAGIC */
-	__u32	crc;
+	be32	magic;		/* DDF_PHYS_DATA_MAGIC */
+	be32	crc;
 	char	guid[DDF_GUID_LEN];
-	__u32	refnum;		/* crc of some magic drive data ... */
+	be32	refnum;		/* crc of some magic drive data ... */
 	__u8	forced_ref;	/* set when above was not result of magic */
 	__u8	forced_guid;	/* set if guid was forced rather than magic */
 	__u8	vendor[32];
@@ -353,16 +401,16 @@ struct disk_data {
 
 /* bbm_section content */
 struct bad_block_log {
-	__u32	magic;
-	__u32	crc;
-	__u16	entry_count;
-	__u32	spare_count;
+	be32	magic;
+	be32	crc;
+	be16	entry_count;
+	be32	spare_count;
 	__u8	pad[10];
-	__u64	first_spare;
+	be64	first_spare;
 	struct mapped_block {
-		__u64	defective_start;
-		__u32	replacement_start;
-		__u16	remap_count;
+		be64	defective_start;
+		be32	replacement_start;
+		be16	remap_count;
 		__u8	pad[2];
 	} entries[0];
 };
@@ -395,6 +443,7 @@ struct ddf_super {
 	struct ddf_header *active;
 	struct phys_disk	*phys;
 	struct virtual_disk	*virt;
+	char			*conf;
 	int pdsize, vdsize;
 	unsigned int max_part, mppe, conf_rec_len;
 	int currentdev;
@@ -404,9 +453,8 @@ struct ddf_super {
 			char space[512];
 			struct {
 				struct vcl	*next;
-				__u64		*lba_offset; /* location in 'conf' of
-							      * the lba table */
 				unsigned int	vcnum; /* index into ->virt */
+				struct vd_config **other_bvds;
 				__u64		*block_sizes; /* NULL if all the same */
 			};
 		};
@@ -421,6 +469,9 @@ struct ddf_super {
 				char *devname;
 				int fd;
 				unsigned long long size; /* sectors */
+				be64 primary_lba; /* sectors */
+				be64 secondary_lba; /* sectors */
+				be64 workspace_lba; /* sectors */
 				int pdnum;	/* index in ->phys */
 				struct spare_assign *spare;
 				void *mdupdate; /* hold metadata update */
@@ -439,21 +490,253 @@ struct ddf_super {
 #define offsetof(t,f) ((size_t)&(((t*)0)->f))
 #endif
 
+#if DEBUG
+static int all_ff(const char *guid);
+static void pr_state(struct ddf_super *ddf, const char *msg)
+{
+	unsigned int i;
+	dprintf("%s/%s: ", __func__, msg);
+	for (i = 0; i < be16_to_cpu(ddf->active->max_vd_entries); i++) {
+		if (all_ff(ddf->virt->entries[i].guid))
+			continue;
+		dprintf("%u(s=%02x i=%02x) ", i,
+			ddf->virt->entries[i].state,
+			ddf->virt->entries[i].init_state);
+	}
+	dprintf("\n");
+}
+#else
+static void pr_state(const struct ddf_super *ddf, const char *msg) {}
+#endif
 
-static unsigned int calc_crc(void *buf, int len)
+static void _ddf_set_updates_pending(struct ddf_super *ddf, const char *func)
+{
+	ddf->updates_pending = 1;
+	ddf->active->seq = cpu_to_be32((be32_to_cpu(ddf->active->seq)+1));
+	pr_state(ddf, func);
+}
+
+#define ddf_set_updates_pending(x) _ddf_set_updates_pending((x), __func__)
+
+static unsigned int get_pd_index_from_refnum(const struct vcl *vc,
+					     be32 refnum, unsigned int nmax,
+					     const struct vd_config **bvd,
+					     unsigned int *idx);
+
+static be32 calc_crc(void *buf, int len)
 {
 	/* crcs are always at the same place as in the ddf_header */
 	struct ddf_header *ddf = buf;
-	__u32 oldcrc = ddf->crc;
+	be32 oldcrc = ddf->crc;
 	__u32 newcrc;
-	ddf->crc = 0xffffffff;
+	ddf->crc = cpu_to_be32(0xffffffff);
 
 	newcrc = crc32(0, buf, len);
 	ddf->crc = oldcrc;
 	/* The crc is store (like everything) bigendian, so convert
 	 * here for simplicity
 	 */
-	return __cpu_to_be32(newcrc);
+	return cpu_to_be32(newcrc);
+}
+
+#define DDF_INVALID_LEVEL 0xff
+#define DDF_NO_SECONDARY 0xff
+static int err_bad_md_layout(const mdu_array_info_t *array)
+{
+	pr_err("RAID%d layout %x with %d disks is unsupported for DDF\n",
+	       array->level, array->layout, array->raid_disks);
+	return -1;
+}
+
+static int layout_md2ddf(const mdu_array_info_t *array,
+			 struct vd_config *conf)
+{
+	be16 prim_elmnt_count = cpu_to_be16(array->raid_disks);
+	__u8 prl = DDF_INVALID_LEVEL, rlq = 0;
+	__u8 sec_elmnt_count = 1;
+	__u8 srl = DDF_NO_SECONDARY;
+
+	switch (array->level) {
+	case LEVEL_LINEAR:
+		prl = DDF_CONCAT;
+		break;
+	case 0:
+		rlq = DDF_RAID0_SIMPLE;
+		prl = DDF_RAID0;
+		break;
+	case 1:
+		switch (array->raid_disks) {
+		case 2:
+			rlq = DDF_RAID1_SIMPLE;
+			break;
+		case 3:
+			rlq = DDF_RAID1_MULTI;
+			break;
+		default:
+			return err_bad_md_layout(array);
+		}
+		prl = DDF_RAID1;
+		break;
+	case 4:
+		if (array->layout != 0)
+			return err_bad_md_layout(array);
+		rlq = DDF_RAID4_N;
+		prl = DDF_RAID4;
+		break;
+	case 5:
+		switch (array->layout) {
+		case ALGORITHM_LEFT_ASYMMETRIC:
+			rlq = DDF_RAID5_N_RESTART;
+			break;
+		case ALGORITHM_RIGHT_ASYMMETRIC:
+			rlq = DDF_RAID5_0_RESTART;
+			break;
+		case ALGORITHM_LEFT_SYMMETRIC:
+			rlq = DDF_RAID5_N_CONTINUE;
+			break;
+		case ALGORITHM_RIGHT_SYMMETRIC:
+			/* not mentioned in standard */
+		default:
+			return err_bad_md_layout(array);
+		}
+		prl = DDF_RAID5;
+		break;
+	case 6:
+		switch (array->layout) {
+		case ALGORITHM_ROTATING_N_RESTART:
+			rlq = DDF_RAID5_N_RESTART;
+			break;
+		case ALGORITHM_ROTATING_ZERO_RESTART:
+			rlq = DDF_RAID6_0_RESTART;
+			break;
+		case ALGORITHM_ROTATING_N_CONTINUE:
+			rlq = DDF_RAID5_N_CONTINUE;
+			break;
+		default:
+			return err_bad_md_layout(array);
+		}
+		prl = DDF_RAID6;
+		break;
+	case 10:
+		if (array->raid_disks % 2 == 0 && array->layout == 0x102) {
+			rlq = DDF_RAID1_SIMPLE;
+			prim_elmnt_count =  cpu_to_be16(2);
+			sec_elmnt_count = array->raid_disks / 2;
+		} else if (array->raid_disks % 3 == 0
+			   && array->layout == 0x103) {
+			rlq = DDF_RAID1_MULTI;
+			prim_elmnt_count =  cpu_to_be16(3);
+			sec_elmnt_count = array->raid_disks / 3;
+		} else
+			return err_bad_md_layout(array);
+		srl = DDF_2SPANNED;
+		prl = DDF_RAID1;
+		break;
+	default:
+		return err_bad_md_layout(array);
+	}
+	conf->prl = prl;
+	conf->prim_elmnt_count = prim_elmnt_count;
+	conf->rlq = rlq;
+	conf->srl = srl;
+	conf->sec_elmnt_count = sec_elmnt_count;
+	return 0;
+}
+
+static int err_bad_ddf_layout(const struct vd_config *conf)
+{
+	pr_err("DDF RAID %u qualifier %u with %u disks is unsupported\n",
+	       conf->prl, conf->rlq, be16_to_cpu(conf->prim_elmnt_count));
+	return -1;
+}
+
+static int layout_ddf2md(const struct vd_config *conf,
+			 mdu_array_info_t *array)
+{
+	int level = LEVEL_UNSUPPORTED;
+	int layout = 0;
+	int raiddisks = be16_to_cpu(conf->prim_elmnt_count);
+
+	if (conf->sec_elmnt_count > 1) {
+		/* see also check_secondary() */
+		if (conf->prl != DDF_RAID1 ||
+		    (conf->srl != DDF_2STRIPED && conf->srl != DDF_2SPANNED)) {
+			pr_err("Unsupported secondary RAID level %u/%u\n",
+			       conf->prl, conf->srl);
+			return -1;
+		}
+		if (raiddisks == 2 && conf->rlq == DDF_RAID1_SIMPLE)
+			layout = 0x102;
+		else if  (raiddisks == 3 && conf->rlq == DDF_RAID1_MULTI)
+			layout = 0x103;
+		else
+			return err_bad_ddf_layout(conf);
+		raiddisks *= conf->sec_elmnt_count;
+		level = 10;
+		goto good;
+	}
+
+	switch (conf->prl) {
+	case DDF_CONCAT:
+		level = LEVEL_LINEAR;
+		break;
+	case DDF_RAID0:
+		if (conf->rlq != DDF_RAID0_SIMPLE)
+			return err_bad_ddf_layout(conf);
+		level = 0;
+		break;
+	case DDF_RAID1:
+		if (!((conf->rlq == DDF_RAID1_SIMPLE && raiddisks == 2) ||
+		      (conf->rlq == DDF_RAID1_MULTI && raiddisks == 3)))
+			return err_bad_ddf_layout(conf);
+		level = 1;
+		break;
+	case DDF_RAID4:
+		if (conf->rlq != DDF_RAID4_N)
+			return err_bad_ddf_layout(conf);
+		level = 4;
+		break;
+	case DDF_RAID5:
+		switch (conf->rlq) {
+		case DDF_RAID5_N_RESTART:
+			layout = ALGORITHM_LEFT_ASYMMETRIC;
+			break;
+		case DDF_RAID5_0_RESTART:
+			layout = ALGORITHM_RIGHT_ASYMMETRIC;
+			break;
+		case DDF_RAID5_N_CONTINUE:
+			layout = ALGORITHM_LEFT_SYMMETRIC;
+			break;
+		default:
+			return err_bad_ddf_layout(conf);
+		}
+		level = 5;
+		break;
+	case DDF_RAID6:
+		switch (conf->rlq) {
+		case DDF_RAID5_N_RESTART:
+			layout = ALGORITHM_ROTATING_N_RESTART;
+			break;
+		case DDF_RAID6_0_RESTART:
+			layout = ALGORITHM_ROTATING_ZERO_RESTART;
+			break;
+		case DDF_RAID5_N_CONTINUE:
+			layout = ALGORITHM_ROTATING_N_CONTINUE;
+			break;
+		default:
+			return err_bad_ddf_layout(conf);
+		}
+		level = 6;
+		break;
+	default:
+		return err_bad_ddf_layout(conf);
+	};
+
+good:
+	array->level = level;
+	array->layout = layout;
+	array->raid_disks = raiddisks;
+	return 0;
 }
 
 static int load_ddf_header(int fd, unsigned long long lba,
@@ -476,28 +759,34 @@ static int load_ddf_header(int fd, unsigned long long lba,
 	if (read(fd, hdr, 512) != 512)
 		return 0;
 
-	if (hdr->magic != DDF_HEADER_MAGIC)
+	if (!be32_eq(hdr->magic, DDF_HEADER_MAGIC)) {
+		pr_err("%s: bad header magic\n", __func__);
 		return 0;
-	if (calc_crc(hdr, 512) != hdr->crc)
+	}
+	if (!be32_eq(calc_crc(hdr, 512), hdr->crc)) {
+		pr_err("%s: bad CRC\n", __func__);
 		return 0;
+	}
 	if (memcmp(anchor->guid, hdr->guid, DDF_GUID_LEN) != 0 ||
 	    memcmp(anchor->revision, hdr->revision, 8) != 0 ||
-	    anchor->primary_lba != hdr->primary_lba ||
-	    anchor->secondary_lba != hdr->secondary_lba ||
+	    !be64_eq(anchor->primary_lba, hdr->primary_lba) ||
+	    !be64_eq(anchor->secondary_lba, hdr->secondary_lba) ||
 	    hdr->type != type ||
 	    memcmp(anchor->pad2, hdr->pad2, 512 -
-		   offsetof(struct ddf_header, pad2)) != 0)
+		   offsetof(struct ddf_header, pad2)) != 0) {
+		pr_err("%s: header mismatch\n", __func__);
 		return 0;
+	}
 
 	/* Looks good enough to me... */
 	return 1;
 }
 
 static void *load_section(int fd, struct ddf_super *super, void *buf,
-			  __u32 offset_be, __u32 len_be, int check)
+			  be32 offset_be, be32 len_be, int check)
 {
-	unsigned long long offset = __be32_to_cpu(offset_be);
-	unsigned long long len = __be32_to_cpu(len_be);
+	unsigned long long offset = be32_to_cpu(offset_be);
+	unsigned long long len = be32_to_cpu(len_be);
 	int dofree = (buf == NULL);
 
 	if (check)
@@ -507,20 +796,16 @@ static void *load_section(int fd, struct ddf_super *super, void *buf,
 
 	if (len > 1024)
 		return NULL;
-	if (buf) {
-		/* All pre-allocated sections are a single block */
-		if (len != 1)
-			return NULL;
-	} else if (posix_memalign(&buf, 512, len<<9) != 0)
+	if (!buf && posix_memalign(&buf, 512, len<<9) != 0)
 		buf = NULL;
 
 	if (!buf)
 		return NULL;
 
 	if (super->active->type == 1)
-		offset += __be64_to_cpu(super->active->primary_lba);
+		offset += be64_to_cpu(super->active->primary_lba);
 	else
-		offset += __be64_to_cpu(super->active->secondary_lba);
+		offset += be64_to_cpu(super->active->secondary_lba);
 
 	if ((unsigned long long)lseek64(fd, offset<<9, 0) != (offset<<9)) {
 		if (dofree)
@@ -543,60 +828,63 @@ static int load_ddf_headers(int fd, struct ddf_super *super, char *devname)
 
 	if (lseek64(fd, dsize-512, 0) < 0) {
 		if (devname)
-			fprintf(stderr,
-				Name": Cannot seek to anchor block on %s: %s\n",
-				devname, strerror(errno));
+			pr_err("Cannot seek to anchor block on %s: %s\n",
+			       devname, strerror(errno));
 		return 1;
 	}
 	if (read(fd, &super->anchor, 512) != 512) {
 		if (devname)
-			fprintf(stderr,
-				Name ": Cannot read anchor block on %s: %s\n",
-				devname, strerror(errno));
+			pr_err("Cannot read anchor block on %s: %s\n",
+			       devname, strerror(errno));
 		return 1;
 	}
-	if (super->anchor.magic != DDF_HEADER_MAGIC) {
+	if (!be32_eq(super->anchor.magic, DDF_HEADER_MAGIC)) {
 		if (devname)
-			fprintf(stderr, Name ": no DDF anchor found on %s\n",
+			pr_err("no DDF anchor found on %s\n",
 				devname);
 		return 2;
 	}
-	if (calc_crc(&super->anchor, 512) != super->anchor.crc) {
+	if (!be32_eq(calc_crc(&super->anchor, 512), super->anchor.crc)) {
 		if (devname)
-			fprintf(stderr, Name ": bad CRC on anchor on %s\n",
+			pr_err("bad CRC on anchor on %s\n",
 				devname);
 		return 2;
 	}
 	if (memcmp(super->anchor.revision, DDF_REVISION_0, 8) != 0 &&
 	    memcmp(super->anchor.revision, DDF_REVISION_2, 8) != 0) {
 		if (devname)
-			fprintf(stderr, Name ": can only support super revision"
+			pr_err("can only support super revision"
 				" %.8s and earlier, not %.8s on %s\n",
 				DDF_REVISION_2, super->anchor.revision,devname);
 		return 2;
 	}
-	if (load_ddf_header(fd, __be64_to_cpu(super->anchor.primary_lba),
+	super->active = NULL;
+	if (load_ddf_header(fd, be64_to_cpu(super->anchor.primary_lba),
 			    dsize >> 9,  1,
 			    &super->primary, &super->anchor) == 0) {
 		if (devname)
-			fprintf(stderr,
-				Name ": Failed to load primary DDF header "
-				"on %s\n", devname);
-		return 2;
-	}
-	super->active = &super->primary;
-	if (load_ddf_header(fd, __be64_to_cpu(super->anchor.secondary_lba),
+			pr_err("Failed to load primary DDF header "
+			       "on %s\n", devname);
+	} else
+		super->active = &super->primary;
+
+	if (load_ddf_header(fd, be64_to_cpu(super->anchor.secondary_lba),
 			    dsize >> 9,  2,
 			    &super->secondary, &super->anchor)) {
-		if ((__be32_to_cpu(super->primary.seq)
-		     < __be32_to_cpu(super->secondary.seq) &&
-		     !super->secondary.openflag)
-		    || (__be32_to_cpu(super->primary.seq)
-			== __be32_to_cpu(super->secondary.seq) &&
+		if (super->active == NULL
+		    || (be32_to_cpu(super->primary.seq)
+			< be32_to_cpu(super->secondary.seq) &&
+			!super->secondary.openflag)
+		    || (be32_to_cpu(super->primary.seq)
+			== be32_to_cpu(super->secondary.seq) &&
 			super->primary.openflag && !super->secondary.openflag)
 			)
 			super->active = &super->secondary;
-	}
+	} else if (devname)
+		pr_err("Failed to load secondary DDF header on %s\n",
+		       devname);
+	if (super->active == NULL)
+		return 2;
 	return 0;
 }
 
@@ -611,13 +899,13 @@ static int load_ddf_global(int fd, struct ddf_super *super, char *devname)
 				   super->active->phys_section_offset,
 				   super->active->phys_section_length,
 				   1);
-	super->pdsize = __be32_to_cpu(super->active->phys_section_length) * 512;
+	super->pdsize = be32_to_cpu(super->active->phys_section_length) * 512;
 
 	super->virt = load_section(fd, super, NULL,
 				   super->active->virt_section_offset,
 				   super->active->virt_section_length,
 				   1);
-	super->vdsize = __be32_to_cpu(super->active->virt_section_length) * 512;
+	super->vdsize = be32_to_cpu(super->active->virt_section_length) * 512;
 	if (!ok ||
 	    !super->phys ||
 	    !super->virt) {
@@ -630,10 +918,58 @@ static int load_ddf_global(int fd, struct ddf_super *super, char *devname)
 	super->conflist = NULL;
 	super->dlist = NULL;
 
-	super->max_part = __be16_to_cpu(super->active->max_partitions);
-	super->mppe = __be16_to_cpu(super->active->max_primary_element_entries);
-	super->conf_rec_len = __be16_to_cpu(super->active->config_record_len);
+	super->max_part = be16_to_cpu(super->active->max_partitions);
+	super->mppe = be16_to_cpu(super->active->max_primary_element_entries);
+	super->conf_rec_len = be16_to_cpu(super->active->config_record_len);
 	return 0;
+}
+
+#define DDF_UNUSED_BVD 0xff
+static int alloc_other_bvds(const struct ddf_super *ddf, struct vcl *vcl)
+{
+	unsigned int n_vds = vcl->conf.sec_elmnt_count - 1;
+	unsigned int i, vdsize;
+	void *p;
+	if (n_vds == 0) {
+		vcl->other_bvds = NULL;
+		return 0;
+	}
+	vdsize = ddf->conf_rec_len * 512;
+	if (posix_memalign(&p, 512, n_vds *
+			   (vdsize +  sizeof(struct vd_config *))) != 0)
+		return -1;
+	vcl->other_bvds = (struct vd_config **) (p + n_vds * vdsize);
+	for (i = 0; i < n_vds; i++) {
+		vcl->other_bvds[i] = p + i * vdsize;
+		memset(vcl->other_bvds[i], 0, vdsize);
+		vcl->other_bvds[i]->sec_elmnt_seq = DDF_UNUSED_BVD;
+	}
+	return 0;
+}
+
+static void add_other_bvd(struct vcl *vcl, struct vd_config *vd,
+			  unsigned int len)
+{
+	int i;
+	for (i = 0; i < vcl->conf.sec_elmnt_count-1; i++)
+		if (vcl->other_bvds[i]->sec_elmnt_seq == vd->sec_elmnt_seq)
+			break;
+
+	if (i < vcl->conf.sec_elmnt_count-1) {
+		if (be32_to_cpu(vd->seqnum) <=
+		    be32_to_cpu(vcl->other_bvds[i]->seqnum))
+			return;
+	} else {
+		for (i = 0; i < vcl->conf.sec_elmnt_count-1; i++)
+			if (vcl->other_bvds[i]->sec_elmnt_seq == DDF_UNUSED_BVD)
+				break;
+		if (i == vcl->conf.sec_elmnt_count-1) {
+			pr_err("no space for sec level config %u, count is %u\n",
+			       vd->sec_elmnt_seq, vcl->conf.sec_elmnt_count);
+			return;
+		}
+	}
+	memcpy(vcl->other_bvds[i], vd, len);
 }
 
 static int load_ddf_local(int fd, struct ddf_super *super,
@@ -645,14 +981,15 @@ static int load_ddf_local(int fd, struct ddf_super *super,
 	unsigned int i;
 	unsigned int confsec;
 	int vnum;
-	unsigned int max_virt_disks = __be16_to_cpu(super->active->max_vd_entries);
+	unsigned int max_virt_disks = be16_to_cpu
+		(super->active->max_vd_entries);
 	unsigned long long dsize;
 
 	/* First the local disk info */
 	if (posix_memalign((void**)&dl, 512,
 		       sizeof(*dl) +
 		       (super->max_part) * sizeof(dl->vlist[0])) != 0) {
-		fprintf(stderr, Name ": %s could not allocate disk info buffer\n",
+		pr_err("%s could not allocate disk info buffer\n",
 			__func__);
 		return 1;
 	}
@@ -661,7 +998,7 @@ static int load_ddf_local(int fd, struct ddf_super *super,
 		     super->active->data_section_offset,
 		     super->active->data_section_length,
 		     0);
-	dl->devname = devname ? strdup(devname) : NULL;
+	dl->devname = devname ? xstrdup(devname) : NULL;
 
 	fstat(fd, &stb);
 	dl->major = major(stb.st_rdev);
@@ -672,12 +1009,19 @@ static int load_ddf_local(int fd, struct ddf_super *super,
 	dl->size = 0;
 	if (get_dev_size(fd, devname, &dsize))
 		dl->size = dsize >> 9;
+	/* If the disks have different sizes, the LBAs will differ
+	 * between phys disks.
+	 * At this point here, the values in super->active must be valid
+	 * for this phys disk. */
+	dl->primary_lba = super->active->primary_lba;
+	dl->secondary_lba = super->active->secondary_lba;
+	dl->workspace_lba = super->active->workspace_lba;
 	dl->spare = NULL;
 	for (i = 0 ; i < super->max_part ; i++)
 		dl->vlist[i] = NULL;
 	super->dlist = dl;
 	dl->pdnum = -1;
-	for (i = 0; i < __be16_to_cpu(super->active->max_pd_entries); i++)
+	for (i = 0; i < be16_to_cpu(super->active->max_pd_entries); i++)
 		if (memcmp(super->phys->entries[i].guid,
 			   dl->disk.guid, DDF_GUID_LEN) == 0)
 			dl->pdnum = i;
@@ -688,34 +1032,33 @@ static int load_ddf_local(int fd, struct ddf_super *super,
 	 * the conflist
 	 */
 
-	conf = load_section(fd, super, NULL,
+	conf = load_section(fd, super, super->conf,
 			    super->active->config_section_offset,
 			    super->active->config_section_length,
 			    0);
-
+	super->conf = conf;
 	vnum = 0;
 	for (confsec = 0;
-	     confsec < __be32_to_cpu(super->active->config_section_length);
+	     confsec < be32_to_cpu(super->active->config_section_length);
 	     confsec += super->conf_rec_len) {
 		struct vd_config *vd =
 			(struct vd_config *)((char*)conf + confsec*512);
 		struct vcl *vcl;
 
-		if (vd->magic == DDF_SPARE_ASSIGN_MAGIC) {
+		if (be32_eq(vd->magic, DDF_SPARE_ASSIGN_MAGIC)) {
 			if (dl->spare)
 				continue;
 			if (posix_memalign((void**)&dl->spare, 512,
 				       super->conf_rec_len*512) != 0) {
-				fprintf(stderr, Name
-					": %s could not allocate spare info buf\n",
-					__func__);
+				pr_err("%s could not allocate spare info buf\n",
+				       __func__);
 				return 1;
 			}
-				
+
 			memcpy(dl->spare, vd, super->conf_rec_len*512);
 			continue;
 		}
-		if (vd->magic != DDF_VD_CONF_MAGIC)
+		if (!be32_eq(vd->magic, DDF_VD_CONF_MAGIC))
 			continue;
 		for (vcl = super->conflist; vcl; vcl = vcl->next) {
 			if (memcmp(vcl->conf.guid,
@@ -725,27 +1068,35 @@ static int load_ddf_local(int fd, struct ddf_super *super,
 
 		if (vcl) {
 			dl->vlist[vnum++] = vcl;
-			if (__be32_to_cpu(vd->seqnum) <=
-			    __be32_to_cpu(vcl->conf.seqnum))
+			if (vcl->other_bvds != NULL &&
+			    vcl->conf.sec_elmnt_seq != vd->sec_elmnt_seq) {
+				add_other_bvd(vcl, vd, super->conf_rec_len*512);
+				continue;
+			}
+			if (be32_to_cpu(vd->seqnum) <=
+			    be32_to_cpu(vcl->conf.seqnum))
 				continue;
 		} else {
 			if (posix_memalign((void**)&vcl, 512,
 				       (super->conf_rec_len*512 +
 					offsetof(struct vcl, conf))) != 0) {
-				fprintf(stderr, Name
-					": %s could not allocate vcl buf\n",
-					__func__);
+				pr_err("%s could not allocate vcl buf\n",
+				       __func__);
 				return 1;
 			}
 			vcl->next = super->conflist;
 			vcl->block_sizes = NULL; /* FIXME not for CONCAT */
+			vcl->conf.sec_elmnt_count = vd->sec_elmnt_count;
+			if (alloc_other_bvds(super, vcl) != 0) {
+				pr_err("%s could not allocate other bvds\n",
+				       __func__);
+				free(vcl);
+				return 1;
+			};
 			super->conflist = vcl;
 			dl->vlist[vnum++] = vcl;
 		}
 		memcpy(&vcl->conf, vd, super->conf_rec_len*512);
-		vcl->lba_offset = (__u64*)
-			&vcl->conf.phys_refnum[super->mppe];
-
 		for (i=0; i < max_virt_disks ; i++)
 			if (memcmp(super->virt->entries[i].guid,
 				   vcl->conf.guid, DDF_GUID_LEN)==0)
@@ -753,7 +1104,6 @@ static int load_ddf_local(int fd, struct ddf_super *super,
 		if (i < max_virt_disks)
 			vcl->vcnum = i;
 	}
-	free(conf);
 
 	return 0;
 }
@@ -775,32 +1125,30 @@ static int load_super_ddf(struct supertype *st, int fd,
 	if (get_dev_size(fd, devname, &dsize) == 0)
 		return 1;
 
-	if (test_partition(fd))
+	if (!st->ignore_hw_compat && test_partition(fd))
 		/* DDF is not allowed on partitions */
 		return 1;
 
 	/* 32M is a lower bound */
 	if (dsize <= 32*1024*1024) {
 		if (devname)
-			fprintf(stderr,
-				Name ": %s is too small for ddf: "
-				"size is %llu sectors.\n",
-				devname, dsize>>9);
+			pr_err("%s is too small for ddf: "
+			       "size is %llu sectors.\n",
+			       devname, dsize>>9);
 		return 1;
 	}
 	if (dsize & 511) {
 		if (devname)
-			fprintf(stderr,
-				Name ": %s is an odd size for ddf: "
-				"size is %llu bytes.\n",
-				devname, dsize);
+			pr_err("%s is an odd size for ddf: "
+			       "size is %llu bytes.\n",
+			       devname, dsize);
 		return 1;
 	}
 
 	free_super_ddf(st);
 
 	if (posix_memalign((void**)&super, 512, sizeof(*super))!= 0) {
-		fprintf(stderr, Name ": malloc of %zu failed.\n",
+		pr_err("malloc of %zu failed.\n",
 			sizeof(*super));
 		return 1;
 	}
@@ -818,9 +1166,8 @@ static int load_super_ddf(struct supertype *st, int fd,
 
 	if (rv) {
 		if (devname)
-			fprintf(stderr,
-				Name ": Failed to load all information "
-				"sections on %s\n", devname);
+			pr_err("Failed to load all information "
+			       "sections on %s\n", devname);
 		free(super);
 		return rv;
 	}
@@ -829,9 +1176,8 @@ static int load_super_ddf(struct supertype *st, int fd,
 
 	if (rv) {
 		if (devname)
-			fprintf(stderr,
-				Name ": Failed to load all information "
-				"sections on %s\n", devname);
+			pr_err("Failed to load all information "
+			       "sections on %s\n", devname);
 		free(super);
 		return rv;
 	}
@@ -855,11 +1201,18 @@ static void free_super_ddf(struct supertype *st)
 		return;
 	free(ddf->phys);
 	free(ddf->virt);
+	free(ddf->conf);
 	while (ddf->conflist) {
 		struct vcl *v = ddf->conflist;
 		ddf->conflist = v->next;
 		if (v->block_sizes)
 			free(v->block_sizes);
+		if (v->other_bvds)
+			/*
+			   v->other_bvds[0] points to beginning of buffer,
+			   see alloc_other_bvds()
+			*/
+			free(v->other_bvds[0]);
 		free(v);
 	}
 	while (ddf->dlist) {
@@ -893,16 +1246,13 @@ static struct supertype *match_metadata_desc_ddf(char *arg)
 		)
 		return NULL;
 
-	st = malloc(sizeof(*st));
-	memset(st, 0, sizeof(*st));
-	st->container_dev = NoMdDev;
+	st = xcalloc(1, sizeof(*st));
 	st->ss = &super_ddf;
 	st->max_devs = 512;
 	st->minor_version = 0;
 	st->sb = NULL;
 	return st;
 }
-
 
 #ifndef MDASSEMBLE
 
@@ -956,40 +1306,29 @@ static mapping_t ddf_sec_level[] = {
 };
 #endif
 
-struct num_mapping {
-	int num1, num2;
-};
-static struct num_mapping ddf_level_num[] = {
-	{ DDF_RAID0, 0 },
-	{ DDF_RAID1, 1 },
-	{ DDF_RAID3, LEVEL_UNSUPPORTED },
-	{ DDF_RAID4, 4 },
-	{ DDF_RAID5, 5 },
-	{ DDF_RAID1E, LEVEL_UNSUPPORTED },
-	{ DDF_JBOD, LEVEL_UNSUPPORTED },
-	{ DDF_CONCAT, LEVEL_LINEAR },
-	{ DDF_RAID5E, LEVEL_UNSUPPORTED },
-	{ DDF_RAID5EE, LEVEL_UNSUPPORTED },
-	{ DDF_RAID6, 6},
-	{ MAXINT, MAXINT }
-};
-
-static int map_num1(struct num_mapping *map, int num)
-{
-	int i;
-	for (i=0 ; map[i].num1 != MAXINT; i++)
-		if (map[i].num1 == num)
-			break;
-	return map[i].num2;
-}
-
-static int all_ff(char *guid)
+static int all_ff(const char *guid)
 {
 	int i;
 	for (i = 0; i < DDF_GUID_LEN; i++)
 		if (guid[i] != (char)0xff)
 			return 0;
 	return 1;
+}
+
+static const char *guid_str(const char *guid)
+{
+	static char buf[DDF_GUID_LEN*2+1];
+	int i;
+	char *p = buf;
+	for (i = 0; i < DDF_GUID_LEN; i++) {
+		unsigned char c = guid[i];
+		if (c >= 32 && c < 127)
+			p += sprintf(p, "%c", c);
+		else
+			p += sprintf(p, "%02x", c);
+	}
+	*p = '\0';
+	return (const char *) buf;
 }
 
 #ifndef MDASSEMBLE
@@ -1038,19 +1377,20 @@ static void examine_vd(int n, struct ddf_super *sb, char *guid)
 		unsigned int i;
 		struct vd_config *vc = &vcl->conf;
 
-		if (calc_crc(vc, crl*512) != vc->crc)
+		if (!be32_eq(calc_crc(vc, crl*512), vc->crc))
 			continue;
 		if (memcmp(vc->guid, guid, DDF_GUID_LEN) != 0)
 			continue;
 
 		/* Ok, we know about this VD, let's give more details */
 		printf(" Raid Devices[%d] : %d (", n,
-		       __be16_to_cpu(vc->prim_elmnt_count));
-		for (i = 0; i < __be16_to_cpu(vc->prim_elmnt_count); i++) {
+		       be16_to_cpu(vc->prim_elmnt_count));
+		for (i = 0; i < be16_to_cpu(vc->prim_elmnt_count); i++) {
 			int j;
-			int cnt = __be16_to_cpu(sb->phys->used_pdes);
+			int cnt = be16_to_cpu(sb->phys->used_pdes);
 			for (j=0; j<cnt; j++)
-				if (vc->phys_refnum[i] == sb->phys->entries[j].refnum)
+				if (be32_eq(vc->phys_refnum[i],
+					    sb->phys->entries[j].refnum))
 					break;
 			if (i) printf(" ");
 			if (j < cnt)
@@ -1060,8 +1400,8 @@ static void examine_vd(int n, struct ddf_super *sb, char *guid)
 		}
 		printf(")\n");
 		if (vc->chunk_shift != 255)
-		printf("   Chunk Size[%d] : %d sectors\n", n,
-		       1 << vc->chunk_shift);
+			printf("   Chunk Size[%d] : %d sectors\n", n,
+			       1 << vc->chunk_shift);
 		printf("   Raid Level[%d] : %s\n", n,
 		       map_num(ddf_level, vc->prl)?:"-unknown-");
 		if (vc->sec_elmnt_count != 1) {
@@ -1071,32 +1411,34 @@ static void examine_vd(int n, struct ddf_super *sb, char *guid)
 			       map_num(ddf_sec_level, vc->srl) ?: "-unknown-");
 		}
 		printf("  Device Size[%d] : %llu\n", n,
-		       (unsigned long long)__be64_to_cpu(vc->blocks)/2);
+		       be64_to_cpu(vc->blocks)/2);
 		printf("   Array Size[%d] : %llu\n", n,
-		       (unsigned long long)__be64_to_cpu(vc->array_blocks)/2);
+		       be64_to_cpu(vc->array_blocks)/2);
 	}
 }
 
 static void examine_vds(struct ddf_super *sb)
 {
-	int cnt = __be16_to_cpu(sb->virt->populated_vdes);
-	int i;
+	int cnt = be16_to_cpu(sb->virt->populated_vdes);
+	unsigned int i;
 	printf("  Virtual Disks : %d\n", cnt);
 
-	for (i=0; i<cnt; i++) {
+	for (i = 0; i < be16_to_cpu(sb->virt->max_vdes); i++) {
 		struct virtual_entry *ve = &sb->virt->entries[i];
+		if (all_ff(ve->guid))
+			continue;
 		printf("\n");
 		printf("      VD GUID[%d] : ", i); print_guid(ve->guid, 1);
 		printf("\n");
-		printf("         unit[%d] : %d\n", i, __be16_to_cpu(ve->unit));
+		printf("         unit[%d] : %d\n", i, be16_to_cpu(ve->unit));
 		printf("        state[%d] : %s, %s%s\n", i,
 		       map_num(ddf_state, ve->state & 7),
-		       (ve->state & 8) ? "Morphing, ": "",
-		       (ve->state & 16)? "Not Consistent" : "Consistent");
+		       (ve->state & DDF_state_morphing) ? "Morphing, ": "",
+		       (ve->state & DDF_state_inconsistent)? "Not Consistent" : "Consistent");
 		printf("   init state[%d] : %s\n", i,
-		       map_num(ddf_init_state, ve->init_state&3));
+		       map_num(ddf_init_state, ve->init_state&DDF_initstate_mask));
 		printf("       access[%d] : %s\n", i,
-		       map_num(ddf_access, (ve->init_state>>6) & 3));
+		       map_num(ddf_access, (ve->init_state & DDF_access_mask) >> 6));
 		printf("         Name[%d] : %.16s\n", i, ve->name);
 		examine_vd(i, sb, ve->guid);
 	}
@@ -1105,7 +1447,7 @@ static void examine_vds(struct ddf_super *sb)
 
 static void examine_pds(struct ddf_super *sb)
 {
-	int cnt = __be16_to_cpu(sb->phys->used_pdes);
+	int cnt = be16_to_cpu(sb->phys->used_pdes);
 	int i;
 	struct dl *dl;
 	printf(" Physical Disks : %d\n", cnt);
@@ -1113,17 +1455,17 @@ static void examine_pds(struct ddf_super *sb)
 
 	for (i=0 ; i<cnt ; i++) {
 		struct phys_disk_entry *pd = &sb->phys->entries[i];
-		int type = __be16_to_cpu(pd->type);
-		int state = __be16_to_cpu(pd->state);
+		int type = be16_to_cpu(pd->type);
+		int state = be16_to_cpu(pd->state);
 
 		//printf("      PD GUID[%d] : ", i); print_guid(pd->guid, 0);
 		//printf("\n");
 		printf("       %3d    %08x  ", i,
-		       __be32_to_cpu(pd->refnum));
-		printf("%8lluK ", 
-		       (unsigned long long)__be64_to_cpu(pd->config_size)>>1);
+		       be32_to_cpu(pd->refnum));
+		printf("%8lluK ",
+		       be64_to_cpu(pd->config_size)>>1);
 		for (dl = sb->dlist; dl ; dl = dl->next) {
-			if (dl->disk.refnum == pd->refnum) {
+			if (be32_eq(dl->disk.refnum, pd->refnum)) {
 				char *dv = map_dev(dl->major, dl->minor, 0);
 				if (dv) {
 					printf("%-15s", dv);
@@ -1158,14 +1500,15 @@ static void examine_super_ddf(struct supertype *st, char *homehost)
 {
 	struct ddf_super *sb = st->sb;
 
-	printf("          Magic : %08x\n", __be32_to_cpu(sb->anchor.magic));
+	printf("          Magic : %08x\n", be32_to_cpu(sb->anchor.magic));
 	printf("        Version : %.8s\n", sb->anchor.revision);
 	printf("Controller GUID : "); print_guid(sb->controller.guid, 0);
 	printf("\n");
 	printf(" Container GUID : "); print_guid(sb->anchor.guid, 1);
 	printf("\n");
-	printf("            Seq : %08x\n", __be32_to_cpu(sb->active->seq));
-	printf("  Redundant hdr : %s\n", sb->secondary.magic == DDF_HEADER_MAGIC
+	printf("            Seq : %08x\n", be32_to_cpu(sb->active->seq));
+	printf("  Redundant hdr : %s\n", be32_eq(sb->secondary.magic,
+						 DDF_HEADER_MAGIC)
 	       ?"yes" : "no");
 	examine_vds(sb);
 	examine_pds(sb);
@@ -1173,7 +1516,39 @@ static void examine_super_ddf(struct supertype *st, char *homehost)
 
 static void getinfo_super_ddf(struct supertype *st, struct mdinfo *info, char *map);
 
+static void uuid_from_ddf_guid(const char *guid, int uuid[4]);
 static void uuid_from_super_ddf(struct supertype *st, int uuid[4]);
+
+static unsigned int get_vd_num_of_subarray(struct supertype *st)
+{
+	/*
+	 * Figure out the VD number for this supertype.
+	 * Returns DDF_CONTAINER for the container itself,
+	 * and DDF_NOTFOUND on error.
+	 */
+	struct ddf_super *ddf = st->sb;
+	struct mdinfo *sra;
+	char *sub, *end;
+	unsigned int vcnum;
+
+	if (*st->container_devnm == '\0')
+		return DDF_CONTAINER;
+
+	sra = sysfs_read(-1, st->devnm, GET_VERSION);
+	if (!sra || sra->array.major_version != -1 ||
+	    sra->array.minor_version != -2 ||
+	    !is_subarray(sra->text_version))
+		return DDF_NOTFOUND;
+
+	sub = strchr(sra->text_version + 1, '/');
+	if (sub != NULL)
+		vcnum = strtoul(sub + 1, &end, 10);
+	if (sub == NULL || *sub == '\0' || *end != '\0' ||
+	    vcnum >= be16_to_cpu(ddf->active->max_vd_entries))
+		return DDF_NOTFOUND;
+
+	return vcnum;
+}
 
 static void brief_examine_super_ddf(struct supertype *st, int verbose)
 {
@@ -1198,7 +1573,7 @@ static void brief_examine_subarrays_ddf(struct supertype *st, int verbose)
 	getinfo_super_ddf(st, &info, NULL);
 	fname_from_uuid(st, &info, nbuf, ':');
 
-	for (i = 0; i < __be16_to_cpu(ddf->virt->max_vdes); i++) {
+	for (i = 0; i < be16_to_cpu(ddf->virt->max_vdes); i++) {
 		struct virtual_entry *ve = &ddf->virt->entries[i];
 		struct vcl vcl;
 		char nbuf1[64];
@@ -1222,8 +1597,71 @@ static void export_examine_super_ddf(struct supertype *st)
 	printf("MD_METADATA=ddf\n");
 	printf("MD_LEVEL=container\n");
 	printf("MD_UUID=%s\n", nbuf+5);
+	printf("MD_DEVICES=%u\n",
+		be16_to_cpu(((struct ddf_super *)st->sb)->phys->used_pdes));
 }
-	
+
+static int copy_metadata_ddf(struct supertype *st, int from, int to)
+{
+	void *buf;
+	unsigned long long dsize, offset;
+	int bytes;
+	struct ddf_header *ddf;
+	int written = 0;
+
+	/* The meta consists of an anchor, a primary, and a secondary.
+	 * This all lives at the end of the device.
+	 * So it is easiest to find the earliest of primary and
+	 * secondary, and copy everything from there.
+	 *
+	 * Anchor is 512 from end It contains primary_lba and secondary_lba
+	 * we choose one of those
+	 */
+
+	if (posix_memalign(&buf, 4096, 4096) != 0)
+		return 1;
+
+	if (!get_dev_size(from, NULL, &dsize))
+		goto err;
+
+	if (lseek64(from, dsize-512, 0) < 0)
+		goto err;
+	if (read(from, buf, 512) != 512)
+		goto err;
+	ddf = buf;
+	if (!be32_eq(ddf->magic, DDF_HEADER_MAGIC) ||
+	    !be32_eq(calc_crc(ddf, 512), ddf->crc) ||
+	    (memcmp(ddf->revision, DDF_REVISION_0, 8) != 0 &&
+	     memcmp(ddf->revision, DDF_REVISION_2, 8) != 0))
+		goto err;
+
+	offset = dsize - 512;
+	if ((be64_to_cpu(ddf->primary_lba) << 9) < offset)
+		offset = be64_to_cpu(ddf->primary_lba) << 9;
+	if ((be64_to_cpu(ddf->secondary_lba) << 9) < offset)
+		offset = be64_to_cpu(ddf->secondary_lba) << 9;
+
+	bytes = dsize - offset;
+
+	if (lseek64(from, offset, 0) < 0 ||
+	    lseek64(to, offset, 0) < 0)
+		goto err;
+	while (written < bytes) {
+		int n = bytes - written;
+		if (n > 4096)
+			n = 4096;
+		if (read(from, buf, n) != n)
+			goto err;
+		if (write(to, buf, n) != n)
+			goto err;
+		written += n;
+	}
+	free(buf);
+	return 0;
+err:
+	free(buf);
+	return 1;
+}
 
 static void detail_super_ddf(struct supertype *st, char *homehost)
 {
@@ -1237,13 +1675,16 @@ static void detail_super_ddf(struct supertype *st, char *homehost)
 
 static void brief_detail_super_ddf(struct supertype *st)
 {
-	/* FIXME I really need to know which array we are detailing.
-	 * Can that be stored in ddf_super??
-	 */
-//	struct ddf_super *ddf = st->sb;
 	struct mdinfo info;
 	char nbuf[64];
-	getinfo_super_ddf(st, &info, NULL);
+	struct ddf_super *ddf = st->sb;
+	unsigned int vcnum = get_vd_num_of_subarray(st);
+	if (vcnum == DDF_CONTAINER)
+		uuid_from_super_ddf(st, info.uuid);
+	else if (vcnum == DDF_NOTFOUND)
+		return;
+	else
+		uuid_from_ddf_guid(ddf->virt->entries[vcnum].guid, info.uuid);
 	fname_from_uuid(st, &info, nbuf,':');
 	printf(" UUID=%s", nbuf + 5);
 }
@@ -1269,27 +1710,98 @@ static int match_home_ddf(struct supertype *st, char *homehost)
 }
 
 #ifndef MDASSEMBLE
-static struct vd_config *find_vdcr(struct ddf_super *ddf, unsigned int inst)
+static int find_index_in_bvd(const struct ddf_super *ddf,
+			     const struct vd_config *conf, unsigned int n,
+			     unsigned int *n_bvd)
+{
+	/*
+	 * Find the index of the n-th valid physical disk in this BVD
+	 */
+	unsigned int i, j;
+	for (i = 0, j = 0; i < ddf->mppe &&
+		     j < be16_to_cpu(conf->prim_elmnt_count); i++) {
+		if (be32_to_cpu(conf->phys_refnum[i]) != 0xffffffff) {
+			if (n == j) {
+				*n_bvd = i;
+				return 1;
+			}
+			j++;
+		}
+	}
+	dprintf("%s: couldn't find BVD member %u (total %u)\n",
+		__func__, n, be16_to_cpu(conf->prim_elmnt_count));
+	return 0;
+}
+
+static struct vd_config *find_vdcr(struct ddf_super *ddf, unsigned int inst,
+				   unsigned int n,
+				   unsigned int *n_bvd, struct vcl **vcl)
 {
 	struct vcl *v;
 
-	for (v = ddf->conflist; v; v = v->next)
-		if (inst == v->vcnum)
-			return &v->conf;
+	for (v = ddf->conflist; v; v = v->next) {
+		unsigned int nsec, ibvd = 0;
+		struct vd_config *conf;
+		if (inst != v->vcnum)
+			continue;
+		conf = &v->conf;
+		if (conf->sec_elmnt_count == 1) {
+			if (find_index_in_bvd(ddf, conf, n, n_bvd)) {
+				*vcl = v;
+				return conf;
+			} else
+				goto bad;
+		}
+		if (v->other_bvds == NULL) {
+			pr_err("%s: BUG: other_bvds is NULL, nsec=%u\n",
+			       __func__, conf->sec_elmnt_count);
+			goto bad;
+		}
+		nsec = n / be16_to_cpu(conf->prim_elmnt_count);
+		if (conf->sec_elmnt_seq != nsec) {
+			for (ibvd = 1; ibvd < conf->sec_elmnt_count; ibvd++) {
+				if (v->other_bvds[ibvd-1]->sec_elmnt_seq
+				    == nsec)
+					break;
+			}
+			if (ibvd == conf->sec_elmnt_count)
+				goto bad;
+			conf = v->other_bvds[ibvd-1];
+		}
+		if (!find_index_in_bvd(ddf, conf,
+				       n - nsec*conf->sec_elmnt_count, n_bvd))
+			goto bad;
+		dprintf("%s: found disk %u as member %u in bvd %d of array %u\n"
+			, __func__, n, *n_bvd, ibvd, inst);
+		*vcl = v;
+		return conf;
+	}
+bad:
+	pr_err("%s: Could't find disk %d in array %u\n", __func__, n, inst);
 	return NULL;
 }
 #endif
 
-static int find_phys(struct ddf_super *ddf, __u32 phys_refnum)
+static int find_phys(const struct ddf_super *ddf, be32 phys_refnum)
 {
 	/* Find the entry in phys_disk which has the given refnum
 	 * and return it's index
 	 */
 	unsigned int i;
-	for (i = 0; i < __be16_to_cpu(ddf->phys->max_pdes); i++)
-		if (ddf->phys->entries[i].refnum == phys_refnum)
+	for (i = 0; i < be16_to_cpu(ddf->phys->max_pdes); i++)
+		if (be32_eq(ddf->phys->entries[i].refnum, phys_refnum))
 			return i;
 	return -1;
+}
+
+static void uuid_from_ddf_guid(const char *guid, int uuid[4])
+{
+	char buf[20];
+	struct sha1_ctx ctx;
+	sha1_init_ctx(&ctx);
+	sha1_process_bytes(guid, DDF_GUID_LEN, &ctx);
+	sha1_finish_ctx(&ctx, buf);
+	memcpy(uuid, buf, 4*4);
 }
 
 static void uuid_from_super_ddf(struct supertype *st, int uuid[4])
@@ -1302,7 +1814,7 @@ static void uuid_from_super_ddf(struct supertype *st, int uuid[4])
 	 *    not the device-set.
 	 *  uuid to recognise same set when adding a missing device back
 	 *    to an array.   This is a uuid for the device-set.
-	 *  
+	 *
 	 * For each of these we can make do with a truncated
 	 * or hashed uuid rather than the original, as long as
 	 * everyone agrees.
@@ -1316,18 +1828,12 @@ static void uuid_from_super_ddf(struct supertype *st, int uuid[4])
 	struct ddf_super *ddf = st->sb;
 	struct vcl *vcl = ddf->currentconf;
 	char *guid;
-	char buf[20];
-	struct sha1_ctx ctx;
 
 	if (vcl)
 		guid = vcl->conf.guid;
 	else
 		guid = ddf->anchor.guid;
-
-	sha1_init_ctx(&ctx);
-	sha1_process_bytes(guid, DDF_GUID_LEN, &ctx);
-	sha1_finish_ctx(&ctx, buf);
-	memcpy(uuid, buf, 4*4);
+	uuid_from_ddf_guid(guid, uuid);
 }
 
 static void getinfo_super_ddf_bvd(struct supertype *st, struct mdinfo *info, char *map);
@@ -1344,7 +1850,7 @@ static void getinfo_super_ddf(struct supertype *st, struct mdinfo *info, char *m
 	}
 	memset(info, 0, sizeof(*info));
 
-	info->array.raid_disks    = __be16_to_cpu(ddf->phys->used_pdes);
+	info->array.raid_disks    = be16_to_cpu(ddf->phys->used_pdes);
 	info->array.level	  = LEVEL_CONTAINER;
 	info->array.layout	  = 0;
 	info->array.md_minor	  = -1;
@@ -1355,16 +1861,15 @@ static void getinfo_super_ddf(struct supertype *st, struct mdinfo *info, char *m
 	info->array.chunk_size	  = 0;
 	info->container_enough	  = 1;
 
-
 	info->disk.major = 0;
 	info->disk.minor = 0;
 	if (ddf->dlist) {
-		info->disk.number = __be32_to_cpu(ddf->dlist->disk.refnum);
+		info->disk.number = be32_to_cpu(ddf->dlist->disk.refnum);
 		info->disk.raid_disk = find_phys(ddf, ddf->dlist->disk.refnum);
 
-		info->data_offset = __be64_to_cpu(ddf->phys->
-					  entries[info->disk.raid_disk].
-					  config_size);
+		info->data_offset = be64_to_cpu(ddf->phys->
+						  entries[info->disk.raid_disk].
+						  config_size);
 		info->component_size = ddf->dlist->size - info->data_offset;
 	} else {
 		info->disk.number = -1;
@@ -1372,7 +1877,6 @@ static void getinfo_super_ddf(struct supertype *st, struct mdinfo *info, char *m
 //		info->disk.raid_disk = find refnum in the table and use index;
 	}
 	info->disk.state = (1 << MD_DISK_SYNC) | (1 << MD_DISK_ACTIVE);
-
 
 	info->recovery_start = MaxSector;
 	info->reshape_active = 0;
@@ -1390,8 +1894,10 @@ static void getinfo_super_ddf(struct supertype *st, struct mdinfo *info, char *m
 		int i;
 		for (i = 0 ; i < map_disks; i++) {
 			if (i < info->array.raid_disks &&
-			    (__be16_to_cpu(ddf->phys->entries[i].state) & DDF_Online) &&
-			    !(__be16_to_cpu(ddf->phys->entries[i].state) & DDF_Failed))
+			    (be16_to_cpu(ddf->phys->entries[i].state)
+			     & DDF_Online) &&
+			    !(be16_to_cpu(ddf->phys->entries[i].state)
+			      & DDF_Failed))
 				map[i] = 1;
 			else
 				map[i] = 0;
@@ -1399,42 +1905,47 @@ static void getinfo_super_ddf(struct supertype *st, struct mdinfo *info, char *m
 	}
 }
 
-static int rlq_to_layout(int rlq, int prl, int raiddisks);
-
 static void getinfo_super_ddf_bvd(struct supertype *st, struct mdinfo *info, char *map)
 {
 	struct ddf_super *ddf = st->sb;
 	struct vcl *vc = ddf->currentconf;
 	int cd = ddf->currentdev;
+	int n_prim;
 	int j;
 	struct dl *dl;
 	int map_disks = info->array.raid_disks;
 	__u32 *cptr;
+	struct vd_config *conf;
 
 	memset(info, 0, sizeof(*info));
-	/* FIXME this returns BVD info - what if we want SVD ?? */
-
-	info->array.raid_disks    = __be16_to_cpu(vc->conf.prim_elmnt_count);
-	info->array.level	  = map_num1(ddf_level_num, vc->conf.prl);
-	info->array.layout	  = rlq_to_layout(vc->conf.rlq, vc->conf.prl,
-						  info->array.raid_disks);
+	if (layout_ddf2md(&vc->conf, &info->array) == -1)
+		return;
 	info->array.md_minor	  = -1;
 	cptr = (__u32 *)(vc->conf.guid + 16);
 	info->array.ctime	  = DECADE + __be32_to_cpu(*cptr);
-	info->array.utime	  = DECADE + __be32_to_cpu(vc->conf.timestamp);
+	info->array.utime	  = DECADE + be32_to_cpu(vc->conf.timestamp);
 	info->array.chunk_size	  = 512 << vc->conf.chunk_shift;
 	info->custom_array_size	  = 0;
 
+	conf = &vc->conf;
+	n_prim = be16_to_cpu(conf->prim_elmnt_count);
+	if (conf->sec_elmnt_count > 1 && cd >= n_prim) {
+		int ibvd = cd / n_prim - 1;
+		cd %= n_prim;
+		conf = vc->other_bvds[ibvd];
+	}
+
 	if (cd >= 0 && (unsigned)cd < ddf->mppe) {
-		info->data_offset	  = __be64_to_cpu(vc->lba_offset[cd]);
+		info->data_offset =
+			be64_to_cpu(LBA_OFFSET(ddf, conf)[cd]);
 		if (vc->block_sizes)
 			info->component_size = vc->block_sizes[cd];
 		else
-			info->component_size = __be64_to_cpu(vc->conf.blocks);
+			info->component_size = be64_to_cpu(conf->blocks);
 	}
 
 	for (dl = ddf->dlist; dl ; dl = dl->next)
-		if (dl->raiddisk == ddf->currentdev)
+		if (be32_eq(dl->disk.refnum, conf->phys_refnum[cd]))
 			break;
 
 	info->disk.major = 0;
@@ -1443,7 +1954,8 @@ static void getinfo_super_ddf_bvd(struct supertype *st, struct mdinfo *info, cha
 	if (dl) {
 		info->disk.major = dl->major;
 		info->disk.minor = dl->minor;
-		info->disk.raid_disk = dl->raiddisk;
+		info->disk.raid_disk = cd + conf->sec_elmnt_seq
+			* be16_to_cpu(conf->prim_elmnt_count);
 		info->disk.number = dl->pdnum;
 		info->disk.state = (1<<MD_DISK_SYNC)|(1<<MD_DISK_ACTIVE);
 	}
@@ -1466,9 +1978,9 @@ static void getinfo_super_ddf_bvd(struct supertype *st, struct mdinfo *info, cha
 	info->array.major_version = -1;
 	info->array.minor_version = -2;
 	sprintf(info->text_version, "/%s/%d",
-		devnum2devname(st->container_dev),
+		st->container_devnm,
 		info->container_member);
-	info->safe_mode_delay = 200;
+	info->safe_mode_delay = DDF_SAFE_MODE_DELAY;
 
 	memcpy(info->name, ddf->virt->entries[info->container_member].name, 16);
 	info->name[16]=0;
@@ -1481,14 +1993,15 @@ static void getinfo_super_ddf_bvd(struct supertype *st, struct mdinfo *info, cha
 			map[j] = 0;
 			if (j <  info->array.raid_disks) {
 				int i = find_phys(ddf, vc->conf.phys_refnum[j]);
-				if (i >= 0 && 
-				    (__be16_to_cpu(ddf->phys->entries[i].state) & DDF_Online) &&
-				    !(__be16_to_cpu(ddf->phys->entries[i].state) & DDF_Failed))
+				if (i >= 0 &&
+				    (be16_to_cpu(ddf->phys->entries[i].state)
+				     & DDF_Online) &&
+				    !(be16_to_cpu(ddf->phys->entries[i].state)
+				      & DDF_Failed))
 					map[i] = 1;
 			}
 		}
 }
-
 
 static int update_super_ddf(struct supertype *st, struct mdinfo *info,
 			    char *update,
@@ -1561,7 +2074,7 @@ static int update_super_ddf(struct supertype *st, struct mdinfo *info,
 
 static void make_header_guid(char *guid)
 {
-	__u32 stamp;
+	be32 stamp;
 	/* Create a DDF Header of Virtual Disk GUID */
 
 	/* 24 bytes of fiction required.
@@ -1570,26 +2083,66 @@ static void make_header_guid(char *guid)
 	 * Remaining 8 random number plus timestamp
 	 */
 	memcpy(guid, T10, sizeof(T10));
-	stamp = __cpu_to_be32(0xdeadbeef);
+	stamp = cpu_to_be32(0xdeadbeef);
 	memcpy(guid+8, &stamp, 4);
-	stamp = __cpu_to_be32(0);
+	stamp = cpu_to_be32(0);
 	memcpy(guid+12, &stamp, 4);
-	stamp = __cpu_to_be32(time(0) - DECADE);
+	stamp = cpu_to_be32(time(0) - DECADE);
 	memcpy(guid+16, &stamp, 4);
-	stamp = random32();
+	stamp._v32 = random32();
 	memcpy(guid+20, &stamp, 4);
 }
+
+static unsigned int find_unused_vde(const struct ddf_super *ddf)
+{
+	unsigned int i;
+	for (i = 0; i < be16_to_cpu(ddf->virt->max_vdes); i++) {
+		if (all_ff(ddf->virt->entries[i].guid))
+			return i;
+	}
+	return DDF_NOTFOUND;
+}
+
+static unsigned int find_vde_by_name(const struct ddf_super *ddf,
+				     const char *name)
+{
+	unsigned int i;
+	if (name == NULL)
+		return DDF_NOTFOUND;
+	for (i = 0; i < be16_to_cpu(ddf->virt->max_vdes); i++) {
+		if (all_ff(ddf->virt->entries[i].guid))
+			continue;
+		if (!strncmp(name, ddf->virt->entries[i].name,
+			     sizeof(ddf->virt->entries[i].name)))
+			return i;
+	}
+	return DDF_NOTFOUND;
+}
+
+#ifndef MDASSEMBLE
+static unsigned int find_vde_by_guid(const struct ddf_super *ddf,
+				     const char *guid)
+{
+	unsigned int i;
+	if (guid == NULL || all_ff(guid))
+		return DDF_NOTFOUND;
+	for (i = 0; i < be16_to_cpu(ddf->virt->max_vdes); i++)
+		if (!memcmp(ddf->virt->entries[i].guid, guid, DDF_GUID_LEN))
+			return i;
+	return DDF_NOTFOUND;
+}
+#endif
 
 static int init_super_ddf_bvd(struct supertype *st,
 			      mdu_array_info_t *info,
 			      unsigned long long size,
 			      char *name, char *homehost,
-			      int *uuid);
+			      int *uuid, unsigned long long data_offset);
 
 static int init_super_ddf(struct supertype *st,
 			  mdu_array_info_t *info,
 			  unsigned long long size, char *name, char *homehost,
-			  int *uuid)
+			  int *uuid, unsigned long long data_offset)
 {
 	/* This is primarily called by Create when creating a new array.
 	 * We will then get add_to_super called for each component, and then
@@ -1625,11 +2178,17 @@ static int init_super_ddf(struct supertype *st,
 	struct phys_disk *pd;
 	struct virtual_disk *vd;
 
+	if (data_offset != INVALID_SECTORS) {
+		pr_err("data-offset not supported by DDF\n");
+		return 0;
+	}
+
 	if (st->sb)
-		return init_super_ddf_bvd(st, info, size, name, homehost, uuid);
+		return init_super_ddf_bvd(st, info, size, name, homehost, uuid,
+					  data_offset);
 
 	if (posix_memalign((void**)&ddf, 512, sizeof(*ddf)) != 0) {
-		fprintf(stderr, Name ": %s could not allocate superblock\n", __func__);
+		pr_err("%s could not allocate superblock\n", __func__);
 		return 0;
 	}
 	memset(ddf, 0, sizeof(*ddf));
@@ -1654,37 +2213,37 @@ static int init_super_ddf(struct supertype *st,
 	make_header_guid(ddf->anchor.guid);
 
 	memcpy(ddf->anchor.revision, DDF_REVISION_2, 8);
-	ddf->anchor.seq = __cpu_to_be32(1);
-	ddf->anchor.timestamp = __cpu_to_be32(time(0) - DECADE);
+	ddf->anchor.seq = cpu_to_be32(1);
+	ddf->anchor.timestamp = cpu_to_be32(time(0) - DECADE);
 	ddf->anchor.openflag = 0xFF;
 	ddf->anchor.foreignflag = 0;
 	ddf->anchor.enforcegroups = 0; /* Is this best?? */
 	ddf->anchor.pad0 = 0xff;
 	memset(ddf->anchor.pad1, 0xff, 12);
 	memset(ddf->anchor.header_ext, 0xff, 32);
-	ddf->anchor.primary_lba = ~(__u64)0;
-	ddf->anchor.secondary_lba = ~(__u64)0;
+	ddf->anchor.primary_lba = cpu_to_be64(~(__u64)0);
+	ddf->anchor.secondary_lba = cpu_to_be64(~(__u64)0);
 	ddf->anchor.type = DDF_HEADER_ANCHOR;
 	memset(ddf->anchor.pad2, 0xff, 3);
-	ddf->anchor.workspace_len = __cpu_to_be32(32768); /* Must be reserved */
-	ddf->anchor.workspace_lba = ~(__u64)0; /* Put this at bottom
-						  of 32M reserved.. */
+	ddf->anchor.workspace_len = cpu_to_be32(32768); /* Must be reserved */
+	/* Put this at bottom of 32M reserved.. */
+	ddf->anchor.workspace_lba = cpu_to_be64(~(__u64)0);
 	max_phys_disks = 1023;   /* Should be enough */
-	ddf->anchor.max_pd_entries = __cpu_to_be16(max_phys_disks);
+	ddf->anchor.max_pd_entries = cpu_to_be16(max_phys_disks);
 	max_virt_disks = 255;
-	ddf->anchor.max_vd_entries = __cpu_to_be16(max_virt_disks); /* ?? */
-	ddf->anchor.max_partitions = __cpu_to_be16(64); /* ?? */
+	ddf->anchor.max_vd_entries = cpu_to_be16(max_virt_disks); /* ?? */
+	ddf->anchor.max_partitions = cpu_to_be16(64); /* ?? */
 	ddf->max_part = 64;
 	ddf->mppe = 256;
 	ddf->conf_rec_len = 1 + ROUND_UP(ddf->mppe * (4+8), 512)/512;
-	ddf->anchor.config_record_len = __cpu_to_be16(ddf->conf_rec_len);
-	ddf->anchor.max_primary_element_entries = __cpu_to_be16(ddf->mppe);
+	ddf->anchor.config_record_len = cpu_to_be16(ddf->conf_rec_len);
+	ddf->anchor.max_primary_element_entries = cpu_to_be16(ddf->mppe);
 	memset(ddf->anchor.pad3, 0xff, 54);
 	/* controller sections is one sector long immediately
 	 * after the ddf header */
 	sector = 1;
-	ddf->anchor.controller_section_offset = __cpu_to_be32(sector);
-	ddf->anchor.controller_section_length = __cpu_to_be32(1);
+	ddf->anchor.controller_section_offset = cpu_to_be32(sector);
+	ddf->anchor.controller_section_length = cpu_to_be32(1);
 	sector += 1;
 
 	/* phys is 8 sectors after that */
@@ -1695,9 +2254,9 @@ static int init_super_ddf(struct supertype *st,
 	case 2: case 8: case 32: case 128: case 512: break;
 	default: abort();
 	}
-	ddf->anchor.phys_section_offset = __cpu_to_be32(sector);
+	ddf->anchor.phys_section_offset = cpu_to_be32(sector);
 	ddf->anchor.phys_section_length =
-		__cpu_to_be32(pdsize/512); /* max_primary_element_entries/8 */
+		cpu_to_be32(pdsize/512); /* max_primary_element_entries/8 */
 	sector += pdsize/512;
 
 	/* virt is another 32 sectors */
@@ -1708,26 +2267,26 @@ static int init_super_ddf(struct supertype *st,
 	case 2: case 8: case 32: case 128: case 512: break;
 	default: abort();
 	}
-	ddf->anchor.virt_section_offset = __cpu_to_be32(sector);
+	ddf->anchor.virt_section_offset = cpu_to_be32(sector);
 	ddf->anchor.virt_section_length =
-		__cpu_to_be32(vdsize/512); /* max_vd_entries/8 */
+		cpu_to_be32(vdsize/512); /* max_vd_entries/8 */
 	sector += vdsize/512;
 
 	clen = ddf->conf_rec_len * (ddf->max_part+1);
-	ddf->anchor.config_section_offset = __cpu_to_be32(sector);
-	ddf->anchor.config_section_length = __cpu_to_be32(clen);
+	ddf->anchor.config_section_offset = cpu_to_be32(sector);
+	ddf->anchor.config_section_length = cpu_to_be32(clen);
 	sector += clen;
 
-	ddf->anchor.data_section_offset = __cpu_to_be32(sector);
-	ddf->anchor.data_section_length = __cpu_to_be32(1);
+	ddf->anchor.data_section_offset = cpu_to_be32(sector);
+	ddf->anchor.data_section_length = cpu_to_be32(1);
 	sector += 1;
 
-	ddf->anchor.bbm_section_length = __cpu_to_be32(0);
-	ddf->anchor.bbm_section_offset = __cpu_to_be32(0xFFFFFFFF);
-	ddf->anchor.diag_space_length = __cpu_to_be32(0);
-	ddf->anchor.diag_space_offset = __cpu_to_be32(0xFFFFFFFF);
-	ddf->anchor.vendor_length = __cpu_to_be32(0);
-	ddf->anchor.vendor_offset = __cpu_to_be32(0xFFFFFFFF);
+	ddf->anchor.bbm_section_length = cpu_to_be32(0);
+	ddf->anchor.bbm_section_offset = cpu_to_be32(0xFFFFFFFF);
+	ddf->anchor.diag_space_length = cpu_to_be32(0);
+	ddf->anchor.diag_space_offset = cpu_to_be32(0xFFFFFFFF);
+	ddf->anchor.vendor_length = cpu_to_be32(0);
+	ddf->anchor.vendor_offset = cpu_to_be32(0xFFFFFFFF);
 
 	memset(ddf->anchor.pad4, 0xff, 256);
 
@@ -1756,10 +2315,10 @@ static int init_super_ddf(struct supertype *st,
 	for (i = strlen(T10) ; i+hostlen < 24; i++)
 		ddf->controller.guid[i] = ' ';
 
-	ddf->controller.type.vendor_id = __cpu_to_be16(0xDEAD);
-	ddf->controller.type.device_id = __cpu_to_be16(0xBEEF);
-	ddf->controller.type.sub_vendor_id = 0;
-	ddf->controller.type.sub_device_id = 0;
+	ddf->controller.type.vendor_id = cpu_to_be16(0xDEAD);
+	ddf->controller.type.device_id = cpu_to_be16(0xBEEF);
+	ddf->controller.type.sub_vendor_id = cpu_to_be16(0);
+	ddf->controller.type.sub_device_id = cpu_to_be16(0);
 	memcpy(ddf->controller.product_id, "What Is My PID??", 16);
 	memset(ddf->controller.pad, 0xff, 8);
 	memset(ddf->controller.vendor_data, 0xff, 448);
@@ -1767,7 +2326,7 @@ static int init_super_ddf(struct supertype *st,
 		strcpy((char*)ddf->controller.vendor_data, homehost);
 
 	if (posix_memalign((void**)&pd, 512, pdsize) != 0) {
-		fprintf(stderr, Name ": %s could not allocate pd\n", __func__);
+		pr_err("%s could not allocate pd\n", __func__);
 		return 0;
 	}
 	ddf->phys = pd;
@@ -1776,127 +2335,35 @@ static int init_super_ddf(struct supertype *st,
 	memset(pd, 0xff, pdsize);
 	memset(pd, 0, sizeof(*pd));
 	pd->magic = DDF_PHYS_RECORDS_MAGIC;
-	pd->used_pdes = __cpu_to_be16(0);
-	pd->max_pdes = __cpu_to_be16(max_phys_disks);
+	pd->used_pdes = cpu_to_be16(0);
+	pd->max_pdes = cpu_to_be16(max_phys_disks);
 	memset(pd->pad, 0xff, 52);
+	for (i = 0; i < max_phys_disks; i++)
+		memset(pd->entries[i].guid, 0xff, DDF_GUID_LEN);
 
 	if (posix_memalign((void**)&vd, 512, vdsize) != 0) {
-		fprintf(stderr, Name ": %s could not allocate vd\n", __func__);
+		pr_err("%s could not allocate vd\n", __func__);
 		return 0;
 	}
 	ddf->virt = vd;
 	ddf->vdsize = vdsize;
 	memset(vd, 0, vdsize);
 	vd->magic = DDF_VIRT_RECORDS_MAGIC;
-	vd->populated_vdes = __cpu_to_be16(0);
-	vd->max_vdes = __cpu_to_be16(max_virt_disks);
+	vd->populated_vdes = cpu_to_be16(0);
+	vd->max_vdes = cpu_to_be16(max_virt_disks);
 	memset(vd->pad, 0xff, 52);
 
 	for (i=0; i<max_virt_disks; i++)
 		memset(&vd->entries[i], 0xff, sizeof(struct virtual_entry));
 
 	st->sb = ddf;
-	ddf->updates_pending = 1;
+	ddf_set_updates_pending(ddf);
 	return 1;
 }
 
 static int chunk_to_shift(int chunksize)
 {
 	return ffs(chunksize/512)-1;
-}
-
-static int level_to_prl(int level)
-{
-	switch (level) {
-	case LEVEL_LINEAR: return DDF_CONCAT;
-	case 0: return DDF_RAID0;
-	case 1: return DDF_RAID1;
-	case 4: return DDF_RAID4;
-	case 5: return DDF_RAID5;
-	case 6: return DDF_RAID6;
-	default: return -1;
-	}
-}
-static int layout_to_rlq(int level, int layout, int raiddisks)
-{
-	switch(level) {
-	case 0:
-		return DDF_RAID0_SIMPLE;
-	case 1:
-		switch(raiddisks) {
-		case 2: return DDF_RAID1_SIMPLE;
-		case 3: return DDF_RAID1_MULTI;
-		default: return -1;
-		}
-	case 4:
-		switch(layout) {
-		case 0: return DDF_RAID4_N;
-		}
-		break;
-	case 5:
-		switch(layout) {
-		case ALGORITHM_LEFT_ASYMMETRIC:
-			return DDF_RAID5_N_RESTART;
-		case ALGORITHM_RIGHT_ASYMMETRIC:
-			return DDF_RAID5_0_RESTART;
-		case ALGORITHM_LEFT_SYMMETRIC:
-			return DDF_RAID5_N_CONTINUE;
-		case ALGORITHM_RIGHT_SYMMETRIC:
-			return -1; /* not mentioned in standard */
-		}
-	case 6:
-		switch(layout) {
-		case ALGORITHM_ROTATING_N_RESTART:
-			return DDF_RAID5_N_RESTART;
-		case ALGORITHM_ROTATING_ZERO_RESTART:
-			return DDF_RAID6_0_RESTART;
-		case ALGORITHM_ROTATING_N_CONTINUE:
-			return DDF_RAID5_N_CONTINUE;
-		}
-	}
-	return -1;
-}
-
-static int rlq_to_layout(int rlq, int prl, int raiddisks)
-{
-	switch(prl) {
-	case DDF_RAID0:
-		return 0; /* hopefully rlq == DDF_RAID0_SIMPLE */
-	case DDF_RAID1:
-		return 0; /* hopefully rlq == SIMPLE or MULTI depending
-			     on raiddisks*/
-	case DDF_RAID4:
-		switch(rlq) {
-		case DDF_RAID4_N:
-			return 0;
-		default:
-			/* not supported */
-			return -1; /* FIXME this isn't checked */
-		}
-	case DDF_RAID5:
-		switch(rlq) {
-		case DDF_RAID5_N_RESTART:
-			return ALGORITHM_LEFT_ASYMMETRIC;
-		case DDF_RAID5_0_RESTART:
-			return ALGORITHM_RIGHT_ASYMMETRIC;
-		case DDF_RAID5_N_CONTINUE:
-			return ALGORITHM_LEFT_SYMMETRIC;
-		default:
-			return -1;
-		}
-	case DDF_RAID6:
-		switch(rlq) {
-		case DDF_RAID5_N_RESTART:
-			return ALGORITHM_ROTATING_N_RESTART;
-		case DDF_RAID6_0_RESTART:
-			return ALGORITHM_ROTATING_ZERO_RESTART;
-		case DDF_RAID5_N_CONTINUE:
-			return ALGORITHM_ROTATING_N_CONTINUE;
-		default:
-			return -1;
-		}
-	}
-	return -1;
 }
 
 #ifndef MDASSEMBLE
@@ -1920,33 +2387,34 @@ static struct extent *get_extents(struct ddf_super *ddf, struct dl *dl)
 	 * (dnum) of the given ddf.
 	 * Return a malloced array of 'struct extent'
 
-FIXME ignore DDF_Legacy devices?
+	 * FIXME ignore DDF_Legacy devices?
 
 	 */
 	struct extent *rv;
 	int n = 0;
-	unsigned int i, j;
+	unsigned int i;
+	__u16 state = be16_to_cpu(ddf->phys->entries[dl->pdnum].state);
 
-	rv = malloc(sizeof(struct extent) * (ddf->max_part + 2));
-	if (!rv)
+	if ((state & (DDF_Online|DDF_Failed|DDF_Missing)) != DDF_Online)
 		return NULL;
 
+	rv = xmalloc(sizeof(struct extent) * (ddf->max_part + 2));
+
 	for (i = 0; i < ddf->max_part; i++) {
+		const struct vd_config *bvd;
+		unsigned int ibvd;
 		struct vcl *v = dl->vlist[i];
-		if (v == NULL)
+		if (v == NULL ||
+		    get_pd_index_from_refnum(v, dl->disk.refnum, ddf->mppe,
+					     &bvd, &ibvd) == DDF_NOTFOUND)
 			continue;
-		for (j = 0; j < v->conf.prim_elmnt_count; j++)
-			if (v->conf.phys_refnum[j] == dl->disk.refnum) {
-				/* This device plays role 'j' in  'v'. */
-				rv[n].start = __be64_to_cpu(v->lba_offset[j]);
-				rv[n].size = __be64_to_cpu(v->conf.blocks);
-				n++;
-				break;
-			}
+		rv[n].start = be64_to_cpu(LBA_OFFSET(ddf, bvd)[ibvd]);
+		rv[n].size = be64_to_cpu(bvd->blocks);
+		n++;
 	}
 	qsort(rv, n, sizeof(*rv), cmp_extent);
 
-	rv[n].start = __be64_to_cpu(ddf->phys->entries[dl->pdnum].config_size);
+	rv[n].start = be64_to_cpu(ddf->phys->entries[dl->pdnum].config_size);
 	rv[n].size = 0;
 	return rv;
 }
@@ -1956,45 +2424,25 @@ static int init_super_ddf_bvd(struct supertype *st,
 			      mdu_array_info_t *info,
 			      unsigned long long size,
 			      char *name, char *homehost,
-			      int *uuid)
+			      int *uuid, unsigned long long data_offset)
 {
 	/* We are creating a BVD inside a pre-existing container.
 	 * so st->sb is already set.
 	 * We need to create a new vd_config and a new virtual_entry
 	 */
 	struct ddf_super *ddf = st->sb;
-	unsigned int venum;
+	unsigned int venum, i;
 	struct virtual_entry *ve;
 	struct vcl *vcl;
 	struct vd_config *vc;
 
-	if (__be16_to_cpu(ddf->virt->populated_vdes)
-	    >= __be16_to_cpu(ddf->virt->max_vdes)) {
-		fprintf(stderr, Name": This ddf already has the "
-			"maximum of %d virtual devices\n",
-			__be16_to_cpu(ddf->virt->max_vdes));
+	if (find_vde_by_name(ddf, name) != DDF_NOTFOUND) {
+		pr_err("This ddf already has an array called %s\n", name);
 		return 0;
 	}
-
-	if (name)
-		for (venum = 0; venum < __be16_to_cpu(ddf->virt->max_vdes); venum++)
-			if (!all_ff(ddf->virt->entries[venum].guid)) {
-				char *n = ddf->virt->entries[venum].name;
-
-				if (strncmp(name, n, 16) == 0) {
-					fprintf(stderr, Name ": This ddf already"
-						" has an array called %s\n",
-						name);
-					return 0;
-				}
-			}
-
-	for (venum = 0; venum < __be16_to_cpu(ddf->virt->max_vdes); venum++)
-		if (all_ff(ddf->virt->entries[venum].guid))
-			break;
-	if (venum == __be16_to_cpu(ddf->virt->max_vdes)) {
-		fprintf(stderr, Name ": Cannot find spare slot for "
-			"virtual disk - DDF is corrupt\n");
+	venum = find_unused_vde(ddf);
+	if (venum == DDF_NOTFOUND) {
+		pr_err("Cannot find spare slot for virtual disk\n");
 		return 0;
 	}
 	ve = &ddf->virt->entries[venum];
@@ -2003,10 +2451,11 @@ static int init_super_ddf_bvd(struct supertype *st,
 	 * timestamp, random number
 	 */
 	make_header_guid(ve->guid);
-	ve->unit = __cpu_to_be16(info->md_minor);
+	ve->unit = cpu_to_be16(info->md_minor);
 	ve->pad0 = 0xFFFF;
-	ve->guid_crc = crc32(0, (unsigned char*)ddf->anchor.guid, DDF_GUID_LEN);
-	ve->type = 0;
+	ve->guid_crc._v16 = crc32(0, (unsigned char *)ddf->anchor.guid,
+				  DDF_GUID_LEN);
+	ve->type = cpu_to_be16(0);
 	ve->state = DDF_state_degraded; /* Will be modified as devices are added */
 	if (info->state & 1) /* clean */
 		ve->init_state = DDF_init_full;
@@ -2018,45 +2467,51 @@ static int init_super_ddf_bvd(struct supertype *st,
 	if (name)
 		strncpy(ve->name, name, 16);
 	ddf->virt->populated_vdes =
-		__cpu_to_be16(__be16_to_cpu(ddf->virt->populated_vdes)+1);
+		cpu_to_be16(be16_to_cpu(ddf->virt->populated_vdes)+1);
 
 	/* Now create a new vd_config */
 	if (posix_memalign((void**)&vcl, 512,
 		           (offsetof(struct vcl, conf) + ddf->conf_rec_len * 512)) != 0) {
-		fprintf(stderr, Name ": %s could not allocate vd_config\n", __func__);
+		pr_err("%s could not allocate vd_config\n", __func__);
 		return 0;
 	}
-	vcl->lba_offset = (__u64*) &vcl->conf.phys_refnum[ddf->mppe];
 	vcl->vcnum = venum;
 	vcl->block_sizes = NULL; /* FIXME not for CONCAT */
-
 	vc = &vcl->conf;
 
 	vc->magic = DDF_VD_CONF_MAGIC;
 	memcpy(vc->guid, ve->guid, DDF_GUID_LEN);
-	vc->timestamp = __cpu_to_be32(time(0)-DECADE);
-	vc->seqnum = __cpu_to_be32(1);
+	vc->timestamp = cpu_to_be32(time(0)-DECADE);
+	vc->seqnum = cpu_to_be32(1);
 	memset(vc->pad0, 0xff, 24);
-	vc->prim_elmnt_count = __cpu_to_be16(info->raid_disks);
 	vc->chunk_shift = chunk_to_shift(info->chunk_size);
-	vc->prl = level_to_prl(info->level);
-	vc->rlq = layout_to_rlq(info->level, info->layout, info->raid_disks);
-	vc->sec_elmnt_count = 1;
+	if (layout_md2ddf(info, vc) == -1 ||
+		be16_to_cpu(vc->prim_elmnt_count) > ddf->mppe) {
+		pr_err("%s: unsupported RAID level/layout %d/%d with %d disks\n",
+		       __func__, info->level, info->layout, info->raid_disks);
+		free(vcl);
+		return 0;
+	}
 	vc->sec_elmnt_seq = 0;
-	vc->srl = 0;
-	vc->blocks = __cpu_to_be64(info->size * 2);
-	vc->array_blocks = __cpu_to_be64(
+	if (alloc_other_bvds(ddf, vcl) != 0) {
+		pr_err("%s could not allocate other bvds\n",
+		       __func__);
+		free(vcl);
+		return 0;
+	}
+	vc->blocks = cpu_to_be64(info->size * 2);
+	vc->array_blocks = cpu_to_be64(
 		calc_array_size(info->level, info->raid_disks, info->layout,
 				info->chunk_size, info->size*2));
 	memset(vc->pad1, 0xff, 8);
-	vc->spare_refs[0] = 0xffffffff;
-	vc->spare_refs[1] = 0xffffffff;
-	vc->spare_refs[2] = 0xffffffff;
-	vc->spare_refs[3] = 0xffffffff;
-	vc->spare_refs[4] = 0xffffffff;
-	vc->spare_refs[5] = 0xffffffff;
-	vc->spare_refs[6] = 0xffffffff;
-	vc->spare_refs[7] = 0xffffffff;
+	vc->spare_refs[0] = cpu_to_be32(0xffffffff);
+	vc->spare_refs[1] = cpu_to_be32(0xffffffff);
+	vc->spare_refs[2] = cpu_to_be32(0xffffffff);
+	vc->spare_refs[3] = cpu_to_be32(0xffffffff);
+	vc->spare_refs[4] = cpu_to_be32(0xffffffff);
+	vc->spare_refs[5] = cpu_to_be32(0xffffffff);
+	vc->spare_refs[6] = cpu_to_be32(0xffffffff);
+	vc->spare_refs[7] = cpu_to_be32(0xffffffff);
 	memset(vc->cache_pol, 0, 8);
 	vc->bg_rate = 0x80;
 	memset(vc->pad2, 0xff, 3);
@@ -2071,14 +2526,22 @@ static int init_super_ddf_bvd(struct supertype *st,
 	memset(vc->phys_refnum, 0xff, 4*ddf->mppe);
 	memset(vc->phys_refnum+ddf->mppe, 0x00, 8*ddf->mppe);
 
+	for (i = 1; i < vc->sec_elmnt_count; i++) {
+		memcpy(vcl->other_bvds[i-1], vc, ddf->conf_rec_len * 512);
+		vcl->other_bvds[i-1]->sec_elmnt_seq = i;
+	}
+
 	vcl->next = ddf->conflist;
 	ddf->conflist = vcl;
 	ddf->currentconf = vcl;
-	ddf->updates_pending = 1;
+	ddf_set_updates_pending(ddf);
 	return 1;
 }
 
+
 #ifndef MDASSEMBLE
+static int get_svd_state(const struct ddf_super *, const struct vcl *);
+
 static void add_to_super_ddf_bvd(struct supertype *st,
 				 mdu_disk_info_t *dk, int fd, char *devname)
 {
@@ -2095,11 +2558,10 @@ static void add_to_super_ddf_bvd(struct supertype *st,
 	struct dl *dl;
 	struct ddf_super *ddf = st->sb;
 	struct vd_config *vc;
-	__u64 *lba_offset;
-	unsigned int working;
 	unsigned int i;
 	unsigned long long blocks, pos, esize;
 	struct extent *ex;
+	unsigned int raid_disk = dk->raid_disk;
 
 	if (fd == -1) {
 		for (dl = ddf->dlist; dl ; dl = dl->next)
@@ -2115,14 +2577,19 @@ static void add_to_super_ddf_bvd(struct supertype *st,
 		return;
 
 	vc = &ddf->currentconf->conf;
-	lba_offset = ddf->currentconf->lba_offset;
+	if (vc->sec_elmnt_count > 1) {
+		unsigned int n = be16_to_cpu(vc->prim_elmnt_count);
+		if (raid_disk >= n)
+			vc = ddf->currentconf->other_bvds[raid_disk / n - 1];
+		raid_disk %= n;
+	}
 
 	ex = get_extents(ddf, dl);
 	if (!ex)
 		return;
 
 	i = 0; pos = 0;
-	blocks = __be64_to_cpu(vc->blocks);
+	blocks = be64_to_cpu(vc->blocks);
 	if (ddf->currentconf->block_sizes)
 		blocks = ddf->currentconf->block_sizes[dk->raid_disk];
 
@@ -2139,8 +2606,8 @@ static void add_to_super_ddf_bvd(struct supertype *st,
 		return;
 
 	ddf->currentdev = dk->raid_disk;
-	vc->phys_refnum[dk->raid_disk] = dl->disk.refnum;
-	lba_offset[dk->raid_disk] = __cpu_to_be64(pos);
+	vc->phys_refnum[raid_disk] = dl->disk.refnum;
+	LBA_OFFSET(ddf, vc)[raid_disk] = cpu_to_be64(pos);
 
 	for (i = 0; i < ddf->max_part ; i++)
 		if (dl->vlist[i] == NULL)
@@ -2154,38 +2621,38 @@ static void add_to_super_ddf_bvd(struct supertype *st,
 	if (devname)
 		dl->devname = devname;
 
-	/* Check how many working raid_disks, and if we can mark
-	 * array as optimal yet
-	 */
-	working = 0;
-
-	for (i = 0; i < __be16_to_cpu(vc->prim_elmnt_count); i++)
-		if (vc->phys_refnum[i] != 0xffffffff)
-			working++;
-
-	/* Find which virtual_entry */
+	/* Check if we can mark array as optimal yet */
 	i = ddf->currentconf->vcnum;
-	if (working == __be16_to_cpu(vc->prim_elmnt_count))
-		ddf->virt->entries[i].state =
-			(ddf->virt->entries[i].state & ~DDF_state_mask)
-			| DDF_state_optimal;
+	ddf->virt->entries[i].state =
+		(ddf->virt->entries[i].state & ~DDF_state_mask)
+		| get_svd_state(ddf, ddf->currentconf);
+	be16_clear(ddf->phys->entries[dl->pdnum].type,
+		   cpu_to_be16(DDF_Global_Spare));
+	be16_set(ddf->phys->entries[dl->pdnum].type,
+		 cpu_to_be16(DDF_Active_in_VD));
+	dprintf("%s: added disk %d/%08x to VD %d/%s as disk %d\n",
+		__func__, dl->pdnum, be32_to_cpu(dl->disk.refnum),
+		ddf->currentconf->vcnum, guid_str(vc->guid),
+		dk->raid_disk);
+	ddf_set_updates_pending(ddf);
+}
 
-	if (vc->prl == DDF_RAID6 &&
-	    working+1 == __be16_to_cpu(vc->prim_elmnt_count))
-		ddf->virt->entries[i].state =
-			(ddf->virt->entries[i].state & ~DDF_state_mask)
-			| DDF_state_part_optimal;
-
-	ddf->phys->entries[dl->pdnum].type &= ~__cpu_to_be16(DDF_Global_Spare);
-	ddf->phys->entries[dl->pdnum].type |= __cpu_to_be16(DDF_Active_in_VD);
-	ddf->updates_pending = 1;
+static unsigned int find_unused_pde(const struct ddf_super *ddf)
+{
+	unsigned int i;
+	for (i = 0; i < be16_to_cpu(ddf->phys->max_pdes); i++) {
+		if (all_ff(ddf->phys->entries[i].guid))
+			return i;
+	}
+	return DDF_NOTFOUND;
 }
 
 /* add a device to a container, either while creating it or while
  * expanding a pre-existing container
  */
 static int add_to_super_ddf(struct supertype *st,
-			     mdu_disk_info_t *dk, int fd, char *devname)
+			    mdu_disk_info_t *dk, int fd, char *devname,
+			    unsigned long long data_offset)
 {
 	struct ddf_super *ddf = st->sb;
 	struct dl *dd;
@@ -2206,11 +2673,25 @@ static int add_to_super_ddf(struct supertype *st,
 	 * a phys_disk entry and a more detailed disk_data entry.
 	 */
 	fstat(fd, &stb);
+	n = find_unused_pde(ddf);
+	if (n == DDF_NOTFOUND) {
+		pr_err("%s: No free slot in array, cannot add disk\n",
+		       __func__);
+		return 1;
+	}
+	pde = &ddf->phys->entries[n];
+	get_dev_size(fd, NULL, &size);
+	if (size <= 32*1024*1024) {
+		pr_err("%s: device size must be at least 32MB\n",
+		       __func__);
+		return 1;
+	}
+	size >>= 9;
+
 	if (posix_memalign((void**)&dd, 512,
 		           sizeof(*dd) + sizeof(dd->vlist[0]) * ddf->max_part) != 0) {
-		fprintf(stderr, Name
-			": %s could allocate buffer for new disk, aborting\n",
-			__func__);
+		pr_err("%s could allocate buffer for new disk, aborting\n",
+		       __func__);
 		return 1;
 	}
 	dd->major = major(stb.st_rdev);
@@ -2230,10 +2711,11 @@ static int add_to_super_ddf(struct supertype *st,
 
 	do {
 		/* Cannot be bothered finding a CRC of some irrelevant details*/
-		dd->disk.refnum = random32();
-		for (i = __be16_to_cpu(ddf->active->max_pd_entries);
+		dd->disk.refnum._v32 = random32();
+		for (i = be16_to_cpu(ddf->active->max_pd_entries);
 		     i > 0; i--)
-			if (ddf->phys->entries[i-1].refnum == dd->disk.refnum)
+			if (be32_eq(ddf->phys->entries[i-1].refnum,
+				    dd->disk.refnum))
 				break;
 	} while (i > 0);
 
@@ -2245,8 +2727,6 @@ static int add_to_super_ddf(struct supertype *st,
 	for (i = 0; i < ddf->max_part ; i++)
 		dd->vlist[i] = NULL;
 
-	n = __be16_to_cpu(ddf->phys->used_pdes);
-	pde = &ddf->phys->entries[n];
 	dd->pdnum = n;
 
 	if (st->update_tail) {
@@ -2254,34 +2734,51 @@ static int add_to_super_ddf(struct supertype *st,
 			   sizeof(struct phys_disk_entry));
 		struct phys_disk *pd;
 
-		pd = malloc(len);
+		pd = xmalloc(len);
 		pd->magic = DDF_PHYS_RECORDS_MAGIC;
-		pd->used_pdes = __cpu_to_be16(n);
+		pd->used_pdes = cpu_to_be16(n);
 		pde = &pd->entries[0];
 		dd->mdupdate = pd;
-	} else {
-		n++;
-		ddf->phys->used_pdes = __cpu_to_be16(n);
-	}
+	} else
+		ddf->phys->used_pdes = cpu_to_be16(
+			1 + be16_to_cpu(ddf->phys->used_pdes));
 
 	memcpy(pde->guid, dd->disk.guid, DDF_GUID_LEN);
 	pde->refnum = dd->disk.refnum;
-	pde->type = __cpu_to_be16(DDF_Forced_PD_GUID | DDF_Global_Spare);
-	pde->state = __cpu_to_be16(DDF_Online);
-	get_dev_size(fd, NULL, &size);
-	/* We are required to reserve 32Meg, and record the size in sectors */
-	pde->config_size = __cpu_to_be64( (size - 32*1024*1024) / 512);
+	pde->type = cpu_to_be16(DDF_Forced_PD_GUID | DDF_Global_Spare);
+	pde->state = cpu_to_be16(DDF_Online);
+	dd->size = size;
+	/*
+	 * If there is already a device in dlist, try to reserve the same
+	 * amount of workspace. Otherwise, use 32MB.
+	 * We checked disk size above already.
+	 */
+#define __calc_lba(new, old, lba, mb) do { \
+		unsigned long long dif; \
+		if ((old) != NULL) \
+			dif = (old)->size - be64_to_cpu((old)->lba); \
+		else \
+			dif = (new)->size; \
+		if ((new)->size > dif) \
+			(new)->lba = cpu_to_be64((new)->size - dif); \
+		else \
+			(new)->lba = cpu_to_be64((new)->size - (mb*1024*2)); \
+	} while (0)
+	__calc_lba(dd, ddf->dlist, workspace_lba, 32);
+	__calc_lba(dd, ddf->dlist, primary_lba, 16);
+	__calc_lba(dd, ddf->dlist, secondary_lba, 32);
+	pde->config_size = dd->workspace_lba;
+
 	sprintf(pde->path, "%17.17s","Information: nil") ;
 	memset(pde->pad, 0xff, 6);
 
-	dd->size = size >> 9;
 	if (st->update_tail) {
 		dd->next = ddf->add_list;
 		ddf->add_list = dd;
 	} else {
 		dd->next = ddf->dlist;
 		ddf->dlist = dd;
-		ddf->updates_pending = 1;
+		ddf_set_updates_pending(ddf);
 	}
 
 	return 0;
@@ -2312,14 +2809,15 @@ static int remove_from_super_ddf(struct supertype *st, mdu_disk_info_t *dk)
 			   sizeof(struct phys_disk_entry));
 		struct phys_disk *pd;
 
-		pd = malloc(len);
+		pd = xmalloc(len);
 		pd->magic = DDF_PHYS_RECORDS_MAGIC;
-		pd->used_pdes = __cpu_to_be16(dl->pdnum);
-		pd->entries[0].state = __cpu_to_be16(DDF_Missing);
+		pd->used_pdes = cpu_to_be16(dl->pdnum);
+		pd->entries[0].state = cpu_to_be16(DDF_Missing);
 		append_metadata_update(st, pd, len);
 	}
 	return 0;
 }
+#endif
 
 /*
  * This is the write_init_super method for a ddf container.  It is
@@ -2328,116 +2826,173 @@ static int remove_from_super_ddf(struct supertype *st, mdu_disk_info_t *dk)
  */
 #define NULL_CONF_SZ	4096
 
+static int __write_ddf_structure(struct dl *d, struct ddf_super *ddf, __u8 type)
+{
+	unsigned long long sector;
+	struct ddf_header *header;
+	int fd, i, n_config, conf_size, buf_size;
+	int ret = 0;
+	char *conf;
+
+	fd = d->fd;
+
+	switch (type) {
+	case DDF_HEADER_PRIMARY:
+		header = &ddf->primary;
+		sector = be64_to_cpu(header->primary_lba);
+		break;
+	case DDF_HEADER_SECONDARY:
+		header = &ddf->secondary;
+		sector = be64_to_cpu(header->secondary_lba);
+		break;
+	default:
+		return 0;
+	}
+
+	header->type = type;
+	header->openflag = 1;
+	header->crc = calc_crc(header, 512);
+
+	lseek64(fd, sector<<9, 0);
+	if (write(fd, header, 512) < 0)
+		goto out;
+
+	ddf->controller.crc = calc_crc(&ddf->controller, 512);
+	if (write(fd, &ddf->controller, 512) < 0)
+		goto out;
+
+	ddf->phys->crc = calc_crc(ddf->phys, ddf->pdsize);
+	if (write(fd, ddf->phys, ddf->pdsize) < 0)
+		goto out;
+	ddf->virt->crc = calc_crc(ddf->virt, ddf->vdsize);
+	if (write(fd, ddf->virt, ddf->vdsize) < 0)
+		goto out;
+
+	/* Now write lots of config records. */
+	n_config = ddf->max_part;
+	conf_size = ddf->conf_rec_len * 512;
+	conf = ddf->conf;
+	buf_size = conf_size * (n_config + 1);
+	if (!conf) {
+		if (posix_memalign((void**)&conf, 512, buf_size) != 0)
+			goto out;
+		ddf->conf = conf;
+	}
+	for (i = 0 ; i <= n_config ; i++) {
+		struct vcl *c;
+		struct vd_config *vdc = NULL;
+		if (i == n_config) {
+			c = (struct vcl *)d->spare;
+			if (c)
+				vdc = &c->conf;
+		} else {
+			unsigned int dummy;
+			c = d->vlist[i];
+			if (c)
+				get_pd_index_from_refnum(
+					c, d->disk.refnum,
+					ddf->mppe,
+					(const struct vd_config **)&vdc,
+					&dummy);
+		}
+		if (c) {
+			dprintf("writing conf record %i on disk %08x for %s/%u\n",
+				i, be32_to_cpu(d->disk.refnum),
+				guid_str(vdc->guid),
+				vdc->sec_elmnt_seq);
+			vdc->seqnum = header->seq;
+			vdc->crc = calc_crc(vdc, conf_size);
+			memcpy(conf + i*conf_size, vdc, conf_size);
+		} else
+			memset(conf + i*conf_size, 0xff, conf_size);
+	}
+	if (write(fd, conf, buf_size) != buf_size)
+		goto out;
+
+	d->disk.crc = calc_crc(&d->disk, 512);
+	if (write(fd, &d->disk, 512) < 0)
+		goto out;
+
+	ret = 1;
+out:
+	header->openflag = 0;
+	header->crc = calc_crc(header, 512);
+
+	lseek64(fd, sector<<9, 0);
+	if (write(fd, header, 512) < 0)
+		ret = 0;
+
+	return ret;
+}
+
+static int _write_super_to_disk(struct ddf_super *ddf, struct dl *d)
+{
+	unsigned long long size;
+	int fd = d->fd;
+	if (fd < 0)
+		return 0;
+
+	/* We need to fill in the primary, (secondary) and workspace
+	 * lba's in the headers, set their checksums,
+	 * Also checksum phys, virt....
+	 *
+	 * Then write everything out, finally the anchor is written.
+	 */
+	get_dev_size(fd, NULL, &size);
+	size /= 512;
+	if (be64_to_cpu(d->workspace_lba) != 0ULL)
+		ddf->anchor.workspace_lba = d->workspace_lba;
+	else
+		ddf->anchor.workspace_lba =
+			cpu_to_be64(size - 32*1024*2);
+	if (be64_to_cpu(d->primary_lba) != 0ULL)
+		ddf->anchor.primary_lba = d->primary_lba;
+	else
+		ddf->anchor.primary_lba =
+			cpu_to_be64(size - 16*1024*2);
+	if (be64_to_cpu(d->secondary_lba) != 0ULL)
+		ddf->anchor.secondary_lba = d->secondary_lba;
+	else
+		ddf->anchor.secondary_lba =
+			cpu_to_be64(size - 32*1024*2);
+	ddf->anchor.seq = ddf->active->seq;
+	memcpy(&ddf->primary, &ddf->anchor, 512);
+	memcpy(&ddf->secondary, &ddf->anchor, 512);
+
+	ddf->anchor.openflag = 0xFF; /* 'open' means nothing */
+	ddf->anchor.seq = cpu_to_be32(0xFFFFFFFF); /* no sequencing in anchor */
+	ddf->anchor.crc = calc_crc(&ddf->anchor, 512);
+
+	if (!__write_ddf_structure(d, ddf, DDF_HEADER_PRIMARY))
+		return 0;
+
+	if (!__write_ddf_structure(d, ddf, DDF_HEADER_SECONDARY))
+		return 0;
+
+	lseek64(fd, (size-1)*512, SEEK_SET);
+	if (write(fd, &ddf->anchor, 512) < 0)
+		return 0;
+
+	return 1;
+}
+
+#ifndef MDASSEMBLE
 static int __write_init_super_ddf(struct supertype *st)
 {
-
 	struct ddf_super *ddf = st->sb;
-	int i;
 	struct dl *d;
-	int n_config;
-	int conf_size;
 	int attempts = 0;
 	int successes = 0;
-	unsigned long long size, sector;
-	char *null_aligned;
 
-	if (posix_memalign((void**)&null_aligned, 4096, NULL_CONF_SZ) != 0) {
-		return -ENOMEM;
-	}
-	memset(null_aligned, 0xff, NULL_CONF_SZ);
+	pr_state(ddf, __func__);
 
 	/* try to write updated metadata,
 	 * if we catch a failure move on to the next disk
 	 */
 	for (d = ddf->dlist; d; d=d->next) {
-		int fd = d->fd;
-
-		if (fd < 0)
-			continue;
-
 		attempts++;
-		/* We need to fill in the primary, (secondary) and workspace
-		 * lba's in the headers, set their checksums,
-		 * Also checksum phys, virt....
-		 *
-		 * Then write everything out, finally the anchor is written.
-		 */
-		get_dev_size(fd, NULL, &size);
-		size /= 512;
-		ddf->anchor.workspace_lba = __cpu_to_be64(size - 32*1024*2);
-		ddf->anchor.primary_lba = __cpu_to_be64(size - 16*1024*2);
-		ddf->anchor.seq = __cpu_to_be32(1);
-		memcpy(&ddf->primary, &ddf->anchor, 512);
-		memcpy(&ddf->secondary, &ddf->anchor, 512);
-
-		ddf->anchor.openflag = 0xFF; /* 'open' means nothing */
-		ddf->anchor.seq = 0xFFFFFFFF; /* no sequencing in anchor */
-		ddf->anchor.crc = calc_crc(&ddf->anchor, 512);
-
-		ddf->primary.openflag = 0;
-		ddf->primary.type = DDF_HEADER_PRIMARY;
-
-		ddf->secondary.openflag = 0;
-		ddf->secondary.type = DDF_HEADER_SECONDARY;
-
-		ddf->primary.crc = calc_crc(&ddf->primary, 512);
-		ddf->secondary.crc = calc_crc(&ddf->secondary, 512);
-
-		sector = size - 16*1024*2;
-		lseek64(fd, sector<<9, 0);
-		if (write(fd, &ddf->primary, 512) < 0)
-			continue;
-
-		ddf->controller.crc = calc_crc(&ddf->controller, 512);
-		if (write(fd, &ddf->controller, 512) < 0)
-			continue;
-
-		ddf->phys->crc = calc_crc(ddf->phys, ddf->pdsize);
-
-		if (write(fd, ddf->phys, ddf->pdsize) < 0)
-			continue;
-
-		ddf->virt->crc = calc_crc(ddf->virt, ddf->vdsize);
-		if (write(fd, ddf->virt, ddf->vdsize) < 0)
-			continue;
-
-		/* Now write lots of config records. */
-		n_config = ddf->max_part;
-		conf_size = ddf->conf_rec_len * 512;
-		for (i = 0 ; i <= n_config ; i++) {
-			struct vcl *c = d->vlist[i];
-			if (i == n_config)
-				c = (struct vcl*)d->spare;
-
-			if (c) {
-				c->conf.crc = calc_crc(&c->conf, conf_size);
-				if (write(fd, &c->conf, conf_size) < 0)
-					break;
-			} else {
-				unsigned int togo = conf_size;
-				while (togo > NULL_CONF_SZ) {
-					if (write(fd, null_aligned, NULL_CONF_SZ) < 0)
-						break;
-					togo -= NULL_CONF_SZ;
-				}
-				if (write(fd, null_aligned, togo) < 0)
-					break;
-			}
-		}
-		if (i <= n_config)
-			continue;
-		d->disk.crc = calc_crc(&d->disk, 512);
-		if (write(fd, &d->disk, 512) < 0)
-			continue;
-
-		/* Maybe do the same for secondary */
-
-		lseek64(fd, (size-1)*512, SEEK_SET);
-		if (write(fd, &ddf->anchor, 512) < 0)
-			continue;
-		successes++;
+		successes += _write_super_to_disk(ddf, d);
 	}
-	free(null_aligned);
 
 	return attempts != successes;
 }
@@ -2454,7 +3009,8 @@ static int write_init_super_ddf(struct supertype *st)
 		/* queue the virtual_disk and vd_config as metadata updates */
 		struct virtual_disk *vd;
 		struct vd_config *vc;
-		int len;
+		int len, tlen;
+		unsigned int i;
 
 		if (!currentconf) {
 			int len = (sizeof(struct phys_disk) +
@@ -2473,31 +3029,37 @@ static int write_init_super_ddf(struct supertype *st)
 
 		/* First the virtual disk.  We have a slightly fake header */
 		len = sizeof(struct virtual_disk) + sizeof(struct virtual_entry);
-		vd = malloc(len);
+		vd = xmalloc(len);
 		*vd = *ddf->virt;
 		vd->entries[0] = ddf->virt->entries[currentconf->vcnum];
-		vd->populated_vdes = __cpu_to_be16(currentconf->vcnum);
+		vd->populated_vdes = cpu_to_be16(currentconf->vcnum);
 		append_metadata_update(st, vd, len);
 
 		/* Then the vd_config */
 		len = ddf->conf_rec_len * 512;
-		vc = malloc(len);
+		tlen = len * currentconf->conf.sec_elmnt_count;
+		vc = xmalloc(tlen);
 		memcpy(vc, &currentconf->conf, len);
-		append_metadata_update(st, vc, len);
+		for (i = 1; i < currentconf->conf.sec_elmnt_count; i++)
+			memcpy((char *)vc + i*len, currentconf->other_bvds[i-1],
+			       len);
+		append_metadata_update(st, vc, tlen);
 
 		/* FIXME I need to close the fds! */
 		return 0;
-	} else {	
+	} else {
 		struct dl *d;
-		for (d = ddf->dlist; d; d=d->next)
-			while (Kill(d->devname, NULL, 0, 1, 1) == 0);
+		if (!currentconf)
+			for (d = ddf->dlist; d; d=d->next)
+				while (Kill(d->devname, NULL, 0, -1, 1) == 0);
 		return __write_init_super_ddf(st);
 	}
 }
 
 #endif
 
-static __u64 avail_size_ddf(struct supertype *st, __u64 devsize)
+static __u64 avail_size_ddf(struct supertype *st, __u64 devsize,
+			    unsigned long long data_offset)
 {
 	/* We must reserve the last 32Meg */
 	if (devsize <= 32*1024*2)
@@ -2521,7 +3083,7 @@ static int reserve_space(struct supertype *st, int raiddisks,
 	int cnt = 0;
 
 	for (dl = ddf->dlist; dl ; dl=dl->next) {
-		dl->raiddisk = -1;	
+		dl->raiddisk = -1;
 		dl->esize = 0;
 	}
 	/* Now find largest extent on each device */
@@ -2554,7 +3116,7 @@ static int reserve_space(struct supertype *st, int raiddisks,
 		free(e);
 	}
 	if (cnt < raiddisks) {
-		fprintf(stderr, Name ": not enough devices with space to create array.\n");
+		pr_err("not enough devices with space to create array.\n");
 		return 0; /* No enough free spaces large enough */
 	}
 	if (size == 0) {
@@ -2577,7 +3139,7 @@ static int reserve_space(struct supertype *st, int raiddisks,
 		}
 		*freesize = size;
 		if (size < 32) {
-			fprintf(stderr, Name ": not enough spare devices to create array.\n");
+			pr_err("not enough spare devices to create array.\n");
 			return 0;
 		}
 	}
@@ -2587,31 +3149,32 @@ static int reserve_space(struct supertype *st, int raiddisks,
 	for (dl = ddf->dlist ; dl && cnt < raiddisks ; dl=dl->next) {
 		if (dl->esize < size)
 			continue;
-		
+
 		dl->raiddisk = cnt;
 		cnt++;
 	}
 	return 1;
 }
 
-
-
 static int
 validate_geometry_ddf_container(struct supertype *st,
 				int level, int layout, int raiddisks,
 				int chunk, unsigned long long size,
+				unsigned long long data_offset,
 				char *dev, unsigned long long *freesize,
 				int verbose);
 
 static int validate_geometry_ddf_bvd(struct supertype *st,
 				     int level, int layout, int raiddisks,
 				     int *chunk, unsigned long long size,
+				     unsigned long long data_offset,
 				     char *dev, unsigned long long *freesize,
 				     int verbose);
 
 static int validate_geometry_ddf(struct supertype *st,
 				 int level, int layout, int raiddisks,
 				 int *chunk, unsigned long long size,
+				 unsigned long long data_offset,
 				 char *dev, unsigned long long *freesize,
 				 int verbose)
 {
@@ -2626,28 +3189,29 @@ static int validate_geometry_ddf(struct supertype *st,
 	 * If given BVDs, we make an SVD, changing all the GUIDs in the process.
 	 */
 
-	if (chunk && *chunk == UnSet)
+	if (*chunk == UnSet)
 		*chunk = DEFAULT_CHUNK;
 
-
+	if (level == -1000000) level = LEVEL_CONTAINER;
 	if (level == LEVEL_CONTAINER) {
 		/* Must be a fresh device to add to a container */
 		return validate_geometry_ddf_container(st, level, layout,
-						       raiddisks, chunk?*chunk:0,
-						       size, dev, freesize,
+						       raiddisks, *chunk,
+						       size, data_offset, dev,
+						       freesize,
 						       verbose);
 	}
 
 	if (!dev) {
-		/* Initial sanity check.  Exclude illegal levels. */
-		int i;
-		for (i=0; ddf_level_num[i].num1 != MAXINT; i++)
-			if (ddf_level_num[i].num2 == level)
-				break;
-		if (ddf_level_num[i].num1 == MAXINT) {
+		mdu_array_info_t array = {
+			.level = level, .layout = layout,
+			.raid_disks = raiddisks
+		};
+		struct vd_config conf;
+		if (layout_md2ddf(&array, &conf) == -1) {
 			if (verbose)
-				fprintf(stderr, Name ": DDF does not support level %d arrays\n",
-					level);
+				pr_err("DDF does not support level %d /layout %d arrays with %d disks\n",
+				       level, layout, raiddisks);
 			return 0;
 		}
 		/* Should check layout? etc */
@@ -2660,7 +3224,7 @@ static int validate_geometry_ddf(struct supertype *st,
 			 * chosen so that add_to_super/getinfo_super
 			 * can return them.
 			 */
-			return reserve_space(st, raiddisks, size, chunk?*chunk:0, freesize);
+			return reserve_space(st, raiddisks, size, *chunk, freesize);
 		}
 		return 1;
 	}
@@ -2671,7 +3235,8 @@ static int validate_geometry_ddf(struct supertype *st,
 		 * Should make a distinction one day.
 		 */
 		return validate_geometry_ddf_bvd(st, level, layout, raiddisks,
-						 chunk, size, dev, freesize,
+						 chunk, size, data_offset, dev,
+						 freesize,
 						 verbose);
 	}
 	/* This is the first device for the array.
@@ -2683,7 +3248,7 @@ static int validate_geometry_ddf(struct supertype *st,
 	 */
 	fd = open(dev, O_RDONLY|O_EXCL, 0);
 	if (fd >= 0) {
-		sra = sysfs_read(fd, 0, GET_VERSION);
+		sra = sysfs_read(fd, NULL, GET_VERSION);
 		close(fd);
 		if (sra && sra->array.major_version == -1 &&
 		    strcmp(sra->text_version, "ddf") == 0) {
@@ -2695,16 +3260,15 @@ static int validate_geometry_ddf(struct supertype *st,
 		}
 
 		if (verbose)
-			fprintf(stderr,
-				Name ": ddf: Cannot create this array "
-				"on device %s - a container is required.\n",
-				dev);
+			pr_err("ddf: Cannot create this array "
+			       "on device %s - a container is required.\n",
+			       dev);
 		return 0;
 	}
 	if (errno != EBUSY || (fd = open(dev, O_RDONLY, 0)) < 0) {
 		if (verbose)
-			fprintf(stderr, Name ": ddf: Cannot open %s: %s\n",
-				dev, strerror(errno));
+			pr_err("ddf: Cannot open %s: %s\n",
+			       dev, strerror(errno));
 		return 0;
 	}
 	/* Well, it is in use by someone, maybe a 'ddf' container. */
@@ -2712,11 +3276,11 @@ static int validate_geometry_ddf(struct supertype *st,
 	if (cfd < 0) {
 		close(fd);
 		if (verbose)
-			fprintf(stderr, Name ": ddf: Cannot use %s: %s\n",
-				dev, strerror(EBUSY));
+			pr_err("ddf: Cannot use %s: %s\n",
+			       dev, strerror(EBUSY));
 		return 0;
 	}
-	sra = sysfs_read(cfd, 0, GET_VERSION);
+	sra = sysfs_read(cfd, NULL, GET_VERSION);
 	close(fd);
 	if (sra && sra->array.major_version == -1 &&
 	    strcmp(sra->text_version, "ddf") == 0) {
@@ -2726,10 +3290,11 @@ static int validate_geometry_ddf(struct supertype *st,
 		struct ddf_super *ddf;
 		if (load_super_ddf_all(st, cfd, (void **)&ddf, NULL) == 0) {
 			st->sb = ddf;
-			st->container_dev = fd2devnum(cfd);
+			strcpy(st->container_devnm, fd2devnm(cfd));
 			close(cfd);
 			return validate_geometry_ddf_bvd(st, level, layout,
 							 raiddisks, chunk, size,
+							 data_offset,
 							 dev, freesize,
 							 verbose);
 		}
@@ -2744,6 +3309,7 @@ static int
 validate_geometry_ddf_container(struct supertype *st,
 				int level, int layout, int raiddisks,
 				int chunk, unsigned long long size,
+				unsigned long long data_offset,
 				char *dev, unsigned long long *freesize,
 				int verbose)
 {
@@ -2758,8 +3324,8 @@ validate_geometry_ddf_container(struct supertype *st,
 	fd = open(dev, O_RDONLY|O_EXCL, 0);
 	if (fd < 0) {
 		if (verbose)
-			fprintf(stderr, Name ": ddf: Cannot open %s: %s\n",
-				dev, strerror(errno));
+			pr_err("ddf: Cannot open %s: %s\n",
+			       dev, strerror(errno));
 		return 0;
 	}
 	if (!get_dev_size(fd, dev, &ldsize)) {
@@ -2768,7 +3334,7 @@ validate_geometry_ddf_container(struct supertype *st,
 	}
 	close(fd);
 
-	*freesize = avail_size_ddf(st, ldsize >> 9);
+	*freesize = avail_size_ddf(st, ldsize >> 9, INVALID_SECTORS);
 	if (*freesize == 0)
 		return 0;
 
@@ -2778,6 +3344,7 @@ validate_geometry_ddf_container(struct supertype *st,
 static int validate_geometry_ddf_bvd(struct supertype *st,
 				     int level, int layout, int raiddisks,
 				     int *chunk, unsigned long long size,
+				     unsigned long long data_offset,
 				     char *dev, unsigned long long *freesize,
 				     int verbose)
 {
@@ -2791,7 +3358,7 @@ static int validate_geometry_ddf_bvd(struct supertype *st,
 	/* ddf/bvd supports lots of things, but not containers */
 	if (level == LEVEL_CONTAINER) {
 		if (verbose)
-			fprintf(stderr, Name ": DDF cannot create a container within an container\n");
+			pr_err("DDF cannot create a container within an container\n");
 		return 0;
 	}
 	/* We must have the container info already read in. */
@@ -2828,10 +3395,9 @@ static int validate_geometry_ddf_bvd(struct supertype *st,
 		}
 		if (dcnt < raiddisks) {
 			if (verbose)
-				fprintf(stderr,
-					Name ": ddf: Not enough devices with "
-					"space for this array (%d < %d)\n",
-					dcnt, raiddisks);
+				pr_err("ddf: Not enough devices with "
+				       "space for this array (%d < %d)\n",
+				       dcnt, raiddisks);
 			return 0;
 		}
 		return 1;
@@ -2848,22 +3414,22 @@ static int validate_geometry_ddf_bvd(struct supertype *st,
 	}
 	if (!dl) {
 		if (verbose)
-			fprintf(stderr, Name ": ddf: %s is not in the "
-				"same DDF set\n",
-				dev);
+			pr_err("ddf: %s is not in the "
+			       "same DDF set\n",
+			       dev);
 		return 0;
 	}
 	e = get_extents(ddf, dl);
 	maxsize = 0;
 	i = 0;
 	if (e) do {
-		unsigned long long esize;
-		esize = e[i].start - pos;
-		if (esize >= maxsize)
-			maxsize = esize;
-		pos = e[i].start + e[i].size;
-		i++;
-	} while (e[i-1].size);
+			unsigned long long esize;
+			esize = e[i].start - pos;
+			if (esize >= maxsize)
+				maxsize = esize;
+			pos = e[i].start + e[i].size;
+			i++;
+		} while (e[i-1].size);
 	*freesize = maxsize;
 	// FIXME here I am
 
@@ -2903,7 +3469,7 @@ static int load_super_ddf_all(struct supertype *st, int fd,
 		rv = load_ddf_headers(dfd, super, NULL);
 		close(dfd);
 		if (rv == 0) {
-			seq = __be32_to_cpu(super->active->seq);
+			seq = be32_to_cpu(super->active->seq);
 			if (super->active->openflag)
 				seq--;
 			if (!best || seq > bestseq) {
@@ -2943,7 +3509,7 @@ static int load_super_ddf_all(struct supertype *st, int fd,
 		st->minor_version = 0;
 		st->max_devs = 512;
 	}
-	st->container_dev = fd2devnum(fd);
+	strcpy(st->container_devnm, fd2devnm(fd));
 	return 0;
 }
 
@@ -2954,6 +3520,115 @@ static int load_container_ddf(struct supertype *st, int fd,
 }
 
 #endif /* MDASSEMBLE */
+
+static int check_secondary(const struct vcl *vc)
+{
+	const struct vd_config *conf = &vc->conf;
+	int i;
+
+	/* The only DDF secondary RAID level md can support is
+	 * RAID 10, if the stripe sizes and Basic volume sizes
+	 * are all equal.
+	 * Other configurations could in theory be supported by exposing
+	 * the BVDs to user space and using device mapper for the secondary
+	 * mapping. So far we don't support that.
+	 */
+
+	__u64 sec_elements[4] = {0, 0, 0, 0};
+#define __set_sec_seen(n) (sec_elements[(n)>>6] |= (1<<((n)&63)))
+#define __was_sec_seen(n) ((sec_elements[(n)>>6] & (1<<((n)&63))) != 0)
+
+	if (vc->other_bvds == NULL) {
+		pr_err("No BVDs for secondary RAID found\n");
+		return -1;
+	}
+	if (conf->prl != DDF_RAID1) {
+		pr_err("Secondary RAID level only supported for mirrored BVD\n");
+		return -1;
+	}
+	if (conf->srl != DDF_2STRIPED && conf->srl != DDF_2SPANNED) {
+		pr_err("Secondary RAID level %d is unsupported\n",
+		       conf->srl);
+		return -1;
+	}
+	__set_sec_seen(conf->sec_elmnt_seq);
+	for (i = 0; i < conf->sec_elmnt_count-1; i++) {
+		const struct vd_config *bvd = vc->other_bvds[i];
+		if (bvd->sec_elmnt_seq == DDF_UNUSED_BVD)
+			continue;
+		if (bvd->srl != conf->srl) {
+			pr_err("Inconsistent secondary RAID level across BVDs\n");
+			return -1;
+		}
+		if (bvd->prl != conf->prl) {
+			pr_err("Different RAID levels for BVDs are unsupported\n");
+			return -1;
+		}
+		if (!be16_eq(bvd->prim_elmnt_count, conf->prim_elmnt_count)) {
+			pr_err("All BVDs must have the same number of primary elements\n");
+			return -1;
+		}
+		if (bvd->chunk_shift != conf->chunk_shift) {
+			pr_err("Different strip sizes for BVDs are unsupported\n");
+			return -1;
+		}
+		if (!be64_eq(bvd->array_blocks, conf->array_blocks)) {
+			pr_err("Different BVD sizes are unsupported\n");
+			return -1;
+		}
+		__set_sec_seen(bvd->sec_elmnt_seq);
+	}
+	for (i = 0; i < conf->sec_elmnt_count; i++) {
+		if (!__was_sec_seen(i)) {
+			pr_err("BVD %d is missing\n", i);
+			return -1;
+		}
+	}
+	return 0;
+}
+
+static unsigned int get_pd_index_from_refnum(const struct vcl *vc,
+					     be32 refnum, unsigned int nmax,
+					     const struct vd_config **bvd,
+					     unsigned int *idx)
+{
+	unsigned int i, j, n, sec, cnt;
+
+	cnt = be16_to_cpu(vc->conf.prim_elmnt_count);
+	sec = (vc->conf.sec_elmnt_count == 1 ? 0 : vc->conf.sec_elmnt_seq);
+
+	for (i = 0, j = 0 ; i < nmax ; i++) {
+		/* j counts valid entries for this BVD */
+		if (be32_to_cpu(vc->conf.phys_refnum[i]) != 0xffffffff)
+			j++;
+		if (be32_eq(vc->conf.phys_refnum[i], refnum)) {
+			*bvd = &vc->conf;
+			*idx = i;
+			return sec * cnt + j - 1;
+		}
+	}
+	if (vc->other_bvds == NULL)
+		goto bad;
+
+	for (n = 1; n < vc->conf.sec_elmnt_count; n++) {
+		struct vd_config *vd = vc->other_bvds[n-1];
+		sec = vd->sec_elmnt_seq;
+		if (sec == DDF_UNUSED_BVD)
+			continue;
+		for (i = 0, j = 0 ; i < nmax ; i++) {
+			if (be32_to_cpu(vd->phys_refnum[i]) != 0xffffffff)
+				j++;
+			if (be32_eq(vd->phys_refnum[i], refnum)) {
+				*bvd = vd;
+				*idx = i;
+				return sec * cnt + j - 1;
+			}
+		}
+	}
+bad:
+	*bvd = NULL;
+	return DDF_NOTFOUND;
+}
 
 static struct mdinfo *container_content_ddf(struct supertype *st, char *subarray)
 {
@@ -2976,29 +3651,32 @@ static struct mdinfo *container_content_ddf(struct supertype *st, char *subarray
 		struct mdinfo *this;
 		char *ep;
 		__u32 *cptr;
+		unsigned int pd;
 
 		if (subarray &&
 		    (strtoul(subarray, &ep, 10) != vc->vcnum ||
 		     *ep != '\0'))
 			continue;
 
-		this = malloc(sizeof(*this));
-		memset(this, 0, sizeof(*this));
+		if (vc->conf.sec_elmnt_count > 1) {
+			if (check_secondary(vc) != 0)
+				continue;
+		}
+
+		this = xcalloc(1, sizeof(*this));
 		this->next = rest;
 		rest = this;
 
-		this->array.level = map_num1(ddf_level_num, vc->conf.prl);
-		this->array.raid_disks =
-			__be16_to_cpu(vc->conf.prim_elmnt_count);
-		this->array.layout = rlq_to_layout(vc->conf.rlq, vc->conf.prl,
-						   this->array.raid_disks);
+		if (layout_ddf2md(&vc->conf, &this->array))
+			continue;
 		this->array.md_minor      = -1;
 		this->array.major_version = -1;
 		this->array.minor_version = -2;
+		this->safe_mode_delay = DDF_SAFE_MODE_DELAY;
 		cptr = (__u32 *)(vc->conf.guid + 16);
 		this->array.ctime         = DECADE + __be32_to_cpu(*cptr);
 		this->array.utime	  = DECADE +
-			__be32_to_cpu(vc->conf.timestamp);
+			be32_to_cpu(vc->conf.timestamp);
 		this->array.chunk_size	  = 512 << vc->conf.chunk_shift;
 
 		i = vc->vcnum;
@@ -3018,64 +3696,65 @@ static struct mdinfo *container_content_ddf(struct supertype *st, char *subarray
 				this->name[j] = 0;
 
 		memset(this->uuid, 0, sizeof(this->uuid));
-		this->component_size = __be64_to_cpu(vc->conf.blocks);
+		this->component_size = be64_to_cpu(vc->conf.blocks);
 		this->array.size = this->component_size / 2;
 		this->container_member = i;
 
 		ddf->currentconf = vc;
 		uuid_from_super_ddf(st, this->uuid);
-		ddf->currentconf = NULL;
+		if (!subarray)
+			ddf->currentconf = NULL;
 
 		sprintf(this->text_version, "/%s/%d",
-			devnum2devname(st->container_dev),
-			this->container_member);
+			st->container_devnm, this->container_member);
 
-		for (i = 0 ; i < ddf->mppe ; i++) {
+		for (pd = 0; pd < be16_to_cpu(ddf->phys->used_pdes); pd++) {
 			struct mdinfo *dev;
 			struct dl *d;
+			const struct vd_config *bvd;
+			unsigned int iphys;
 			int stt;
-			int pd;
 
-			if (vc->conf.phys_refnum[i] == 0xFFFFFFFF)
+			if (be32_to_cpu(ddf->phys->entries[pd].refnum)
+			    == 0xFFFFFFFF)
 				continue;
 
-			for (pd = __be16_to_cpu(ddf->phys->used_pdes);
-			     pd--;)
-				if (ddf->phys->entries[pd].refnum
-				    == vc->conf.phys_refnum[i])
-					break;
-			if (pd < 0)
-				continue;
-
-			stt = __be16_to_cpu(ddf->phys->entries[pd].state);
+			stt = be16_to_cpu(ddf->phys->entries[pd].state);
 			if ((stt & (DDF_Online|DDF_Failed|DDF_Rebuilding))
 			    != DDF_Online)
+				continue;
+
+			i = get_pd_index_from_refnum(
+				vc, ddf->phys->entries[pd].refnum,
+				ddf->mppe, &bvd, &iphys);
+			if (i == DDF_NOTFOUND)
 				continue;
 
 			this->array.working_disks++;
 
 			for (d = ddf->dlist; d ; d=d->next)
-				if (d->disk.refnum == vc->conf.phys_refnum[i])
+				if (be32_eq(d->disk.refnum,
+					    ddf->phys->entries[pd].refnum))
 					break;
 			if (d == NULL)
 				/* Haven't found that one yet, maybe there are others */
 				continue;
 
-			dev = malloc(sizeof(*dev));
-			memset(dev, 0, sizeof(*dev));
+			dev = xcalloc(1, sizeof(*dev));
 			dev->next = this->devs;
 			this->devs = dev;
 
-			dev->disk.number = __be32_to_cpu(d->disk.refnum);
+			dev->disk.number = be32_to_cpu(d->disk.refnum);
 			dev->disk.major = d->major;
 			dev->disk.minor = d->minor;
 			dev->disk.raid_disk = i;
 			dev->disk.state = (1<<MD_DISK_SYNC)|(1<<MD_DISK_ACTIVE);
 			dev->recovery_start = MaxSector;
 
-			dev->events = __be32_to_cpu(ddf->primary.seq);
-			dev->data_offset = __be64_to_cpu(vc->lba_offset[i]);
-			dev->component_size = __be64_to_cpu(vc->conf.blocks);
+			dev->events = be32_to_cpu(ddf->primary.seq);
+			dev->data_offset =
+				be64_to_cpu(LBA_OFFSET(ddf, bvd)[iphys]);
+			dev->component_size = be64_to_cpu(bvd->blocks);
 			if (d->devname)
 				strcpy(dev->name, d->devname);
 		}
@@ -3093,14 +3772,35 @@ static int store_super_ddf(struct supertype *st, int fd)
 	if (!ddf)
 		return 1;
 
-	/* ->dlist and ->conflist will be set for updates, currently not
-	 * supported
-	 */
-	if (ddf->dlist || ddf->conflist)
-		return 1;
-
 	if (!get_dev_size(fd, NULL, &dsize))
 		return 1;
+
+	if (ddf->dlist || ddf->conflist) {
+		struct stat sta;
+		struct dl *dl;
+		int ofd, ret;
+
+		if (fstat(fd, &sta) == -1 || !S_ISBLK(sta.st_mode)) {
+			pr_err("%s: file descriptor for invalid device\n",
+			       __func__);
+			return 1;
+		}
+		for (dl = ddf->dlist; dl; dl = dl->next)
+			if (dl->major == (int)major(sta.st_rdev) &&
+			    dl->minor == (int)minor(sta.st_rdev))
+				break;
+		if (!dl) {
+			pr_err("%s: couldn't find disk %d/%d\n", __func__,
+			       (int)major(sta.st_rdev),
+			       (int)minor(sta.st_rdev));
+			return 1;
+		}
+		ofd = dl->fd;
+		dl->fd = fd;
+		ret = (_write_super_to_disk(ddf, dl) != 1);
+		dl->fd = ofd;
+		return ret;
+	}
 
 	if (posix_memalign(&buf, 512, 512) != 0)
 		return 1;
@@ -3125,6 +3825,9 @@ static int compare_super_ddf(struct supertype *st, struct supertype *tst)
 	 */
 	struct ddf_super *first = st->sb;
 	struct ddf_super *second = tst->sb;
+	struct dl *dl1, *dl2;
+	struct vcl *vl1, *vl2;
+	unsigned int max_vds, max_pds, pd, vd;
 
 	if (!first) {
 		st->sb = tst->sb;
@@ -3135,7 +3838,146 @@ static int compare_super_ddf(struct supertype *st, struct supertype *tst)
 	if (memcmp(first->anchor.guid, second->anchor.guid, DDF_GUID_LEN) != 0)
 		return 2;
 
+	if (!be32_eq(first->anchor.seq, second->anchor.seq)) {
+		dprintf("%s: sequence number mismatch %u/%u\n", __func__,
+			be32_to_cpu(first->anchor.seq),
+			be32_to_cpu(second->anchor.seq));
+		return 3;
+	}
+	if (first->max_part != second->max_part ||
+	    !be16_eq(first->phys->used_pdes, second->phys->used_pdes) ||
+	    !be16_eq(first->virt->populated_vdes,
+		     second->virt->populated_vdes)) {
+		dprintf("%s: PD/VD number mismatch\n", __func__);
+		return 3;
+	}
+
+	max_pds =  be16_to_cpu(first->phys->used_pdes);
+	for (dl2 = second->dlist; dl2; dl2 = dl2->next) {
+		for (pd = 0; pd < max_pds; pd++)
+			if (be32_eq(first->phys->entries[pd].refnum,
+				    dl2->disk.refnum))
+				break;
+		if (pd == max_pds) {
+			dprintf("%s: no match for disk %08x\n", __func__,
+				be32_to_cpu(dl2->disk.refnum));
+			return 3;
+		}
+	}
+
+	max_vds = be16_to_cpu(first->active->max_vd_entries);
+	for (vl2 = second->conflist; vl2; vl2 = vl2->next) {
+		if (!be32_eq(vl2->conf.magic, DDF_VD_CONF_MAGIC))
+			continue;
+		for (vd = 0; vd < max_vds; vd++)
+			if (!memcmp(first->virt->entries[vd].guid,
+				    vl2->conf.guid, DDF_GUID_LEN))
+				break;
+		if (vd == max_vds) {
+			dprintf("%s: no match for VD config\n", __func__);
+			return 3;
+		}
+	}
 	/* FIXME should I look at anything else? */
+
+	/*
+	   At this point we are fairly sure that the meta data matches.
+	   But the new disk may contain additional local data.
+	   Add it to the super block.
+	 */
+	for (vl2 = second->conflist; vl2; vl2 = vl2->next) {
+		for (vl1 = first->conflist; vl1; vl1 = vl1->next)
+			if (!memcmp(vl1->conf.guid, vl2->conf.guid,
+				    DDF_GUID_LEN))
+				break;
+		if (vl1) {
+			if (vl1->other_bvds != NULL &&
+			    vl1->conf.sec_elmnt_seq !=
+			    vl2->conf.sec_elmnt_seq) {
+				dprintf("%s: adding BVD %u\n", __func__,
+					vl2->conf.sec_elmnt_seq);
+				add_other_bvd(vl1, &vl2->conf,
+					      first->conf_rec_len*512);
+			}
+			continue;
+		}
+
+		if (posix_memalign((void **)&vl1, 512,
+				   (first->conf_rec_len*512 +
+				    offsetof(struct vcl, conf))) != 0) {
+			pr_err("%s could not allocate vcl buf\n",
+			       __func__);
+			return 3;
+		}
+
+		vl1->next = first->conflist;
+		vl1->block_sizes = NULL;
+		memcpy(&vl1->conf, &vl2->conf, first->conf_rec_len*512);
+		if (alloc_other_bvds(first, vl1) != 0) {
+			pr_err("%s could not allocate other bvds\n",
+			       __func__);
+			free(vl1);
+			return 3;
+		}
+		for (vd = 0; vd < max_vds; vd++)
+			if (!memcmp(first->virt->entries[vd].guid,
+				    vl1->conf.guid, DDF_GUID_LEN))
+				break;
+		vl1->vcnum = vd;
+		dprintf("%s: added config for VD %u\n", __func__, vl1->vcnum);
+		first->conflist = vl1;
+	}
+
+	for (dl2 = second->dlist; dl2; dl2 = dl2->next) {
+		for (dl1 = first->dlist; dl1; dl1 = dl1->next)
+			if (be32_eq(dl1->disk.refnum, dl2->disk.refnum))
+				break;
+		if (dl1)
+			continue;
+
+		if (posix_memalign((void **)&dl1, 512,
+		       sizeof(*dl1) + (first->max_part) * sizeof(dl1->vlist[0]))
+		    != 0) {
+			pr_err("%s could not allocate disk info buffer\n",
+			__func__);
+			return 3;
+		}
+		memcpy(dl1, dl2, sizeof(*dl1));
+		dl1->mdupdate = NULL;
+		dl1->next = first->dlist;
+		dl1->fd = -1;
+		for (pd = 0; pd < max_pds; pd++)
+			if (be32_eq(first->phys->entries[pd].refnum,
+				    dl1->disk.refnum))
+				break;
+		dl1->pdnum = pd;
+		if (dl2->spare) {
+			if (posix_memalign((void **)&dl1->spare, 512,
+				       first->conf_rec_len*512) != 0) {
+				pr_err("%s could not allocate spare info buf\n",
+				       __func__);
+				return 3;
+			}
+			memcpy(dl1->spare, dl2->spare, first->conf_rec_len*512);
+		}
+		for (vd = 0 ; vd < first->max_part ; vd++) {
+			if (!dl2->vlist[vd]) {
+				dl1->vlist[vd] = NULL;
+				continue;
+			}
+			for (vl1 = first->conflist; vl1; vl1 = vl1->next) {
+				if (!memcmp(vl1->conf.guid,
+					    dl2->vlist[vd]->conf.guid,
+					    DDF_GUID_LEN))
+					break;
+				dl1->vlist[vd] = vl1;
+			}
+		}
+		first->dlist = dl1;
+		dprintf("%s: added disk %d: %08x\n", __func__, dl1->pdnum,
+			be32_to_cpu(dl1->disk.refnum));
+	}
+
 	return 0;
 }
 
@@ -3148,8 +3990,41 @@ static int compare_super_ddf(struct supertype *st, struct supertype *tst)
  */
 static int ddf_open_new(struct supertype *c, struct active_array *a, char *inst)
 {
-	dprintf("ddf: open_new %s\n", inst);
-	a->info.container_member = atoi(inst);
+	struct ddf_super *ddf = c->sb;
+	int n = atoi(inst);
+	struct mdinfo *dev;
+	struct dl *dl;
+	static const char faulty[] = "faulty";
+
+	if (all_ff(ddf->virt->entries[n].guid)) {
+		pr_err("%s: subarray %d doesn't exist\n", __func__, n);
+		return -ENODEV;
+	}
+	dprintf("%s: new subarray %d, GUID: %s\n", __func__, n,
+		guid_str(ddf->virt->entries[n].guid));
+	for (dev = a->info.devs; dev; dev = dev->next) {
+		for (dl = ddf->dlist; dl; dl = dl->next)
+			if (dl->major == dev->disk.major &&
+			    dl->minor == dev->disk.minor)
+				break;
+		if (!dl) {
+			pr_err("%s: device %d/%d of subarray %d not found in meta data\n",
+				__func__, dev->disk.major, dev->disk.minor, n);
+			return -1;
+		}
+		if ((be16_to_cpu(ddf->phys->entries[dl->pdnum].state) &
+			(DDF_Online|DDF_Missing|DDF_Failed)) != DDF_Online) {
+			pr_err("%s: new subarray %d contains broken device %d/%d (%02x)\n",
+				__func__, n, dl->major, dl->minor,
+				be16_to_cpu(
+					ddf->phys->entries[dl->pdnum].state));
+			if (write(dev->state_fd, faulty, sizeof(faulty)-1) !=
+			    sizeof(faulty) - 1)
+				pr_err("Write to state_fd failed\n");
+			dev->curr_state = DS_FAULTY;
+		}
+	}
+	a->info.container_member = n;
 	return 0;
 }
 
@@ -3178,7 +4053,7 @@ static int ddf_set_array_state(struct active_array *a, int consistent)
 	else
 		ddf->virt->entries[inst].state |= DDF_state_inconsistent;
 	if (old != ddf->virt->entries[inst].state)
-		ddf->updates_pending = 1;
+		ddf_set_updates_pending(ddf);
 
 	old = ddf->virt->entries[inst].init_state;
 	ddf->virt->entries[inst].init_state &= ~DDF_initstate_mask;
@@ -3189,16 +4064,96 @@ static int ddf_set_array_state(struct active_array *a, int consistent)
 	else
 		ddf->virt->entries[inst].init_state |= DDF_init_quick;
 	if (old != ddf->virt->entries[inst].init_state)
-		ddf->updates_pending = 1;
+		ddf_set_updates_pending(ddf);
 
-	dprintf("ddf mark %d %s %llu\n", inst, consistent?"clean":"dirty",
+	dprintf("ddf mark %d/%s (%d) %s %llu\n", inst,
+		guid_str(ddf->virt->entries[inst].guid), a->curr_state,
+		consistent?"clean":"dirty",
 		a->info.resync_start);
 	return consistent;
 }
 
-#define container_of(ptr, type, member) ({                      \
-        const typeof( ((type *)0)->member ) *__mptr = (ptr);    \
-        (type *)( (char *)__mptr - offsetof(type,member) );})
+static int get_bvd_state(const struct ddf_super *ddf,
+			 const struct vd_config *vc)
+{
+	unsigned int i, n_bvd, working = 0;
+	unsigned int n_prim = be16_to_cpu(vc->prim_elmnt_count);
+	int pd, st, state;
+	for (i = 0; i < n_prim; i++) {
+		if (!find_index_in_bvd(ddf, vc, i, &n_bvd))
+			continue;
+		pd = find_phys(ddf, vc->phys_refnum[n_bvd]);
+		if (pd < 0)
+			continue;
+		st = be16_to_cpu(ddf->phys->entries[pd].state);
+		if ((st & (DDF_Online|DDF_Failed|DDF_Rebuilding))
+		    == DDF_Online)
+			working++;
+	}
+
+	state = DDF_state_degraded;
+	if (working == n_prim)
+		state = DDF_state_optimal;
+	else
+		switch (vc->prl) {
+		case DDF_RAID0:
+		case DDF_CONCAT:
+		case DDF_JBOD:
+			state = DDF_state_failed;
+			break;
+		case DDF_RAID1:
+			if (working == 0)
+				state = DDF_state_failed;
+			else if (working >= 2)
+				state = DDF_state_part_optimal;
+			break;
+		case DDF_RAID4:
+		case DDF_RAID5:
+			if (working < n_prim - 1)
+				state = DDF_state_failed;
+			break;
+		case DDF_RAID6:
+			if (working < n_prim - 2)
+				state = DDF_state_failed;
+			else if (working == n_prim - 1)
+				state = DDF_state_part_optimal;
+			break;
+		}
+	return state;
+}
+
+static int secondary_state(int state, int other, int seclevel)
+{
+	if (state == DDF_state_optimal && other == DDF_state_optimal)
+		return DDF_state_optimal;
+	if (seclevel == DDF_2MIRRORED) {
+		if (state == DDF_state_optimal || other == DDF_state_optimal)
+			return DDF_state_part_optimal;
+		if (state == DDF_state_failed && other == DDF_state_failed)
+			return DDF_state_failed;
+		return DDF_state_degraded;
+	} else {
+		if (state == DDF_state_failed || other == DDF_state_failed)
+			return DDF_state_failed;
+		if (state == DDF_state_degraded || other == DDF_state_degraded)
+			return DDF_state_degraded;
+		return DDF_state_part_optimal;
+	}
+}
+
+static int get_svd_state(const struct ddf_super *ddf, const struct vcl *vcl)
+{
+	int state = get_bvd_state(ddf, &vcl->conf);
+	unsigned int i;
+	for (i = 1; i < vcl->conf.sec_elmnt_count; i++) {
+		state = secondary_state(
+			state,
+			get_bvd_state(ddf, vcl->other_bvds[i-1]),
+			vcl->conf.srl);
+	}
+	return state;
+}
+
 /*
  * The state of each disk is stored in the global phys_disk structure
  * in phys_disk.entries[n].state.
@@ -3216,13 +4171,15 @@ static int ddf_set_array_state(struct active_array *a, int consistent)
 static void ddf_set_disk(struct active_array *a, int n, int state)
 {
 	struct ddf_super *ddf = a->container->sb;
-	unsigned int inst = a->info.container_member;
-	struct vd_config *vc = find_vdcr(ddf, inst);
-	int pd = find_phys(ddf, vc->phys_refnum[n]);
-	int i, st, working;
+	unsigned int inst = a->info.container_member, n_bvd;
+	struct vcl *vcl;
+	struct vd_config *vc = find_vdcr(ddf, inst, (unsigned int)n,
+					 &n_bvd, &vcl);
+	int pd;
 	struct mdinfo *mdi;
 	struct dl *dl;
 
+	dprintf("%s: %d to %x\n", __func__, n, state);
 	if (vc == NULL) {
 		dprintf("ddf: cannot find instance %d!!\n", inst);
 		return;
@@ -3231,8 +4188,11 @@ static void ddf_set_disk(struct active_array *a, int n, int state)
 	for (mdi = a->info.devs; mdi; mdi = mdi->next)
 		if (mdi->disk.raid_disk == n)
 			break;
-	if (!mdi)
+	if (!mdi) {
+		pr_err("%s: cannot find raid disk %d\n",
+		       __func__, n);
 		return;
+	}
 
 	/* and find the 'dl' entry corresponding to that. */
 	for (dl = ddf->dlist; dl; dl = dl->next)
@@ -3240,80 +4200,59 @@ static void ddf_set_disk(struct active_array *a, int n, int state)
 		    mdi->disk.major == dl->major &&
 		    mdi->disk.minor == dl->minor)
 			break;
-	if (!dl)
+	if (!dl) {
+		pr_err("%s: cannot find raid disk %d (%d/%d)\n",
+		       __func__, n,
+		       mdi->disk.major, mdi->disk.minor);
 		return;
+	}
 
+	pd = find_phys(ddf, vc->phys_refnum[n_bvd]);
 	if (pd < 0 || pd != dl->pdnum) {
 		/* disk doesn't currently exist or has changed.
 		 * If it is now in_sync, insert it. */
+		dprintf("%s: phys disk not found for %d: %d/%d ref %08x\n",
+			__func__, dl->pdnum, dl->major, dl->minor,
+			be32_to_cpu(dl->disk.refnum));
+		dprintf("%s: array %u disk %u ref %08x pd %d\n",
+			__func__, inst, n_bvd,
+			be32_to_cpu(vc->phys_refnum[n_bvd]), pd);
 		if ((state & DS_INSYNC) && ! (state & DS_FAULTY)) {
-			struct vcl *vcl;
-			pd = dl->pdnum;
-			vc->phys_refnum[n] = dl->disk.refnum;
-			vcl = container_of(vc, struct vcl, conf);
-			vcl->lba_offset[n] = mdi->data_offset;
-			ddf->phys->entries[pd].type &=
-				~__cpu_to_be16(DDF_Global_Spare);
-			ddf->phys->entries[pd].type |=
-				__cpu_to_be16(DDF_Active_in_VD);
-			ddf->updates_pending = 1;
+			pd = dl->pdnum; /* FIXME: is this really correct ? */
+			vc->phys_refnum[n_bvd] = dl->disk.refnum;
+			LBA_OFFSET(ddf, vc)[n_bvd] =
+				cpu_to_be64(mdi->data_offset);
+			be16_clear(ddf->phys->entries[pd].type,
+				   cpu_to_be16(DDF_Global_Spare));
+			be16_set(ddf->phys->entries[pd].type,
+				 cpu_to_be16(DDF_Active_in_VD));
+			ddf_set_updates_pending(ddf);
 		}
 	} else {
-		int old = ddf->phys->entries[pd].state;
+		be16 old = ddf->phys->entries[pd].state;
 		if (state & DS_FAULTY)
-			ddf->phys->entries[pd].state  |= __cpu_to_be16(DDF_Failed);
+			be16_set(ddf->phys->entries[pd].state,
+				 cpu_to_be16(DDF_Failed));
 		if (state & DS_INSYNC) {
-			ddf->phys->entries[pd].state  |= __cpu_to_be16(DDF_Online);
-			ddf->phys->entries[pd].state  &= __cpu_to_be16(~DDF_Rebuilding);
+			be16_set(ddf->phys->entries[pd].state,
+				 cpu_to_be16(DDF_Online));
+			be16_clear(ddf->phys->entries[pd].state,
+				   cpu_to_be16(DDF_Rebuilding));
 		}
-		if (old != ddf->phys->entries[pd].state)
-			ddf->updates_pending = 1;
+		if (!be16_eq(old, ddf->phys->entries[pd].state))
+			ddf_set_updates_pending(ddf);
 	}
 
-	dprintf("ddf: set_disk %d to %x\n", n, state);
+	dprintf("ddf: set_disk %d (%08x) to %x->%02x\n", n,
+		be32_to_cpu(dl->disk.refnum), state,
+		be16_to_cpu(ddf->phys->entries[pd].state));
 
 	/* Now we need to check the state of the array and update
 	 * virtual_disk.entries[n].state.
 	 * It needs to be one of "optimal", "degraded", "failed".
 	 * I don't understand 'deleted' or 'missing'.
 	 */
-	working = 0;
-	for (i=0; i < a->info.array.raid_disks; i++) {
-		pd = find_phys(ddf, vc->phys_refnum[i]);
-		if (pd < 0)
-			continue;
-		st = __be16_to_cpu(ddf->phys->entries[pd].state);
-		if ((st & (DDF_Online|DDF_Failed|DDF_Rebuilding))
-		    == DDF_Online)
-			working++;
-	}
-	state = DDF_state_degraded;
-	if (working == a->info.array.raid_disks)
-		state = DDF_state_optimal;
-	else switch(vc->prl) {
-	case DDF_RAID0:
-	case DDF_CONCAT:
-	case DDF_JBOD:
-		state = DDF_state_failed;
-		break;
-	case DDF_RAID1:
-		if (working == 0)
-			state = DDF_state_failed;
-		else if (working == 2 && state == DDF_state_degraded)
-			state = DDF_state_part_optimal;
-		break;
-	case DDF_RAID4:
-	case DDF_RAID5:
-		if (working < a->info.array.raid_disks-1)
-			state = DDF_state_failed;
-		break;
-	case DDF_RAID6:
-		if (working < a->info.array.raid_disks-2)
-			state = DDF_state_failed;
-		else if (working == a->info.array.raid_disks-1)
-			state = DDF_state_part_optimal;
-		break;
-	}
+	state = get_svd_state(ddf, vcl);
 
 	if (ddf->virt->entries[inst].state !=
 	    ((ddf->virt->entries[inst].state & ~DDF_state_mask)
@@ -3322,7 +4261,7 @@ static void ddf_set_disk(struct active_array *a, int n, int state)
 		ddf->virt->entries[inst].state =
 			(ddf->virt->entries[inst].state & ~DDF_state_mask)
 			| state;
-		ddf->updates_pending = 1;
+		ddf_set_updates_pending(ddf);
 	}
 
 }
@@ -3343,6 +4282,112 @@ static void ddf_sync_metadata(struct supertype *st)
 	ddf->updates_pending = 0;
 	__write_init_super_ddf(st);
 	dprintf("ddf: sync_metadata\n");
+}
+
+static int del_from_conflist(struct vcl **list, const char *guid)
+{
+	struct vcl **p;
+	int found = 0;
+	for (p = list; p && *p; p = &((*p)->next))
+		if (!memcmp((*p)->conf.guid, guid, DDF_GUID_LEN)) {
+			found = 1;
+			*p = (*p)->next;
+		}
+	return found;
+}
+
+static int _kill_subarray_ddf(struct ddf_super *ddf, const char *guid)
+{
+	struct dl *dl;
+	unsigned int vdnum, i;
+	vdnum = find_vde_by_guid(ddf, guid);
+	if (vdnum == DDF_NOTFOUND) {
+		pr_err("%s: could not find VD %s\n", __func__,
+		       guid_str(guid));
+		return -1;
+	}
+	if (del_from_conflist(&ddf->conflist, guid) == 0) {
+		pr_err("%s: could not find conf %s\n", __func__,
+		       guid_str(guid));
+		return -1;
+	}
+	for (dl = ddf->dlist; dl; dl = dl->next)
+		for (i = 0; i < ddf->max_part; i++)
+			if (dl->vlist[i] != NULL &&
+			    !memcmp(dl->vlist[i]->conf.guid, guid,
+				    DDF_GUID_LEN))
+				dl->vlist[i] = NULL;
+	memset(ddf->virt->entries[vdnum].guid, 0xff, DDF_GUID_LEN);
+	dprintf("%s: deleted %s\n", __func__, guid_str(guid));
+	return 0;
+}
+
+static int kill_subarray_ddf(struct supertype *st)
+{
+	struct ddf_super *ddf = st->sb;
+	/*
+	 *  currentconf is set in container_content_ddf,
+	 *  called with subarray arg
+	 */
+	struct vcl *victim = ddf->currentconf;
+	struct vd_config *conf;
+	ddf->currentconf = NULL;
+	unsigned int vdnum;
+	if (!victim) {
+		pr_err("%s: nothing to kill\n", __func__);
+		return -1;
+	}
+	conf = &victim->conf;
+	vdnum = find_vde_by_guid(ddf, conf->guid);
+	if (vdnum == DDF_NOTFOUND) {
+		pr_err("%s: could not find VD %s\n", __func__,
+		       guid_str(conf->guid));
+		return -1;
+	}
+	if (st->update_tail) {
+		struct virtual_disk *vd;
+		int len = sizeof(struct virtual_disk)
+			+ sizeof(struct virtual_entry);
+		vd = xmalloc(len);
+		if (vd == NULL) {
+			pr_err("%s: failed to allocate %d bytes\n", __func__,
+			       len);
+			return -1;
+		}
+		memset(vd, 0 , len);
+		vd->magic = DDF_VIRT_RECORDS_MAGIC;
+		vd->populated_vdes = cpu_to_be16(0);
+		memcpy(vd->entries[0].guid, conf->guid, DDF_GUID_LEN);
+		/* we use DDF_state_deleted as marker */
+		vd->entries[0].state = DDF_state_deleted;
+		append_metadata_update(st, vd, len);
+	} else {
+		_kill_subarray_ddf(ddf, conf->guid);
+		ddf_set_updates_pending(ddf);
+		ddf_sync_metadata(st);
+	}
+	return 0;
+}
+
+static void copy_matching_bvd(struct ddf_super *ddf,
+			      struct vd_config *conf,
+			      const struct metadata_update *update)
+{
+	unsigned int mppe =
+		be16_to_cpu(ddf->anchor.max_primary_element_entries);
+	unsigned int len = ddf->conf_rec_len * 512;
+	char *p;
+	struct vd_config *vc;
+	for (p = update->buf; p < update->buf + update->len; p += len) {
+		vc = (struct vd_config *) p;
+		if (vc->sec_elmnt_seq == conf->sec_elmnt_seq) {
+			memcpy(conf->phys_refnum, vc->phys_refnum,
+			       mppe * (sizeof(__u32) + sizeof(__u64)));
+			return;
+		}
+	}
+	pr_err("%s: no match for BVD %d of %s in update\n", __func__,
+	       conf->sec_elmnt_seq, guid_str(conf->guid));
 }
 
 static void ddf_process_update(struct supertype *st,
@@ -3376,33 +4421,32 @@ static void ddf_process_update(struct supertype *st,
 	 *    a spare-assignment record.
 	 */
 	struct ddf_super *ddf = st->sb;
-	__u32 *magic = (__u32*)update->buf;
+	be32 *magic = (be32 *)update->buf;
 	struct phys_disk *pd;
 	struct virtual_disk *vd;
 	struct vd_config *vc;
 	struct vcl *vcl;
 	struct dl *dl;
-	unsigned int mppe;
 	unsigned int ent;
-	unsigned int pdnum, pd2;
+	unsigned int pdnum, pd2, len;
 
-	dprintf("Process update %x\n", *magic);
+	dprintf("Process update %x\n", be32_to_cpu(*magic));
 
-	switch (*magic) {
-	case DDF_PHYS_RECORDS_MAGIC:
+	if (be32_eq(*magic, DDF_PHYS_RECORDS_MAGIC)) {
 
 		if (update->len != (sizeof(struct phys_disk) +
 				    sizeof(struct phys_disk_entry)))
 			return;
 		pd = (struct phys_disk*)update->buf;
 
-		ent = __be16_to_cpu(pd->used_pdes);
-		if (ent >= __be16_to_cpu(ddf->phys->max_pdes))
+		ent = be16_to_cpu(pd->used_pdes);
+		if (ent >= be16_to_cpu(ddf->phys->max_pdes))
 			return;
-		if (pd->entries[0].state & __cpu_to_be16(DDF_Missing)) {
+		if (be16_and(pd->entries[0].state, cpu_to_be16(DDF_Missing))) {
 			struct dl **dlp;
 			/* removing this disk. */
-			ddf->phys->entries[ent].state |= __cpu_to_be16(DDF_Missing);
+			be16_set(ddf->phys->entries[ent].state,
+				 cpu_to_be16(DDF_Missing));
 			for (dlp = &ddf->dlist; *dlp; dlp = &(*dlp)->next) {
 				struct dl *dl = *dlp;
 				if (dl->pdnum == (signed)ent) {
@@ -3415,15 +4459,15 @@ static void ddf_process_update(struct supertype *st,
 					break;
 				}
 			}
-			ddf->updates_pending = 1;
+			ddf_set_updates_pending(ddf);
 			return;
 		}
 		if (!all_ff(ddf->phys->entries[ent].guid))
 			return;
 		ddf->phys->entries[ent] = pd->entries[0];
-		ddf->phys->used_pdes = __cpu_to_be16(1 +
-					   __be16_to_cpu(ddf->phys->used_pdes));
-		ddf->updates_pending = 1;
+		ddf->phys->used_pdes = cpu_to_be16
+			(1 + be16_to_cpu(ddf->phys->used_pdes));
+		ddf_set_updates_pending(ddf);
 		if (ddf->add_list) {
 			struct active_array *a;
 			struct dl *al = ddf->add_list;
@@ -3438,123 +4482,173 @@ static void ddf_process_update(struct supertype *st,
 			for (a = st->arrays ; a; a=a->next)
 				a->check_degraded = 1;
 		}
-		break;
-
-	case DDF_VIRT_RECORDS_MAGIC:
+	} else if (be32_eq(*magic, DDF_VIRT_RECORDS_MAGIC)) {
 
 		if (update->len != (sizeof(struct virtual_disk) +
 				    sizeof(struct virtual_entry)))
 			return;
 		vd = (struct virtual_disk*)update->buf;
 
-		ent = __be16_to_cpu(vd->populated_vdes);
-		if (ent >= __be16_to_cpu(ddf->virt->max_vdes))
-			return;
-		if (!all_ff(ddf->virt->entries[ent].guid))
-			return;
-		ddf->virt->entries[ent] = vd->entries[0];
-		ddf->virt->populated_vdes = __cpu_to_be16(1 +
-			      __be16_to_cpu(ddf->virt->populated_vdes));
-		ddf->updates_pending = 1;
-		break;
+		if (vd->entries[0].state == DDF_state_deleted) {
+			if (_kill_subarray_ddf(ddf, vd->entries[0].guid))
+				return;
+		} else {
 
-	case DDF_VD_CONF_MAGIC:
-		dprintf("len %d %d\n", update->len, ddf->conf_rec_len);
+			ent = find_vde_by_guid(ddf, vd->entries[0].guid);
+			if (ent != DDF_NOTFOUND) {
+				dprintf("%s: VD %s exists already in slot %d\n",
+					__func__, guid_str(vd->entries[0].guid),
+					ent);
+				return;
+			}
+			ent = find_unused_vde(ddf);
+			if (ent == DDF_NOTFOUND)
+				return;
+			ddf->virt->entries[ent] = vd->entries[0];
+			ddf->virt->populated_vdes =
+				cpu_to_be16(
+					1 + be16_to_cpu(
+						ddf->virt->populated_vdes));
+			dprintf("%s: added VD %s in slot %d(s=%02x i=%02x)\n",
+				__func__, guid_str(vd->entries[0].guid), ent,
+				ddf->virt->entries[ent].state,
+				ddf->virt->entries[ent].init_state);
+		}
+		ddf_set_updates_pending(ddf);
+	}
 
-		mppe = __be16_to_cpu(ddf->anchor.max_primary_element_entries);
-		if ((unsigned)update->len != ddf->conf_rec_len * 512)
-			return;
+	else if (be32_eq(*magic, DDF_VD_CONF_MAGIC)) {
 		vc = (struct vd_config*)update->buf;
+		len = ddf->conf_rec_len * 512;
+		if ((unsigned int)update->len != len * vc->sec_elmnt_count) {
+			pr_err("%s: %s: insufficient data (%d) for %u BVDs\n",
+			       __func__, guid_str(vc->guid), update->len,
+			       vc->sec_elmnt_count);
+			return;
+		}
 		for (vcl = ddf->conflist; vcl ; vcl = vcl->next)
 			if (memcmp(vcl->conf.guid, vc->guid, DDF_GUID_LEN) == 0)
 				break;
-		dprintf("vcl = %p\n", vcl);
+		dprintf("%s: conf update for %s (%s)\n", __func__,
+			guid_str(vc->guid), (vcl ? "old" : "new"));
 		if (vcl) {
 			/* An update, just copy the phys_refnum and lba_offset
 			 * fields
 			 */
-			memcpy(vcl->conf.phys_refnum, vc->phys_refnum,
-			       mppe * (sizeof(__u32) + sizeof(__u64)));
+			unsigned int i;
+			unsigned int k;
+			copy_matching_bvd(ddf, &vcl->conf, update);
+			for (k = 0; k < be16_to_cpu(vc->prim_elmnt_count); k++)
+				dprintf("BVD %u has %08x at %llu\n", 0,
+					be32_to_cpu(vcl->conf.phys_refnum[k]),
+					be64_to_cpu(LBA_OFFSET(ddf,
+							       &vcl->conf)[k]));
+			for (i = 1; i < vc->sec_elmnt_count; i++) {
+				copy_matching_bvd(ddf, vcl->other_bvds[i-1],
+						  update);
+				for (k = 0; k < be16_to_cpu(
+					     vc->prim_elmnt_count); k++)
+					dprintf("BVD %u has %08x at %llu\n", i,
+						be32_to_cpu
+						(vcl->other_bvds[i-1]->
+						 phys_refnum[k]),
+						be64_to_cpu
+						(LBA_OFFSET
+						 (ddf,
+						  vcl->other_bvds[i-1])[k]));
+			}
 		} else {
 			/* A new VD_CONF */
+			unsigned int i;
 			if (!update->space)
 				return;
 			vcl = update->space;
 			update->space = NULL;
 			vcl->next = ddf->conflist;
-			memcpy(&vcl->conf, vc, update->len);
-			vcl->lba_offset = (__u64*)
-				&vcl->conf.phys_refnum[mppe];
-			for (ent = 0;
-			     ent < __be16_to_cpu(ddf->virt->populated_vdes);
-			     ent++)
-				if (memcmp(vc->guid, ddf->virt->entries[ent].guid,
-					   DDF_GUID_LEN) == 0) {
-					vcl->vcnum = ent;
-					break;
-				}
+			memcpy(&vcl->conf, vc, len);
+			ent = find_vde_by_guid(ddf, vc->guid);
+			if (ent == DDF_NOTFOUND)
+				return;
+			vcl->vcnum = ent;
 			ddf->conflist = vcl;
+			for (i = 1; i < vc->sec_elmnt_count; i++)
+				memcpy(vcl->other_bvds[i-1],
+				       update->buf + len * i, len);
 		}
 		/* Set DDF_Transition on all Failed devices - to help
 		 * us detect those that are no longer in use
 		 */
-		for (pdnum = 0; pdnum < __be16_to_cpu(ddf->phys->used_pdes); pdnum++)
-			if (ddf->phys->entries[pdnum].state
-			    & __be16_to_cpu(DDF_Failed))
-				ddf->phys->entries[pdnum].state
-					|= __be16_to_cpu(DDF_Transition);
+		for (pdnum = 0; pdnum < be16_to_cpu(ddf->phys->used_pdes);
+		     pdnum++)
+			if (be16_and(ddf->phys->entries[pdnum].state,
+				     cpu_to_be16(DDF_Failed)))
+				be16_set(ddf->phys->entries[pdnum].state,
+					 cpu_to_be16(DDF_Transition));
 		/* Now make sure vlist is correct for each dl. */
 		for (dl = ddf->dlist; dl; dl = dl->next) {
-			unsigned int dn;
 			unsigned int vn = 0;
 			int in_degraded = 0;
-			for (vcl = ddf->conflist; vcl ; vcl = vcl->next)
-				for (dn=0; dn < ddf->mppe ; dn++)
-					if (vcl->conf.phys_refnum[dn] ==
-					    dl->disk.refnum) {
-						int vstate;
-						dprintf("dev %d has %p at %d\n",
-							dl->pdnum, vcl, vn);
-						/* Clear the Transition flag */
-						if (ddf->phys->entries[dl->pdnum].state
-						    & __be16_to_cpu(DDF_Failed))
-							ddf->phys->entries[dl->pdnum].state &=
-								~__be16_to_cpu(DDF_Transition);
-
-						dl->vlist[vn++] = vcl;
-						vstate = ddf->virt->entries[vcl->vcnum].state
-							& DDF_state_mask;
-						if (vstate == DDF_state_degraded ||
-						    vstate == DDF_state_part_optimal)
-							in_degraded = 1;
-						break;
-					}
+			for (vcl = ddf->conflist; vcl ; vcl = vcl->next) {
+				unsigned int dn, ibvd;
+				const struct vd_config *conf;
+				int vstate;
+				dn = get_pd_index_from_refnum(vcl,
+							      dl->disk.refnum,
+							      ddf->mppe,
+							      &conf, &ibvd);
+				if (dn == DDF_NOTFOUND)
+					continue;
+				dprintf("dev %d/%08x has %s (sec=%u) at %d\n",
+					dl->pdnum,
+					be32_to_cpu(dl->disk.refnum),
+					guid_str(conf->guid),
+					conf->sec_elmnt_seq, vn);
+				/* Clear the Transition flag */
+				if (be16_and
+				    (ddf->phys->entries[dl->pdnum].state,
+				     cpu_to_be16(DDF_Failed)))
+					be16_clear(ddf->phys
+						   ->entries[dl->pdnum].state,
+						   cpu_to_be16(DDF_Transition));
+				dl->vlist[vn++] = vcl;
+				vstate = ddf->virt->entries[vcl->vcnum].state
+					& DDF_state_mask;
+				if (vstate == DDF_state_degraded ||
+					vstate == DDF_state_part_optimal)
+					in_degraded = 1;
+			}
 			while (vn < ddf->max_part)
 				dl->vlist[vn++] = NULL;
 			if (dl->vlist[0]) {
-				ddf->phys->entries[dl->pdnum].type &=
-					~__cpu_to_be16(DDF_Global_Spare);
-				if (!(ddf->phys->entries[dl->pdnum].type &
-				      __cpu_to_be16(DDF_Active_in_VD))) {
-					    ddf->phys->entries[dl->pdnum].type |=
-						    __cpu_to_be16(DDF_Active_in_VD);
-					    if (in_degraded)
-						    ddf->phys->entries[dl->pdnum].state |=
-							    __cpu_to_be16(DDF_Rebuilding);
-				    }
+				be16_clear(ddf->phys->entries[dl->pdnum].type,
+					   cpu_to_be16(DDF_Global_Spare));
+				if (!be16_and(ddf->phys
+					      ->entries[dl->pdnum].type,
+					      cpu_to_be16(DDF_Active_in_VD))) {
+					be16_set(ddf->phys
+						 ->entries[dl->pdnum].type,
+						 cpu_to_be16(DDF_Active_in_VD));
+					if (in_degraded)
+						be16_set(ddf->phys
+							 ->entries[dl->pdnum]
+							 .state,
+							 cpu_to_be16
+							 (DDF_Rebuilding));
+				}
 			}
 			if (dl->spare) {
-				ddf->phys->entries[dl->pdnum].type &=
-					~__cpu_to_be16(DDF_Global_Spare);
-				ddf->phys->entries[dl->pdnum].type |=
-					__cpu_to_be16(DDF_Spare);
+				be16_clear(ddf->phys->entries[dl->pdnum].type,
+					   cpu_to_be16(DDF_Global_Spare));
+				be16_set(ddf->phys->entries[dl->pdnum].type,
+					 cpu_to_be16(DDF_Spare));
 			}
 			if (!dl->vlist[0] && !dl->spare) {
-				ddf->phys->entries[dl->pdnum].type |=
-					__cpu_to_be16(DDF_Global_Spare);
-				ddf->phys->entries[dl->pdnum].type &=
-					~__cpu_to_be16(DDF_Spare |
-						       DDF_Active_in_VD);
+				be16_set(ddf->phys->entries[dl->pdnum].type,
+					 cpu_to_be16(DDF_Global_Spare));
+				be16_clear(ddf->phys->entries[dl->pdnum].type,
+					   cpu_to_be16(DDF_Spare));
+				be16_clear(ddf->phys->entries[dl->pdnum].type,
+					   cpu_to_be16(DDF_Active_in_VD));
 			}
 		}
 
@@ -3563,32 +4657,40 @@ static void ddf_process_update(struct supertype *st,
 		 * Once done, we need to update all dl->pdnum numbers.
 		 */
 		pd2 = 0;
-		for (pdnum = 0; pdnum < __be16_to_cpu(ddf->phys->used_pdes); pdnum++)
-			if ((ddf->phys->entries[pdnum].state
-			     & __be16_to_cpu(DDF_Failed))
-			    && (ddf->phys->entries[pdnum].state
-				& __be16_to_cpu(DDF_Transition)))
-				/* skip this one */;
-			else if (pdnum == pd2)
+		for (pdnum = 0; pdnum < be16_to_cpu(ddf->phys->used_pdes);
+		     pdnum++) {
+			if (be16_and(ddf->phys->entries[pdnum].state,
+				     cpu_to_be16(DDF_Failed))
+			    && be16_and(ddf->phys->entries[pdnum].state,
+					cpu_to_be16(DDF_Transition))) {
+				/* skip this one unless in dlist*/
+				for (dl = ddf->dlist; dl; dl = dl->next)
+					if (dl->pdnum == (int)pdnum)
+						break;
+				if (!dl)
+					continue;
+			}
+			if (pdnum == pd2)
 				pd2++;
 			else {
-				ddf->phys->entries[pd2] = ddf->phys->entries[pdnum];
+				ddf->phys->entries[pd2] =
+					ddf->phys->entries[pdnum];
 				for (dl = ddf->dlist; dl; dl = dl->next)
 					if (dl->pdnum == (int)pdnum)
 						dl->pdnum = pd2;
 				pd2++;
 			}
-		ddf->phys->used_pdes = __cpu_to_be16(pd2);
+		}
+		ddf->phys->used_pdes = cpu_to_be16(pd2);
 		while (pd2 < pdnum) {
-			memset(ddf->phys->entries[pd2].guid, 0xff, DDF_GUID_LEN);
+			memset(ddf->phys->entries[pd2].guid, 0xff,
+			       DDF_GUID_LEN);
 			pd2++;
 		}
 
-		ddf->updates_pending = 1;
-		break;
-	case DDF_SPARE_ASSIGN_MAGIC:
-	default: break;
+		ddf_set_updates_pending(ddf);
 	}
+	/* case DDF_SPARE_ASSIGN_MAGIC */
 }
 
 static void ddf_prepare_update(struct supertype *st,
@@ -3599,12 +4701,66 @@ static void ddf_prepare_update(struct supertype *st,
 	 * If a malloc is needed, do it here.
 	 */
 	struct ddf_super *ddf = st->sb;
-	__u32 *magic = (__u32*)update->buf;
-	if (*magic == DDF_VD_CONF_MAGIC)
+	be32 *magic = (be32 *)update->buf;
+	if (be32_eq(*magic, DDF_VD_CONF_MAGIC)) {
+		struct vcl *vcl;
+		struct vd_config *conf = (struct vd_config *) update->buf;
 		if (posix_memalign(&update->space, 512,
-			       offsetof(struct vcl, conf)
-			       + ddf->conf_rec_len * 512) != 0)
+				   offsetof(struct vcl, conf)
+				   + ddf->conf_rec_len * 512) != 0) {
 			update->space = NULL;
+			return;
+		}
+		vcl = update->space;
+		vcl->conf.sec_elmnt_count = conf->sec_elmnt_count;
+		if (alloc_other_bvds(ddf, vcl) != 0) {
+			free(update->space);
+			update->space = NULL;
+		}
+	}
+}
+
+/*
+ * Check degraded state of a RAID10.
+ * returns 2 for good, 1 for degraded, 0 for failed, and -1 for error
+ */
+static int raid10_degraded(struct mdinfo *info)
+{
+	int n_prim, n_bvds;
+	int i;
+	struct mdinfo *d;
+	char *found;
+	int ret = -1;
+
+	n_prim = info->array.layout & ~0x100;
+	n_bvds = info->array.raid_disks / n_prim;
+	found = xmalloc(n_bvds);
+	if (found == NULL)
+		return ret;
+	memset(found, 0, n_bvds);
+	for (d = info->devs; d; d = d->next) {
+		i = d->disk.raid_disk / n_prim;
+		if (i >= n_bvds) {
+			pr_err("%s: BUG: invalid raid disk\n", __func__);
+			goto out;
+		}
+		if (d->state_fd > 0)
+			found[i]++;
+	}
+	ret = 2;
+	for (i = 0; i < n_bvds; i++)
+		if (!found[i]) {
+			dprintf("%s: BVD %d/%d failed\n", __func__, i, n_bvds);
+			ret = 0;
+			goto out;
+		} else if (found[i] < n_prim) {
+			dprintf("%s: BVD %d/%d degraded\n", __func__, i,
+				n_bvds);
+			ret = 1;
+		}
+out:
+	free(found);
+	return ret;
 }
 
 /*
@@ -3634,19 +4790,22 @@ static struct mdinfo *ddf_activate_spare(struct active_array *a,
 	struct metadata_update *mu;
 	struct dl *dl;
 	int i;
+	unsigned int j;
+	struct vcl *vcl;
 	struct vd_config *vc;
-	__u64 *lba;
+	unsigned int n_bvd;
 
 	for (d = a->info.devs ; d ; d = d->next) {
 		if ((d->curr_state & DS_FAULTY) &&
-			d->state_fd >= 0)
+		    d->state_fd >= 0)
 			/* wait for Removal to happen */
 			return NULL;
 		if (d->state_fd >= 0)
 			working ++;
 	}
 
-	dprintf("ddf_activate: working=%d (%d) level=%d\n", working, a->info.array.raid_disks,
+	dprintf("%s: working=%d (%d) level=%d\n", __func__, working,
+		a->info.array.raid_disks,
 		a->info.array.level);
 	if (working == a->info.array.raid_disks)
 		return NULL; /* array not degraded */
@@ -3663,6 +4822,10 @@ static struct mdinfo *ddf_activate_spare(struct active_array *a,
 	case 6:
 		if (working < a->info.array.raid_disks - 2)
 			return NULL; /* failed */
+		break;
+	case 10:
+		if (raid10_degraded(&a->info) < 1)
+			return NULL;
 		break;
 	default: /* concat or stripe */
 		return NULL; /* failed */
@@ -3688,24 +4851,35 @@ static struct mdinfo *ddf_activate_spare(struct active_array *a,
 			int is_dedicated = 0;
 			struct extent *ex;
 			unsigned int j;
+			be16 state = ddf->phys->entries[dl->pdnum].state;
+			if (be16_and(state,
+				     cpu_to_be16(DDF_Failed|DDF_Missing)) ||
+			    !be16_and(state,
+				      cpu_to_be16(DDF_Online)))
+				continue;
+
 			/* If in this array, skip */
 			for (d2 = a->info.devs ; d2 ; d2 = d2->next)
 				if (d2->state_fd >= 0 &&
 				    d2->disk.major == dl->major &&
 				    d2->disk.minor == dl->minor) {
-					dprintf("%x:%x already in array\n", dl->major, dl->minor);
+					dprintf("%x:%x (%08x) already in array\n",
+						dl->major, dl->minor,
+						be32_to_cpu(dl->disk.refnum));
 					break;
 				}
 			if (d2)
 				continue;
-			if (ddf->phys->entries[dl->pdnum].type &
-			    __cpu_to_be16(DDF_Spare)) {
+			if (be16_and(ddf->phys->entries[dl->pdnum].type,
+				     cpu_to_be16(DDF_Spare))) {
 				/* Check spare assign record */
 				if (dl->spare) {
 					if (dl->spare->type & DDF_spare_dedicated) {
 						/* check spare_ents for guid */
 						for (j = 0 ;
-						     j < __be16_to_cpu(dl->spare->populated);
+						     j < be16_to_cpu
+							     (dl->spare
+							      ->populated);
 						     j++) {
 							if (memcmp(dl->spare->spare_ents[j].guid,
 								   ddf->virt->entries[a->info.container_member].guid,
@@ -3715,14 +4889,19 @@ static struct mdinfo *ddf_activate_spare(struct active_array *a,
 					} else
 						is_global = 1;
 				}
-			} else if (ddf->phys->entries[dl->pdnum].type &
-				   __cpu_to_be16(DDF_Global_Spare)) {
+			} else if (be16_and(ddf->phys->entries[dl->pdnum].type,
+					    cpu_to_be16(DDF_Global_Spare))) {
+				is_global = 1;
+			} else if (!be16_and(ddf->phys
+					     ->entries[dl->pdnum].state,
+					     cpu_to_be16(DDF_Failed))) {
+				/* we can possibly use some of this */
 				is_global = 1;
 			}
 			if ( ! (is_dedicated ||
 				(is_global && global_ok))) {
 				dprintf("%x:%x not suitable: %d %d\n", dl->major, dl->minor,
-				       is_dedicated, is_global);
+					is_dedicated, is_global);
 				continue;
 			}
 
@@ -3754,10 +4933,7 @@ static struct mdinfo *ddf_activate_spare(struct active_array *a,
 			}
 
 			/* Cool, we have a device with some space at pos */
-			di = malloc(sizeof(*di));
-			if (!di)
-				continue;
-			memset(di, 0, sizeof(*di));
+			di = xcalloc(1, sizeof(*di));
 			di->disk.number = i;
 			di->disk.raid_disk = i;
 			di->disk.major = dl->major;
@@ -3769,8 +4945,9 @@ static struct mdinfo *ddf_activate_spare(struct active_array *a,
 			di->container_member = dl->pdnum;
 			di->next = rv;
 			rv = di;
-			dprintf("%x:%x to be %d at %llu\n", dl->major, dl->minor,
-				i, pos);
+			dprintf("%x:%x (%08x) to be %d at %llu\n",
+				dl->major, dl->minor,
+				be32_to_cpu(dl->disk.refnum), i, pos);
 
 			break;
 		}
@@ -3789,35 +4966,51 @@ static struct mdinfo *ddf_activate_spare(struct active_array *a,
 	 * Create a metadata_update record to update the
 	 * phys_refnum and lba_offset values
 	 */
-	mu = malloc(sizeof(*mu));
-	if (mu && posix_memalign(&mu->space, 512, sizeof(struct vcl)) != 0) {
+	vc = find_vdcr(ddf, a->info.container_member, rv->disk.raid_disk,
+		       &n_bvd, &vcl);
+	if (vc == NULL)
+		return NULL;
+
+	mu = xmalloc(sizeof(*mu));
+	if (posix_memalign(&mu->space, 512, sizeof(struct vcl)) != 0) {
 		free(mu);
 		mu = NULL;
 	}
-	if (!mu) {
-		while (rv) {
-			struct mdinfo *n = rv->next;
 
-			free(rv);
-			rv = n;
-		}
-		return NULL;
-	}
-		
-	mu->buf = malloc(ddf->conf_rec_len * 512);
-	mu->len = ddf->conf_rec_len * 512;
+	mu->len = ddf->conf_rec_len * 512 * vcl->conf.sec_elmnt_count;
+	mu->buf = xmalloc(mu->len);
 	mu->space = NULL;
 	mu->space_list = NULL;
 	mu->next = *updates;
-	vc = find_vdcr(ddf, a->info.container_member);
-	memcpy(mu->buf, vc, ddf->conf_rec_len * 512);
+	memcpy(mu->buf, &vcl->conf, ddf->conf_rec_len * 512);
+	for (j = 1; j < vcl->conf.sec_elmnt_count; j++)
+		memcpy(mu->buf + j * ddf->conf_rec_len * 512,
+		       vcl->other_bvds[j-1], ddf->conf_rec_len * 512);
 
 	vc = (struct vd_config*)mu->buf;
-	lba = (__u64*)&vc->phys_refnum[ddf->mppe];
 	for (di = rv ; di ; di = di->next) {
-		vc->phys_refnum[di->disk.raid_disk] =
-			ddf->phys->entries[dl->pdnum].refnum;
-		lba[di->disk.raid_disk] = di->data_offset;
+		unsigned int i_sec, i_prim;
+		i_sec = di->disk.raid_disk
+			/ be16_to_cpu(vcl->conf.prim_elmnt_count);
+		i_prim = di->disk.raid_disk
+			% be16_to_cpu(vcl->conf.prim_elmnt_count);
+		vc = (struct vd_config *)(mu->buf
+					  + i_sec * ddf->conf_rec_len * 512);
+		for (dl = ddf->dlist; dl; dl = dl->next)
+			if (dl->major == di->disk.major
+			    && dl->minor == di->disk.minor)
+				break;
+		if (!dl) {
+			pr_err("%s: BUG: can't find disk %d (%d/%d)\n",
+			       __func__, di->disk.raid_disk,
+			       di->disk.major, di->disk.minor);
+			return NULL;
+		}
+		vc->phys_refnum[i_prim] = ddf->phys->entries[dl->pdnum].refnum;
+		LBA_OFFSET(ddf, vc)[i_prim] = cpu_to_be64(di->data_offset);
+		dprintf("BVD %u gets %u: %08x at %llu\n", i_sec, i_prim,
+			be32_to_cpu(vc->phys_refnum[i_prim]),
+			be64_to_cpu(LBA_OFFSET(ddf, vc)[i_prim]));
 	}
 	*updates = mu;
 	return rv;
@@ -3863,6 +5056,8 @@ struct superswitch super_ddf = {
 	.add_to_super	= add_to_super_ddf,
 	.remove_from_super = remove_from_super_ddf,
 	.load_container	= load_container_ddf,
+	.copy_metadata = copy_metadata_ddf,
+	.kill_subarray  = kill_subarray_ddf,
 #endif
 	.match_home	= match_home_ddf,
 	.uuid_from_super= uuid_from_super_ddf,

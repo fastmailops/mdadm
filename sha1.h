@@ -1,11 +1,11 @@
 /* Declarations of functions and data types used for SHA1 sum
    library functions.
-   Copyright (C) 2000, 2001, 2003, 2005, 2006, 2008, 2010
+   Copyright (C) 2000, 2001, 2003, 2005, 2006, 2008
    Free Software Foundation, Inc.
 
    This program is free software; you can redistribute it and/or modify it
    under the terms of the GNU General Public License as published by the
-   Free Software Foundation; either version 3, or (at your option) any
+   Free Software Foundation; either version 2, or (at your option) any
    later version.
 
    This program is distributed in the hope that it will be useful,
@@ -25,8 +25,6 @@
 #if defined HAVE_LIMITS_H || _LIBC
 # include <limits.h>
 #endif
-
-#include "ansidecl.h"
 
 /* The following contortions are an attempt to use the C preprocessor
    to determine an unsigned integral type that is 32 bits wide.  An
@@ -86,7 +84,6 @@ struct sha1_ctx
   sha1_uint32 buffer[32];
 };
 
-
 /* Initialize structure containing state of computation. */
 extern void sha1_init_ctx (struct sha1_ctx *ctx);
 
@@ -113,7 +110,6 @@ extern void sha1_process_bytes (const void *buffer, size_t len,
    aligned for a 32 bits value.  */
 extern void *sha1_finish_ctx (struct sha1_ctx *ctx, void *resbuf);
 
-
 /* Put result from CTX in first 20 bytes following RESBUF.  The result is
    always in little endian byte order, so that a byte-wise output yields
    to the wanted ASCII representation of the message digest.
@@ -121,7 +117,6 @@ extern void *sha1_finish_ctx (struct sha1_ctx *ctx, void *resbuf);
    IMPORTANT: On some systems it is required that RESBUF is correctly
    aligned for a 32 bits value.  */
 extern void *sha1_read_ctx (const struct sha1_ctx *ctx, void *resbuf);
-
 
 /* Compute SHA1 message digest for bytes read from STREAM.  The
    resulting message digest number will be written into the 20 bytes

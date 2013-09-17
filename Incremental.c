@@ -2,7 +2,7 @@
  * Incremental.c - support --incremental.  Part of:
  * mdadm - manage Linux "md" devices aka RAID arrays.
  *
- * Copyright (C) 2006-2009 Neil Brown <neilb@suse.de>
+ * Copyright (C) 2006-2013 Neil Brown <neilb@suse.de>
  *
  *
  *    This program is free software; you can redistribute it and/or modify
@@ -29,6 +29,7 @@
  */
 
 #include	"mdadm.h"
+#include	<sys/wait.h>
 #include	<dirent.h>
 #include	<ctype.h>
 
@@ -43,13 +44,10 @@ static int try_spare(char *devname, int *dfdp, struct dev_policy *pol,
 		     struct supertype *st, int verbose);
 
 static int Incremental_container(struct supertype *st, char *devname,
-				 char *homehost,
-				 int verbose, int runstop, int autof,
-				 int freeze_reshape);
+				 struct context *c);
 
-int Incremental(char *devname, int verbose, int runstop,
-		struct supertype *st, char *homehost, int require_homehost,
-		int autof, int freeze_reshape)
+int Incremental(char *devname, struct context *c,
+		struct supertype *st)
 {
 	/* Add this device to an array, creating the array if necessary
 	 * and starting the array if sensible or - if runstop>0 - if possible.
@@ -108,21 +106,21 @@ int Incremental(char *devname, int verbose, int runstop,
 	struct createinfo *ci = conf_get_create_info();
 
 	if (stat(devname, &stb) < 0) {
-		if (verbose >= 0)
-			fprintf(stderr, Name ": stat failed for %s: %s.\n",
+		if (c->verbose >= 0)
+			pr_err("stat failed for %s: %s.\n",
 				devname, strerror(errno));
 		return rv;
 	}
 	if ((stb.st_mode & S_IFMT) != S_IFBLK) {
-		if (verbose >= 0)
-			fprintf(stderr, Name ": %s is not a block device.\n",
+		if (c->verbose >= 0)
+			pr_err("%s is not a block device.\n",
 				devname);
 		return rv;
 	}
-	dfd = dev_open(devname, O_RDONLY|O_EXCL);
+	dfd = dev_open(devname, O_RDONLY);
 	if (dfd < 0) {
-		if (verbose >= 0)
-			fprintf(stderr, Name ": cannot open %s: %s.\n",
+		if (c->verbose >= 0)
+			pr_err("cannot open %s: %s.\n",
 				devname, strerror(errno));
 		return rv;
 	}
@@ -130,22 +128,22 @@ int Incremental(char *devname, int verbose, int runstop,
 	if (must_be_container(dfd)) {
 		if (!st)
 			st = super_by_fd(dfd, NULL);
+		if (st)
+			st->ignore_hw_compat = 1;
 		if (st && st->ss->load_container)
 			rv = st->ss->load_container(st, dfd, NULL);
 
 		close(dfd);
 		if (!rv && st->ss->container_content) {
 			if (map_lock(&map))
-				fprintf(stderr, Name ": failed to get "
-					"exclusive lock on mapfile\n");
-			rv = Incremental_container(st, devname, homehost,
-						   verbose, runstop, autof,
-						   freeze_reshape);
+				pr_err("failed to get "
+				       "exclusive lock on mapfile\n");
+			rv = Incremental_container(st, devname, c);
 			map_unlock(&map);
 			return rv;
 		}
 
-		fprintf(stderr, Name ": %s is not part of an md array.\n",
+		pr_err("%s is not part of an md array.\n",
 			devname);
 		return rv;
 	}
@@ -153,10 +151,9 @@ int Incremental(char *devname, int verbose, int runstop,
 	/* 1/ Check if device is permitted by mdadm.conf */
 
 	if (!conf_test_dev(devname)) {
-		if (verbose >= 0)
-			fprintf(stderr, Name
-				": %s not permitted by mdadm.conf.\n",
-				devname);
+		if (c->verbose >= 0)
+			pr_err("%s not permitted by mdadm.conf.\n",
+			       devname);
 		goto out;
 	}
 
@@ -164,14 +161,14 @@ int Incremental(char *devname, int verbose, int runstop,
 	 *            version/name from args) */
 
 	if (fstat(dfd, &stb) < 0) {
-		if (verbose >= 0)
-			fprintf(stderr, Name ": fstat failed for %s: %s.\n",
+		if (c->verbose >= 0)
+			pr_err("fstat failed for %s: %s.\n",
 				devname, strerror(errno));
 		goto out;
 	}
 	if ((stb.st_mode & S_IFMT) != S_IFBLK) {
-		if (verbose >= 0)
-			fprintf(stderr, Name ": %s is not a block device.\n",
+		if (c->verbose >= 0)
+			pr_err("%s is not a block device.\n",
 				devname);
 		goto out;
 	}
@@ -183,23 +180,23 @@ int Incremental(char *devname, int verbose, int runstop,
 	have_target = policy_check_path(&dinfo, &target_array);
 
 	if (st == NULL && (st = guess_super(dfd)) == NULL) {
-		if (verbose >= 0)
-			fprintf(stderr, Name
-				": no recognisable superblock on %s.\n",
-				devname);
+		if (c->verbose >= 0)
+			pr_err("no recognisable superblock on %s.\n",
+			       devname);
 		rv = try_spare(devname, &dfd, policy,
 			       have_target ? &target_array : NULL,
-			       st, verbose);
+			       st, c->verbose);
 		goto out;
 	}
+	st->ignore_hw_compat = 1;
 	if (st->ss->compare_super == NULL ||
 	    st->ss->load_super(st, dfd, NULL)) {
-		if (verbose >= 0)
-			fprintf(stderr, Name ": no RAID superblock on %s.\n",
+		if (c->verbose >= 0)
+			pr_err("no RAID superblock on %s.\n",
 				devname);
 		rv = try_spare(devname, &dfd, policy,
 			       have_target ? &target_array : NULL,
-			       st, verbose);
+			       st, c->verbose);
 		free(st);
 		goto out;
 	}
@@ -208,14 +205,14 @@ int Incremental(char *devname, int verbose, int runstop,
 	st->ss->getinfo_super(st, &info, NULL);
 
 	/* 3/ Check if there is a match in mdadm.conf */
-	match = conf_match(st, &info, devname, verbose, &rv);
+	match = conf_match(st, &info, devname, c->verbose, &rv);
 	if (!match && rv == 2)
 		goto out;
 
 	if (match && match->devname
 	    && strcasecmp(match->devname, "<ignore>") == 0) {
-		if (verbose >= 0)
-			fprintf(stderr, Name ": array containing %s is explicitly"
+		if (c->verbose >= 0)
+			pr_err("array containing %s is explicitly"
 				" ignored by mdadm.conf\n",
 				devname);
 		goto out;
@@ -227,21 +224,19 @@ int Incremental(char *devname, int verbose, int runstop,
 	 * on that. */
 	if (match)
 		trustworthy = LOCAL;
-	else if (st->ss->match_home(st, homehost) == 1)
+	else if (st->ss->match_home(st, c->homehost) == 1)
 		trustworthy = LOCAL;
 	else if (st->ss->match_home(st, "any") == 1)
 		trustworthy = LOCAL_ANY;
 	else
 		trustworthy = FOREIGN;
 
-
 	if (!match && !conf_test_metadata(st->ss->name, policy,
 					  (trustworthy == LOCAL))) {
-		if (verbose >= 1)
-			fprintf(stderr, Name
-				": %s has metadata type %s for which "
-				"auto-assembly is disabled\n",
-				devname, st->ss->name);
+		if (c->verbose >= 1)
+			pr_err("%s has metadata type %s for which "
+			       "auto-assembly is disabled\n",
+			       devname, st->ss->name);
 		goto out;
 	}
 	if (trustworthy == LOCAL_ANY)
@@ -253,9 +248,9 @@ int Incremental(char *devname, int verbose, int runstop,
 	 * CREATE.
 	 */
 	if (match && match->autof)
-		autof = match->autof;
-	if (autof == 0)
-		autof = ci->autof;
+		c->autof = match->autof;
+	if (c->autof == 0)
+		c->autof = ci->autof;
 
 	name_to_use = info.name;
 	if (name_to_use[0] == 0 &&
@@ -264,7 +259,7 @@ int Incremental(char *devname, int verbose, int runstop,
 		trustworthy = METADATA;
 	}
 	if (name_to_use[0] && trustworthy != LOCAL &&
-	    ! require_homehost &&
+	    ! c->require_homehost &&
 	    conf_name_is_free(name_to_use))
 		trustworthy = LOCAL;
 
@@ -277,11 +272,29 @@ int Incremental(char *devname, int verbose, int runstop,
 	/* 4/ Check if array exists.
 	 */
 	if (map_lock(&map))
-		fprintf(stderr, Name ": failed to get exclusive lock on "
+		pr_err("failed to get exclusive lock on "
 			"mapfile\n");
+	/* Now check we can get O_EXCL.  If not, probably "mdadm -A" has
+	 * taken over
+	 */
+	dfd = dev_open(devname, O_RDONLY|O_EXCL);
+	if (dfd < 0) {
+		if (c->verbose >= 0)
+			pr_err("cannot reopen %s: %s.\n",
+				devname, strerror(errno));
+		goto out_unlock;
+	}
+	/* Cannot hold it open while we add the device to the array,
+	 * so we must release the O_EXCL and depend on the map_lock()
+	 * So now is the best time to remove any partitions.
+	 */
+	remove_partitions(dfd);
+	close(dfd);
+	dfd = -1;
+
 	mp = map_by_uuid(&map, info.uuid);
 	if (mp)
-		mdfd = open_dev(mp->devnum);
+		mdfd = open_dev(mp->devnm);
 	else
 		mdfd = -1;
 
@@ -289,15 +302,15 @@ int Incremental(char *devname, int verbose, int runstop,
 
 		/* Couldn't find an existing array, maybe make a new one */
 		mdfd = create_mddev(match ? match->devname : NULL,
-				    name_to_use, autof, trustworthy, chosen_name);
+				    name_to_use, c->autof, trustworthy, chosen_name);
 
 		if (mdfd < 0)
 			goto out_unlock;
 
-		sysfs_init(&info, mdfd, 0);
+		sysfs_init(&info, mdfd, NULL);
 
 		if (set_array_info(mdfd, st, &info) != 0) {
-			fprintf(stderr, Name ": failed to set array info for %s: %s\n",
+			pr_err("failed to set array info for %s: %s\n",
 				chosen_name, strerror(errno));
 			rv = 2;
 			goto out_unlock;
@@ -307,30 +320,29 @@ int Incremental(char *devname, int verbose, int runstop,
 		dinfo.disk.major = major(stb.st_rdev);
 		dinfo.disk.minor = minor(stb.st_rdev);
 		if (add_disk(mdfd, st, &info, &dinfo) != 0) {
-			fprintf(stderr, Name ": failed to add %s to %s: %s.\n",
+			pr_err("failed to add %s to new array %s: %s.\n",
 				devname, chosen_name, strerror(errno));
 			ioctl(mdfd, STOP_ARRAY, 0);
 			rv = 2;
 			goto out_unlock;
 		}
-		sra = sysfs_read(mdfd, -1, (GET_DEVS | GET_STATE |
-					    GET_OFFSET | GET_SIZE));
-	
+		sra = sysfs_read(mdfd, NULL, (GET_DEVS | GET_STATE |
+					      GET_OFFSET | GET_SIZE));
+
 		if (!sra || !sra->devs || sra->devs->disk.raid_disk >= 0) {
 			/* It really should be 'none' - must be old buggy
 			 * kernel, and mdadm -I may not be able to complete.
 			 * So reject it.
 			 */
 			ioctl(mdfd, STOP_ARRAY, NULL);
-			fprintf(stderr, Name
-		      ": You have an old buggy kernel which cannot support\n"
-				"      --incremental reliably.  Aborting.\n");
+			pr_err("You have an old buggy kernel which cannot support\n"
+			       "      --incremental reliably.  Aborting.\n");
 			rv = 2;
 			goto out_unlock;
 		}
 		info.array.working_disks = 1;
 		/* 6/ Make sure /var/run/mdadm.map contains this array. */
-		map_update(&map, fd2devnum(mdfd),
+		map_update(&map, fd2devnm(mdfd),
 			   info.text_version,
 			   info.uuid, chosen_name);
 	} else {
@@ -344,13 +356,13 @@ int Incremental(char *devname, int verbose, int runstop,
 		struct supertype *st2;
 		struct mdinfo info2, *d;
 
-		sra = sysfs_read(mdfd, -1, (GET_DEVS | GET_STATE |
+		sra = sysfs_read(mdfd, NULL, (GET_DEVS | GET_STATE |
 					    GET_OFFSET | GET_SIZE));
-	
+
 		if (mp->path)
 			strcpy(chosen_name, mp->path);
 		else
-			strcpy(chosen_name, devnum2devname(mp->devnum));
+			strcpy(chosen_name, mp->devnm);
 
 		/* It is generally not OK to add non-spare drives to a
 		 * running array as they are probably missing because
@@ -367,11 +379,10 @@ int Incremental(char *devname, int verbose, int runstop,
 		    && (info.disk.state & (1<<MD_DISK_SYNC)) != 0
 		    && ! policy_action_allows(policy, st->ss->name,
 					      act_re_add)
-		    && runstop < 1) {
+		    && c->runstop < 1) {
 			if (ioctl(mdfd, GET_ARRAY_INFO, &ainf) == 0) {
-				fprintf(stderr, Name
-					": not adding %s to active array (without --run) %s\n",
-					devname, chosen_name);
+				pr_err("not adding %s to active array (without --run) %s\n",
+				       devname, chosen_name);
 				rv = 2;
 				goto out_unlock;
 			}
@@ -385,18 +396,16 @@ int Incremental(char *devname, int verbose, int runstop,
 				sra->devs->disk.minor);
 			dfd2 = dev_open(dn, O_RDONLY);
 			if (dfd2 < 0) {
-				fprintf(stderr, Name
-					": unable to open %s\n", devname);
+				pr_err("unable to open %s\n", devname);
 				rv = 2;
 				goto out_unlock;
 			}
 			st2 = dup_super(st);
 			if (st2->ss->load_super(st2, dfd2, NULL) ||
 			    st->ss->compare_super(st, st2) != 0) {
-				fprintf(stderr, Name
-					": metadata mismatch between %s and "
-					"chosen array %s\n",
-					devname, chosen_name);
+				pr_err("metadata mismatch between %s and "
+				       "chosen array %s\n",
+				       devname, chosen_name);
 				close(dfd2);
 				rv = 2;
 				goto out_unlock;
@@ -407,9 +416,8 @@ int Incremental(char *devname, int verbose, int runstop,
 			if (info.array.level != info2.array.level ||
 			    memcmp(info.uuid, info2.uuid, 16) != 0 ||
 			    info.array.raid_disks != info2.array.raid_disks) {
-				fprintf(stderr, Name
-					": unexpected difference between %s and %s.\n",
-					chosen_name, devname);
+				pr_err("unexpected difference between %s and %s.\n",
+				       chosen_name, devname);
 				rv = 2;
 				goto out_unlock;
 			}
@@ -425,11 +433,23 @@ int Incremental(char *devname, int verbose, int runstop,
 			 * disk.number. Find and reject any such
 			 */
 			find_reject(mdfd, st, sra, info.disk.number,
-				    info.events, verbose, chosen_name);
+				    info.events, c->verbose, chosen_name);
 			err = add_disk(mdfd, st, sra, &info);
 		}
+		if (err < 0 && errno == EINVAL &&
+		    info.disk.state & (1<<MD_DISK_SYNC)) {
+			/* Maybe it needs to be added as a spare */
+			if (policy_action_allows(policy, st->ss->name,
+						 act_force_spare)) {
+				info.disk.state &= ~(1<<MD_DISK_SYNC);
+				err = add_disk(mdfd, st, sra, &info);
+			} else
+				if (c->verbose >= 0)
+					pr_err("can only add %s to %s as a spare, and force-spare is not set.\n",
+					       devname, chosen_name);
+		}
 		if (err < 0) {
-			fprintf(stderr, Name ": failed to add %s to %s: %s.\n",
+			pr_err("failed to add %s to existing array %s: %s.\n",
 				devname, chosen_name, strerror(errno));
 			rv = 2;
 			goto out_unlock;
@@ -437,31 +457,28 @@ int Incremental(char *devname, int verbose, int runstop,
 		info.array.working_disks = 0;
 		for (d = sra->devs; d; d=d->next)
 			info.array.working_disks ++;
-			
+
 	}
 
 	/* 7/ Is there enough devices to possibly start the array? */
 	/* 7a/ if not, finish with success. */
 	if (info.array.level == LEVEL_CONTAINER) {
-		int devnum = devnum; /* defined and used iff ->external */
+		char devnm[32];
 		/* Try to assemble within the container */
 		sysfs_uevent(sra, "change");
-		if (verbose >= 0)
-			fprintf(stderr, Name
-				": container %s now has %d device%s\n",
-				chosen_name, info.array.working_disks,
-				info.array.working_disks==1?"":"s");
+		if (c->verbose >= 0)
+			pr_err("container %s now has %d device%s\n",
+			       chosen_name, info.array.working_disks,
+			       info.array.working_disks == 1?"":"s");
 		wait_for(chosen_name, mdfd);
 		if (st->ss->external)
-			devnum = fd2devnum(mdfd);
+			strcpy(devnm, fd2devnm(mdfd));
 		if (st->ss->load_container)
 			rv = st->ss->load_container(st, mdfd, NULL);
 		close(mdfd);
 		sysfs_free(sra);
 		if (!rv)
-			rv = Incremental_container(st, chosen_name, homehost,
-						   verbose, runstop, autof,
-						   freeze_reshape);
+			rv = Incremental_container(st, chosen_name, c);
 		map_unlock(&map);
 		if (rv == 1)
 			/* Don't fail the whole -I if a subarray didn't
@@ -471,7 +488,7 @@ int Incremental(char *devname, int verbose, int runstop,
 		/* after spare is added, ping monitor for external metadata
 		 * so that it can eg. try to rebuild degraded array */
 		if (st->ss->external)
-			ping_monitor_by_id(devnum);
+			ping_monitor(devnm);
 		return rv;
 	}
 
@@ -480,16 +497,15 @@ int Incremental(char *devname, int verbose, int runstop,
 	 * things change.
 	 */
 	sysfs_free(sra);
-	sra = sysfs_read(mdfd, -1, (GET_DEVS | GET_STATE |
+	sra = sysfs_read(mdfd, NULL, (GET_DEVS | GET_STATE |
 				    GET_OFFSET | GET_SIZE));
 	active_disks = count_active(st, sra, mdfd, &avail, &info);
 	if (enough(info.array.level, info.array.raid_disks,
 		   info.array.layout, info.array.state & 1,
 		   avail) == 0) {
-		if (verbose >= 0)
-			fprintf(stderr, Name
-			     ": %s attached to %s, not enough to start (%d).\n",
-				devname, chosen_name, active_disks);
+		if (c->verbose >= 0)
+			pr_err("%s attached to %s, not enough to start (%d).\n",
+			       devname, chosen_name, active_disks);
 		rv = 0;
 		goto out_unlock;
 	}
@@ -501,31 +517,35 @@ int Incremental(char *devname, int verbose, int runstop,
 	/*   + start the array (auto-readonly). */
 
 	if (ioctl(mdfd, GET_ARRAY_INFO, &ainf) == 0) {
-		if (verbose >= 0)
-			fprintf(stderr, Name
-			   ": %s attached to %s which is already active.\n",
-				devname, chosen_name);
+		if (c->verbose >= 0)
+			pr_err("%s attached to %s which is already active.\n",
+			       devname, chosen_name);
 		rv = 0;
 		goto out_unlock;
 	}
 
 	map_unlock(&map);
-	if (runstop > 0 || active_disks >= info.array.working_disks) {
+	if (c->runstop > 0 || active_disks >= info.array.working_disks) {
 		struct mdinfo *dsk;
 		/* Let's try to start it */
+
+		if (info.reshape_active && !(info.reshape_active & RESHAPE_NO_BACKUP)) {
+			pr_err("%s: This array is being reshaped and cannot be started\n",
+			       chosen_name);
+			cont_err("by --incremental.  Please use --assemble\n");
+			goto out;
+		}
 		if (match && match->bitmap_file) {
 			int bmfd = open(match->bitmap_file, O_RDWR);
 			if (bmfd < 0) {
-				fprintf(stderr, Name
-					": Could not open bitmap file %s.\n",
-					match->bitmap_file);
+				pr_err("Could not open bitmap file %s.\n",
+				       match->bitmap_file);
 				goto out;
 			}
 			if (ioctl(mdfd, SET_BITMAP_FILE, bmfd) != 0) {
 				close(bmfd);
-				fprintf(stderr, Name
-					": Failed to set bitmapfile for %s.\n",
-					chosen_name);
+				pr_err("Failed to set bitmapfile for %s.\n",
+				       chosen_name);
 				goto out;
 			}
 			close(bmfd);
@@ -544,10 +564,9 @@ int Incremental(char *devname, int verbose, int runstop,
 			rv = sysfs_set_str(sra, NULL,
 					   "array_state", "read-auto");
 		if (rv == 0) {
-			if (verbose >= 0)
-				fprintf(stderr, Name
-					": %s attached to %s, which has been started.\n",
-					devname, chosen_name);
+			if (c->verbose >= 0)
+				pr_err("%s attached to %s, which has been started.\n",
+				       devname, chosen_name);
 			rv = 0;
 			wait_for(chosen_name, mdfd);
 			/* We just started the array, so some devices
@@ -559,21 +578,18 @@ int Incremental(char *devname, int verbose, int runstop,
 			for (dsk = sra->devs; dsk ; dsk = dsk->next) {
 				if (disk_action_allows(dsk, st->ss->name, act_re_add) &&
 				    add_disk(mdfd, st, sra, dsk) == 0)
-					fprintf(stderr, Name
-						": %s re-added to %s\n",
-						dsk->sys_name, chosen_name);
+					pr_err("%s re-added to %s\n",
+					       dsk->sys_name, chosen_name);
 			}
 		} else {
-			fprintf(stderr, Name
-                             ": %s attached to %s, but failed to start: %s.\n",
-				devname, chosen_name, strerror(errno));
+			pr_err("%s attached to %s, but failed to start: %s.\n",
+			       devname, chosen_name, strerror(errno));
 			rv = 1;
 		}
 	} else {
-		if (verbose >= 0)
-			fprintf(stderr, Name
-                          ": %s attached to %s, not enough to start safely.\n",
-				devname, chosen_name);
+		if (c->verbose >= 0)
+			pr_err("%s attached to %s, not enough to start safely.\n",
+			       devname, chosen_name);
 		rv = 0;
 	}
 out:
@@ -630,9 +646,8 @@ static void find_reject(int mdfd, struct supertype *st, struct mdinfo *sra,
 			sysfs_set_str(sra, d, "slot", "none");
 		if (sysfs_set_str(sra, d, "state", "remove") == 0)
 			if (verbose >= 0)
-				fprintf(stderr, Name
-					": removing old device %s from %s\n",
-					d->sys_name+4, array_name);
+				pr_err("removing old device %s from %s\n",
+				       d->sys_name+4, array_name);
 	}
 }
 
@@ -643,6 +658,7 @@ static int count_active(struct supertype *st, struct mdinfo *sra,
 	/* count how many devices in sra think they are active */
 	struct mdinfo *d;
 	int cnt = 0;
+	int replcnt = 0;
 	__u64 max_events = 0;
 	char *avail = NULL;
 	int *best = NULL;
@@ -657,7 +673,7 @@ static int count_active(struct supertype *st, struct mdinfo *sra,
 
 	for (d = sra->devs ; d ; d = d->next)
 		numdevs++;
-	for (d = sra->devs, devnum=0 ; d ; d = d->next, devnum++) {
+	for (d = sra->devs, devnum = 0 ; d ; d = d->next, devnum++) {
 		char dn[30];
 		int dfd;
 		int ok;
@@ -675,15 +691,11 @@ static int count_active(struct supertype *st, struct mdinfo *sra,
 		st->ss->getinfo_super(st, &info, devmap + raid_disks * devnum);
 		if (!avail) {
 			raid_disks = info.array.raid_disks;
-			avail = calloc(raid_disks, 1);
-			if (!avail) {
-				fprintf(stderr, Name ": out of memory.\n");
-				exit(1);
-			}
+			avail = xcalloc(raid_disks, 1);
 			*availp = avail;
 
-			best = calloc(raid_disks, sizeof(int));
-			devmap = calloc(raid_disks * numdevs, 1);
+			best = xcalloc(raid_disks, sizeof(int));
+			devmap = xcalloc(raid_disks, numdevs);
 
 			st->ss->getinfo_super(st, &info, devmap);
 		}
@@ -709,7 +721,7 @@ static int count_active(struct supertype *st, struct mdinfo *sra,
 			else if (info.events == max_events+1) {
 				int i;
 				max_events = info.events;
-				for (i=0; i < raid_disks; i++)
+				for (i = 0; i < raid_disks; i++)
 					if (avail[i])
 						avail[i]--;
 				avail[info.disk.raid_disk] = 2;
@@ -722,7 +734,8 @@ static int count_active(struct supertype *st, struct mdinfo *sra,
 				best[info.disk.raid_disk] = devnum;
 				st->ss->getinfo_super(st, bestinfo, NULL);
 			}
-		}
+		} else if (info.disk.state & (1<<MD_DISK_REPLACEMENT))
+			replcnt++;
 		st->ss->free_super(st);
 	}
 	if (!avail)
@@ -747,9 +760,17 @@ static int count_active(struct supertype *st, struct mdinfo *sra,
 		if (avail[i])
 			cnt++;
 	}
+	/* Also need to reject any spare device with an event count that
+	 * is too high
+	 */
+	for (d = sra->devs; d; d = d->next) {
+		if (!(d->disk.state & (1<<MD_DISK_SYNC)) &&
+		    d->events > max_events)
+			d->disk.state |= (1 << MD_DISK_REMOVED);
+	}
 	free(best);
 	free(devmap);
-	return cnt;
+	return cnt + replcnt;
 }
 
 /* test if container has degraded member(s) */
@@ -760,10 +781,9 @@ static int container_members_max_degradation(struct map_ent *map, struct map_ent
 	int max_degraded = 0;
 
 	for(; map; map = map->next) {
-		if (!is_subarray(map->metadata) ||
-		    devname2devnum(map->metadata+1) != me->devnum)
+		if (!metadata_container_matches(map->metadata, me->devnm))
 			continue;
-		afd = open_dev(map->devnum);
+		afd = open_dev(map->devnm);
 		if (afd < 0)
 			continue;
 		/* most accurate information regarding array degradation */
@@ -811,7 +831,7 @@ static int array_try_spare(char *devname, int *dfdp, struct dev_policy *pol,
 	 */
 
 	if (map_lock(&map)) {
-		fprintf(stderr, Name ": failed to get exclusive lock on "
+		pr_err("failed to get exclusive lock on "
 			"mapfile\n");
 		return 1;
 	}
@@ -830,19 +850,19 @@ static int array_try_spare(char *devname, int *dfdp, struct dev_policy *pol,
 			    (st->minor_version >= 0 &&
 			     st->minor_version != st2->minor_version)) {
 				if (verbose > 1)
-					fprintf(stderr, Name ": not adding %s to %s as metadata type doesn't match\n",
+					pr_err("not adding %s to %s as metadata type doesn't match\n",
 						devname, mp->path);
 				free(st2);
 				continue;
 			}
 			free(st2);
 		}
-		sra = sysfs_read(-1, mp->devnum,
+		sra = sysfs_read(-1, mp->devnm,
 				 GET_DEVS|GET_OFFSET|GET_SIZE|GET_STATE|
 				 GET_DEGRADED|GET_COMPONENT|GET_VERSION);
 		if (!sra) {
 			/* Probably a container - no degraded info */
-			sra = sysfs_read(-1, mp->devnum,
+			sra = sysfs_read(-1, mp->devnm,
 					 GET_DEVS|GET_OFFSET|GET_SIZE|GET_STATE|
 					 GET_COMPONENT|GET_VERSION);
 			if (sra)
@@ -853,12 +873,12 @@ static int array_try_spare(char *devname, int *dfdp, struct dev_policy *pol,
 		if (st == NULL) {
 			int i;
 			st2 = NULL;
-			for(i=0; !st2 && superlist[i]; i++)
+			for(i = 0; !st2 && superlist[i]; i++)
 				st2 = superlist[i]->match_metadata_desc(
 					sra->text_version);
 			if (!st2) {
 				if (verbose > 1)
-					fprintf(stderr, Name ": not adding %s to %s"
+					pr_err("not adding %s to %s"
 						" as metadata not recognised.\n",
 						devname, mp->path);
 				goto next;
@@ -883,7 +903,7 @@ static int array_try_spare(char *devname, int *dfdp, struct dev_policy *pol,
 			/* true for containers, here we must read superblock
 			 * to obtain minimum spare size */
 			struct supertype *st3 = dup_super(st2);
-			int mdfd = open_dev(mp->devnum);
+			int mdfd = open_dev(mp->devnm);
 			if (mdfd < 0) {
 				free(st3);
 				goto next;
@@ -897,11 +917,15 @@ static int array_try_spare(char *devname, int *dfdp, struct dev_policy *pol,
 			close(mdfd);
 		}
 		if ((sra->component_size > 0 &&
-		     st2->ss->avail_size(st2, devsize) < sra->component_size)
+		     st2->ss->avail_size(st2, devsize,
+					 sra->devs
+					 ? sra->devs->data_offset
+					 : INVALID_SECTORS)
+		     < sra->component_size)
 		    ||
 		    (sra->component_size == 0 && devsize < component_size)) {
 			if (verbose > 1)
-				fprintf(stderr, Name ": not adding %s to %s as it is too small\n",
+				pr_err("not adding %s to %s as it is too small\n",
 					devname, mp->path);
 			goto next;
 		}
@@ -937,7 +961,7 @@ static int array_try_spare(char *devname, int *dfdp, struct dev_policy *pol,
 		if (domain_test(dl, pol, st2->ss->name) != 1) {
 			/* domain test fails */
 			if (verbose > 1)
-				fprintf(stderr, Name ": not adding %s to %s as"
+				pr_err("not adding %s to %s as"
 					" it is not in a compatible domain\n",
 					devname, mp->path);
 
@@ -962,13 +986,12 @@ static int array_try_spare(char *devname, int *dfdp, struct dev_policy *pol,
 	}
 	if (chosen) {
 		/* add current device to chosen array as a spare */
-		int mdfd = open_dev(devname2devnum(chosen->sys_name));
+		int mdfd = open_dev(chosen->sys_name);
 		if (mdfd >= 0) {
 			struct mddev_dev devlist;
 			char devname[20];
 			devlist.next = NULL;
 			devlist.used = 0;
-			devlist.re_add = 0;
 			devlist.writemostly = 0;
 			devlist.devname = devname;
 			sprintf(devname, "%d:%d", major(stb.st_rdev),
@@ -982,10 +1005,10 @@ static int array_try_spare(char *devname, int *dfdp, struct dev_policy *pol,
 		}
 		if (verbose > 0) {
 			if (rv == 0)
-				fprintf(stderr, Name ": added %s as spare for %s\n",
+				pr_err("added %s as spare for %s\n",
 					devname, chosen->sys_name);
 			else
-				fprintf(stderr, Name ": failed to add %s as spare for %s\n",
+				pr_err("failed to add %s as spare for %s\n",
 					devname, chosen->sys_name);
 		}
 		sysfs_free(chosen);
@@ -1211,7 +1234,7 @@ static int try_spare(char *devname, int *dfdp, struct dev_policy *pol,
 		    !policy_action_allows(pol, st?st->ss->name:NULL,
 					  act_spare_same_slot)) {
 			if (verbose > 1)
-				fprintf(stderr, Name ": %s is not bare, so not "
+				pr_err("%s is not bare, so not "
 					"considering as a spare\n",
 					devname);
 			return 1;
@@ -1255,7 +1278,7 @@ static int try_spare(char *devname, int *dfdp, struct dev_policy *pol,
 	return rv;
 }
 
-int IncrementalScan(int verbose)
+int IncrementalScan(int verbose, char *devnm)
 {
 	/* look at every device listed in the 'map' file.
 	 * If one is found that is not running then:
@@ -1275,7 +1298,11 @@ int IncrementalScan(int verbose)
 		mdu_array_info_t array;
 		mdu_bitmap_file_t bmf;
 		struct mdinfo *sra;
-		int mdfd = open_dev(me->devnum);
+		int mdfd;
+
+		if (devnm && strcmp(devnm, me->devnm) != 0)
+			continue;
+		mdfd = open_dev(me->devnm);
 
 		if (mdfd < 0)
 			continue;
@@ -1305,28 +1332,27 @@ int IncrementalScan(int verbose)
 			}
 			if (verbose >= 0) {
 				if (added == 0)
-					fprintf(stderr, Name
-						": Added bitmap %s to %s\n",
-						mddev->bitmap_file, me->path);
+					pr_err("Added bitmap %s to %s\n",
+					       mddev->bitmap_file, me->path);
 				else if (errno != EEXIST)
-					fprintf(stderr, Name
-					   ": Failed to add bitmap to %s: %s\n",
-						me->path, strerror(errno));
+					pr_err("Failed to add bitmap to %s: %s\n",
+					       me->path, strerror(errno));
 			}
 		}
-		sra = sysfs_read(mdfd, 0, 0);
+		/* FIXME check for reshape_active and consider not
+		 * starting array.
+		 */
+		sra = sysfs_read(mdfd, NULL, 0);
 		if (sra) {
 			if (sysfs_set_str(sra, NULL,
 					  "array_state", "read-auto") == 0) {
 				if (verbose >= 0)
-					fprintf(stderr, Name
-						": started array %s\n",
-						me->path ?: devnum2devname(me->devnum));
+					pr_err("started array %s\n",
+					       me->path ?: me->devnm);
 			} else {
-				fprintf(stderr, Name
-					": failed to start array %s: %s\n",
-					me->path ?: devnum2devname(me->devnum),
-					strerror(errno));
+				pr_err("failed to start array %s: %s\n",
+				       me->path ?: me->devnm,
+				       strerror(errno));
 				rv = 1;
 			}
 			sysfs_free(sra);
@@ -1342,18 +1368,18 @@ static char *container2devname(char *devname)
 	if (devname[0] == '/') {
 		int fd = open(devname, O_RDONLY);
 		if (fd >= 0) {
-			mdname = devnum2devname(fd2devnum(fd));
+			mdname = xstrdup(fd2devnm(fd));
 			close(fd);
 		}
 	} else {
 		int uuid[4];
 		struct map_ent *mp, *map = NULL;
-					
+
 		if (!parse_uuid(devname, uuid))
 			return mdname;
 		mp = map_by_uuid(&map, uuid);
 		if (mp)
-			mdname = devnum2devname(mp->devnum);
+			mdname = xstrdup(mp->devnm);
 		map_free(map);
 	}
 
@@ -1361,8 +1387,7 @@ static char *container2devname(char *devname)
 }
 
 static int Incremental_container(struct supertype *st, char *devname,
-				 char *homehost, int verbose,
-				 int runstop, int autof, int freeze_reshape)
+				 struct context *c)
 {
 	/* Collect the contents of this container and for each
 	 * array, choose a device name and assemble the array.
@@ -1384,23 +1409,23 @@ static int Incremental_container(struct supertype *st, char *devname,
 
 	st->ss->getinfo_super(st, &info, NULL);
 
-	if ((runstop > 0 && info.container_enough >= 0) ||
+	if ((c->runstop > 0 && info.container_enough >= 0) ||
 	    info.container_enough > 0)
 		/* pass */;
 	else {
-		if (verbose)
-			fprintf(stderr, Name ": not enough devices to start the container\n");
+		if (c->verbose)
+			pr_err("not enough devices to start the container\n");
 		return 0;
 	}
 
-	match = conf_match(st, &info, devname, verbose, &rv);
+	match = conf_match(st, &info, devname, c->verbose, &rv);
 	if (match == NULL && rv == 2)
 		return rv;
 
 	/* Need to compute 'trustworthy' */
 	if (match)
 		trustworthy = LOCAL;
-	else if (st->ss->match_home(st, homehost) == 1)
+	else if (st->ss->match_home(st, c->homehost) == 1)
 		trustworthy = LOCAL;
 	else if (st->ss->match_home(st, "any") == 1)
 		trustworthy = LOCAL;
@@ -1420,7 +1445,7 @@ static int Incremental_container(struct supertype *st, char *devname,
 		ra_all++;
 		/* do not activate arrays blocked by metadata handler */
 		if (ra->array.state & (1 << MD_SB_BLOCK_VOLUME)) {
-			fprintf(stderr, Name ": Cannot activate array %s in %s.\n",
+			pr_err("Cannot activate array %s in %s.\n",
 				ra->text_version, devname);
 			ra_blocked++;
 			continue;
@@ -1428,11 +1453,11 @@ static int Incremental_container(struct supertype *st, char *devname,
 		mp = map_by_uuid(&map, ra->uuid);
 
 		if (mp) {
-			mdfd = open_dev(mp->devnum);
+			mdfd = open_dev(mp->devnm);
 			if (mp->path)
 				strcpy(chosen_name, mp->path);
 			else
-				strcpy(chosen_name, devnum2devname(mp->devnum));
+				strcpy(chosen_name, mp->devnm);
 		} else {
 
 			/* Check in mdadm.conf for container == devname and
@@ -1467,18 +1492,18 @@ static int Incremental_container(struct supertype *st, char *devname,
 				free(dn);
 				/* we have a match */
 				match = array_list;
-				if (verbose>0)
-					fprintf(stderr, Name ": match found for member %s\n",
+				if (c->verbose>0)
+					pr_err("match found for member %s\n",
 						array_list->member);
 				break;
 			}
 
 			if (match && match->devname &&
 			    strcasecmp(match->devname, "<ignore>") == 0) {
-				if (verbose > 0)
-					fprintf(stderr, Name ": array %s/%s is "
-						"explicitly ignored by mdadm.conf\n",
-						match->container, match->member);
+				if (c->verbose > 0)
+					pr_err("array %s/%s is "
+					       "explicitly ignored by mdadm.conf\n",
+					       match->container, match->member);
 				return 2;
 			}
 			if (match)
@@ -1486,20 +1511,19 @@ static int Incremental_container(struct supertype *st, char *devname,
 
 			mdfd = create_mddev(match ? match->devname : NULL,
 					    ra->name,
-					    autof,
+					    c->autof,
 					    trustworthy,
 					    chosen_name);
 		}
 
 		if (mdfd < 0) {
-			fprintf(stderr, Name ": failed to open %s: %s.\n",
+			pr_err("failed to open %s: %s.\n",
 				chosen_name, strerror(errno));
 			return 2;
 		}
 
-		assemble_container_content(st, mdfd, ra, runstop,
-					   chosen_name, verbose, NULL,
-					   freeze_reshape);
+		assemble_container_content(st, mdfd, ra, c,
+					   chosen_name);
 		close(mdfd);
 	}
 
@@ -1544,9 +1568,8 @@ static int Incremental_container(struct supertype *st, char *devname,
 					disks = disks->next;
 				}
 				if (count)
-					fprintf(stderr, Name
-						": Added %d spare%s to %s\n",
-						count, count>1?"s":"", devname);
+					pr_err("Added %d spare%s to %s\n",
+					       count, count>1?"s":"", devname);
 			}
 			sysfs_free(sinfo);
 		} else
@@ -1554,6 +1577,19 @@ static int Incremental_container(struct supertype *st, char *devname,
 	}
 	domain_free(domains);
 	return 0;
+}
+
+static void run_udisks(char *arg1, char *arg2)
+{
+	int pid = fork();
+	int status;
+	if (pid == 0) {
+		execl("/usr/bin/udisks", "udisks", arg1, arg2, NULL);
+		execl("/bin/udisks", "udisks", arg1, arg2, NULL);
+		exit(1);
+	}
+	while (pid > 0 && wait(&status) != pid)
+		;
 }
 
 /*
@@ -1569,9 +1605,11 @@ static int Incremental_container(struct supertype *st, char *devname,
 int IncrementalRemove(char *devname, char *id_path, int verbose)
 {
 	int mdfd;
-	int rv;
+	int rv = 0;
 	struct mdstat_ent *ent;
 	struct mddev_dev devlist;
+	struct mdinfo mdi;
+	char buf[32];
 
 	if (!id_path)
 		dprintf(Name ": incremental removal without --path <id_path> "
@@ -1579,26 +1617,36 @@ int IncrementalRemove(char *devname, char *id_path, int verbose)
 			"port\n");
 
 	if (strchr(devname, '/')) {
-		fprintf(stderr, Name ": incremental removal requires a "
+		pr_err("incremental removal requires a "
 			"kernel device name, not a file: %s\n", devname);
 		return 1;
 	}
 	ent = mdstat_by_component(devname);
 	if (!ent) {
-		fprintf(stderr, Name ": %s does not appear to be a component "
-			"of any array\n", devname);
+		if (verbose >= 0)
+			pr_err("%s does not appear to be a component "
+			       "of any array\n", devname);
 		return 1;
 	}
-	mdfd = open_dev(ent->devnum);
+	sysfs_init(&mdi, -1, ent->devnm);
+	if (sysfs_get_str(&mdi, NULL, "array_state",
+			  buf, sizeof(buf)) > 0) {
+		if (strncmp(buf, "active", 6) == 0 ||
+		    strncmp(buf, "clean", 5) == 0)
+			sysfs_set_str(&mdi, NULL,
+				      "array_state", "read-auto");
+	}
+	mdfd = open_dev(ent->devnm);
 	if (mdfd < 0) {
-		fprintf(stderr, Name ": Cannot open array %s!!\n", ent->dev);
+		if (verbose >= 0)
+			pr_err("Cannot open array %s!!\n", ent->dev);
 		free_mdstat(ent);
 		return 1;
 	}
 
 	if (id_path) {
 		struct map_ent *map = NULL, *me;
-		me = map_by_devnum(&map, ent->devnum);
+		me = map_by_devnm(&map, ent->devnm);
 		if (me)
 			policy_save_path(id_path, me);
 		map_free(map);
@@ -1614,19 +1662,38 @@ int IncrementalRemove(char *devname, char *id_path, int verbose)
 		struct mdstat_ent *memb;
 		for (memb = mdstat ; memb ; memb = memb->next)
 			if (is_container_member(memb, ent->dev)) {
-				int subfd = open_dev(memb->devnum);
+				int subfd = open_dev(memb->devnm);
 				if (subfd >= 0) {
-					Manage_subdevs(memb->dev, subfd,
-						       &devlist, verbose, 0,
-						       NULL, 0);
+					rv |= Manage_subdevs(
+						memb->dev, subfd,
+						&devlist, verbose, 0,
+						NULL, 0);
 					close(subfd);
 				}
 			}
 		free_mdstat(mdstat);
 	} else
-		Manage_subdevs(ent->dev, mdfd, &devlist, verbose, 0, NULL, 0);
-	devlist.disposition = 'r';
-	rv = Manage_subdevs(ent->dev, mdfd, &devlist, verbose, 0, NULL, 0);
+		rv |= Manage_subdevs(ent->dev, mdfd, &devlist,
+				    verbose, 0, NULL, 0);
+	if (rv & 2) {
+		/* Failed due to EBUSY, try to stop the array.
+		 * Give udisks a chance to unmount it first.
+		 */
+		int devid = devnm2devid(ent->devnm);
+		run_udisks("--unmount", map_dev(major(devid),minor(devid), 0));
+		rv = Manage_stop(ent->dev, mdfd, verbose, 1);
+		if (rv)
+			/* At least we can try to trigger a 'remove' */
+			sysfs_uevent(&mdi, "remove");
+		if (verbose) {
+			if (rv)
+				pr_err("Fail to stop %s too.\n", ent->devnm);
+		}
+	} else {
+		devlist.disposition = 'r';
+		rv = Manage_subdevs(ent->dev, mdfd, &devlist,
+				    verbose, 0, NULL, 0);
+	}
 	close(mdfd);
 	free_mdstat(ent);
 	return rv;

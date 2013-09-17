@@ -32,10 +32,10 @@ int open_mddev(char *dev, int report_errors/*unused*/)
 {
 	int mdfd = open(dev, O_RDWR);
 	if (mdfd < 0)
-		fprintf(stderr, Name ": error opening %s: %s\n",
+		pr_err("error opening %s: %s\n",
 			dev, strerror(errno));
 	else if (md_get_version(mdfd) <= 0) {
-		fprintf(stderr, Name ": %s does not appear to be an md device\n",
+		pr_err("%s does not appear to be an md device\n",
 			dev);
 		close(mdfd);
 		mdfd = -1;
@@ -48,7 +48,7 @@ int create_mddev(char *dev, char *name, int autof/*unused*/, int trustworthy,
 	return open_mddev(dev, 0);
 }
 #endif
-int map_update(struct map_ent **mpp, int devnum, char *metadata,
+int map_update(struct map_ent **mpp, char *devnm, char *metadata,
 	       int *uuid, char *path)
 {
 	return 0;
@@ -57,18 +57,19 @@ struct map_ent *map_by_name(struct map_ent **mpp, char *name)
 {
 	return NULL;
 }
+int map_lock(struct map_ent **melp){return 0;}
+void map_unlock(struct map_ent **melp){}
+struct map_ent *map_by_uuid(struct map_ent **map, int uuid[4]){return NULL;}
 
 int rv;
 int mdfd = -1;
-int runstop = 0;
-int readonly = 0;
-int verbose = 0;
-int force = 0;
 
-int main(int argc, char *argv[]) {
+int main(int argc, char *argv[])
+{
 	struct mddev_ident *array_list =  conf_get_ident(NULL);
+	struct context c = { .freeze_reshape = 1 };
 	if (!array_list) {
-		fprintf(stderr, Name ": No arrays found in config file\n");
+		pr_err("No arrays found in config file\n");
 		rv = 1;
 	} else
 		for (; array_list; array_list = array_list->next) {
@@ -83,9 +84,7 @@ int main(int argc, char *argv[]) {
 			if (mdfd >= 0)
 				close(mdfd);
 			rv |= Assemble(array_list->st, array_list->devname,
-				       array_list, NULL, NULL, 0,
-				       readonly, runstop, NULL, NULL, 0,
-				       verbose, force, 1);
+				       array_list, NULL, &c);
 		}
 	return rv;
 }
