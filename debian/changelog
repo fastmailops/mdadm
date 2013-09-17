@@ -26,6 +26,8 @@ mdadm (3.3-1) UNRELEASED; urgency=low
     newly introduced bashism
   * remove debian/source/options, there's no need to set compression
     options for debian.tar.gz.
+  * remove outdated debian/docs/md_superblock_formats.txt
+    (Closes: #714977)
 
   [ Dmitrijs Ledkovs ]
   * Properly remove 65-mdadm.vol_id.rules, instead of trying to remove a
