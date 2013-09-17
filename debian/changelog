@@ -22,6 +22,8 @@ mdadm (3.3-1) UNRELEASED; urgency=low
     don't install new udev-md-raid-assembly.rules for now.
   * remove Martin F. Krafft from uploaders per his request.
     Thank you for your contributions!
+  * added remove-bashism-from-makefile.patch patch to work around
+    newly introduced bashism
 
   [ Dmitrijs Ledkovs ]
   * Properly remove 65-mdadm.vol_id.rules, instead of trying to remove a

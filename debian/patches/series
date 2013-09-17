@@ -1,3 +1,4 @@
 debian-conffile-location.diff
 debian-no-Werror.diff
 sha1-includes.diff
+remove-bashism-from-makefile.patch
