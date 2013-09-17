@@ -16,7 +16,7 @@ any guesses.
 
 --- a/sha1.h
 +++ b/sha1.h
-@@ -22,12 +22,10 @@
+@@ -22,7 +22,7 @@
  
  #include <stdio.h>
  
@@ -25,12 +25,7 @@ any guesses.
  # include <limits.h>
  #endif
  
--#include "ansidecl.h"
--
- /* The following contortions are an attempt to use the C preprocessor
-    to determine an unsigned integral type that is 32 bits wide.  An
-    alternative approach is to use autoconf's AC_CHECK_SIZEOF macro, but
-@@ -35,9 +33,9 @@
+@@ -33,9 +33,9 @@
     the resulting executable.  Locally running cross-compiled executables
     is usually not possible.  */
  

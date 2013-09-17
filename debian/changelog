@@ -1,6 +1,25 @@
-mdadm (3.2.5-5ubuntu1) UNRELEASED; urgency=low
+mdadm (3.3-1) UNRELEASED; urgency=low
 
   [ Michael Tokarev ]
+  * new upstream 3.3 release (Closes: #718896)
+    See ANNOUNCE-3.3 for details.
+    Patches:
+    - refreshed debian-conffile-location.diff
+      (added .conf.d)
+    - removed debian-disable-udev-incr-assembly.diff
+      (do not ship udev-md-raid-assembly.rules for now)
+    - refreshed debian-no-Werror.diff
+    - refreshed sha1-includes.diff
+    - removed patches (included upstream)A:
+       spelling-and-manpages.patch
+       fix-enough-function-for-RAID10.patch
+       fix-segfaults-in-detail.patch
+       super0-do-not-override-uuid-with-homehost.patch
+       mdmon-allow-takeover-when-original-was-started-with-.patch
+       mdmon-fix-arg-parsing.patch
+       mdmon-fix-arg-processing-for-a.path
+    Install udev-md-raid-arrays.rules instead of udev-md-raid.rules,
+    don't install new udev-md-raid-assembly.rules for now.
   * remove Martin F. Krafft from uploaders per his request.
     Thank you for your contributions!
 
