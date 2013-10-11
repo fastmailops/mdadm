@@ -1,4 +1,4 @@
-mdadm (3.3-1) UNRELEASED; urgency=low
+mdadm (3.3-1) unstable; urgency=low
 
   [ Michael Tokarev ]
   * new upstream 3.3 release (Closes: #718896)
@@ -35,7 +35,7 @@ mdadm (3.3-1) UNRELEASED; urgency=low
   * Properly remove 65-mdadm.vol_id.rules, instead of trying to remove a
     never-existed 65_mdadm.vol_id.rules (note the 65- vs 65_).
 
- -- Dmitrijs Ledkovs <dmitrij.ledkov@ubuntu.com>  Wed, 27 Mar 2013 11:10:10 +0000
+ -- Michael Tokarev <mjt@tls.msk.ru>  Fri, 11 Oct 2013 10:12:47 +0400
 
 mdadm (3.2.5-6) unstable; urgency=low
 
