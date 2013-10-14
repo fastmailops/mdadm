@@ -1,3 +1,10 @@
+mdadm (3.3-2) UNRELEASED; urgency=low
+
+  * use 63-md-raid-arrays.rules instead of old 64-md-raid.rules
+    (Closes: #726237)
+
+ -- Michael Tokarev <mjt@tls.msk.ru>  Mon, 14 Oct 2013 15:12:00 +0400
+
 mdadm (3.3-1) unstable; urgency=low
 
   [ Michael Tokarev ]

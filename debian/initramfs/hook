@@ -255,7 +255,7 @@ if [ "$INITRDSTART" != none ] && [ -n "$devices" ]; then
   fi
 
   # Copy udev rules, which udev no longer does
-  UDEV_RULE=64-md-raid.rules
+  UDEV_RULE=63-md-raid-arrays.rules
   for rules_folder in /lib/udev/rules.d /etc/udev/rules.d; do
       if [ -f $rules_folder/$UDEV_RULE ]; then
 	  mkdir -p $DESTDIR$rules_folder
