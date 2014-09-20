@@ -11,6 +11,7 @@ mdadm (3.3.2-1) UNRELEASED; urgency=low
   * use install -D in d/rules consistently and remove dirs from d/mdadm.dirs
   * remove references to old (2.x and 1.x) mdadm versions (Closes: #728804)
   * remove references to very old (pre-wheeze) breaks/replaces/depends
+  * remove support of makedev
 
  -- Michael Tokarev <mjt@tls.msk.ru>  Sat, 20 Sep 2014 08:49:59 +0400
 

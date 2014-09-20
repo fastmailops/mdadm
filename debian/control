@@ -11,7 +11,7 @@ Homepage: http://neil.brown.name/blog/mdadm
 
 Package: mdadm
 Architecture: any
-Depends: ${shlibs:Depends}, udev | makedev, ${misc:Depends}, lsb-base, debconf, initscripts
+Depends: ${shlibs:Depends}, udev, ${misc:Depends}, lsb-base, debconf, initscripts
 Recommends: default-mta | mail-transport-agent, kmod | module-init-tools
 Description: tool to administer Linux MD arrays (software RAID)
  The mdadm utility can be used to create, manage, and monitor MD
