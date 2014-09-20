@@ -255,12 +255,14 @@ if [ "$INITRDSTART" != none ] && [ -n "$devices" ]; then
   fi
 
   # Copy udev rules, which udev no longer does
-  UDEV_RULE=63-md-raid-arrays.rules
-  for rules_folder in /lib/udev/rules.d /etc/udev/rules.d; do
-      if [ -f $rules_folder/$UDEV_RULE ]; then
+  for rules_file in 63-md-raid-arrays.rules 64-md-raid-assembly.rules
+  do
+    for rules_folder in /lib/udev/rules.d /etc/udev/rules.d; do
+      if [ -f $rules_folder/$rules_file ]; then
 	  mkdir -p $DESTDIR$rules_folder
-	  cp $rules_folder/$UDEV_RULE $DESTDIR$rules_folder/$UDEV_RULE
+	  cp $rules_folder/$rules_file $DESTDIR$rules_folder/$rules_file
       fi
+    done
   done
 
 else
