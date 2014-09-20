@@ -235,13 +235,3 @@ msgid ""
 msgstr ""
 "Por favor, introduza o endereço de email do utilizador que deve receber as "
 "notificações de eventos MD importantes."
-
-#~ msgid ""
-#~ "Please refer to /usr/share/doc/mdadm/README.upgrading-2.5.3.gz if you "
-#~ "intend to continue."
-#~ msgstr ""
-#~ "Por favor leia o ficheiro /usr/share/doc/mdadm/README.upgrading-2.5.3.gz "
-#~ "se quiser continuar."
-
-#~ msgid "${msg}"
-#~ msgstr "${msg}"

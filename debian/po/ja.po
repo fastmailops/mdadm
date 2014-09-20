@@ -239,13 +239,6 @@ msgstr ""
 "のメールアドレスを入力してください。"
 
 #~ msgid ""
-#~ "Please refer to /usr/share/doc/mdadm/README.upgrading-2.5.3.gz if you "
-#~ "intend to continue."
-#~ msgstr ""
-#~ "続行したい場合は、/usr/share/doc/mdadm/README.upgrading-2.5.3.gz を参照し"
-#~ "てください。"
-
-#~ msgid ""
 #~ "WARNING! If you are using hard disks which have RAID superblocks from "
 #~ "earlier installations in different RAID arrays, you MUST zero each "
 #~ "superblock *before* activating the autostart feature."

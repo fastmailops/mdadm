@@ -231,13 +231,3 @@ msgid ""
 msgstr ""
 "Introduza o enderezo de email do usuario que debe recibir os avisos por "
 "email de eventos importantes de MD."
-
-#~ msgid ""
-#~ "Please refer to /usr/share/doc/mdadm/README.upgrading-2.5.3.gz if you "
-#~ "intend to continue."
-#~ msgstr ""
-#~ "Consulte /usr/share/doc/mdadm/README.upgrading-2.5.3.gz se quere "
-#~ "continuar."
-
-#~ msgid "${msg}"
-#~ msgstr "${msg}"

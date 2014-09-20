@@ -248,16 +248,6 @@ msgstr ""
 "Geben Sie bitte die E-Mail-Adresse des Benutzers an, der die E-Mail-"
 "Benachrichtigung für wichtigen MD-Ereignisse erhalten soll."
 
-#~ msgid ""
-#~ "Please refer to /usr/share/doc/mdadm/README.upgrading-2.5.3.gz if you "
-#~ "intend to continue."
-#~ msgstr ""
-#~ "Bitte lesen Sie /usr/share/doc/mdadm/README.upgrading-2.5.3.gz falls Sie "
-#~ "beabsichtigen fortzufahren."
-
-#~ msgid "${msg}"
-#~ msgstr "${msg}"
-
 #~ msgid "Initialise the superblock if you reuse hard disks"
 #~ msgstr ""
 #~ "Initialisieren Sie den Superblock, wenn Sie Festplatten wieder verwenden."

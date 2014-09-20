@@ -276,13 +276,3 @@ msgstr ""
 "Introduzca la dirección de correo electrónico del usuario que debería "
 "recibir las notificaciones por correo de eventos relevantes en los "
 "dispositivos MD."
-
-#~ msgid ""
-#~ "Please refer to /usr/share/doc/mdadm/README.upgrading-2.5.3.gz if you "
-#~ "intend to continue."
-#~ msgstr ""
-#~ "Si desea continuar debería leer «/usr/share/doc/mdadm/README."
-#~ "upgrading-2.5.3.gz»."
-
-#~ msgid "${msg}"
-#~ msgstr "${msg}"

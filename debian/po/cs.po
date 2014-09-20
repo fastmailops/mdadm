@@ -240,13 +240,6 @@ msgstr ""
 "Zadejte prosím emailovou adresu uživatele, který má dostávat emailová "
 "upozornění při výskytu významných MD událostí."
 
-#~ msgid ""
-#~ "Please refer to /usr/share/doc/mdadm/README.upgrading-2.5.3.gz if you "
-#~ "intend to continue."
-#~ msgstr ""
-#~ "Hodláte-li pokračovat, přečtěte si prosím /usr/share/doc/mdadm/README."
-#~ "upgrading-2.5.3.gz."
-
 #~ msgid "Initialise the superblock if you reuse hard disks"
 #~ msgstr "Při znovupoužití starších disků inicializujte superblok"
 
