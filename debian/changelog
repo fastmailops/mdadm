@@ -1,3 +1,10 @@
+mdadm (3.3.2-1) UNRELEASED; urgency=low
+
+  * new minor/bugfix upstream release
+  * removed remove-bashism-from-makefile.patch (applied upstream)
+
+ -- Michael Tokarev <mjt@tls.msk.ru>  Sat, 20 Sep 2014 08:49:59 +0400
+
 mdadm (3.3-2) unstable; urgency=low
 
   * use 63-md-raid-arrays.rules instead of old 64-md-raid.rules
