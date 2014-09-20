@@ -59,11 +59,6 @@ case "${1:-}" in
       else
         echo "done (failed to scan arrays; /proc probably not mounted)." >&2
       fi
-    elif dpkg --compare-versions "${2:-2.5.3-1}" le 2.5.3-1; then
-      # we're upgrading from before 2.5.3-1 and there's apparently already
-      # a configuration file which we cannot verify. We'll use the sentinel
-      # during initramfs creation.
-      md5sum $CONFIG > /var/lib/mdadm/CONF-UNCHECKED
     fi
 
     if [ -w $CONFIG ] && [ -z "${MDADM_MAILADDR__:-}" ]; then
@@ -133,50 +128,9 @@ _eof
 
     db_stop
 
-    # try to undo udev rules (installed by 2.5.2-10, see 2.5.3.git200608202239-1
-    # changelog). Do this before update-initramfs, which copies udev into
-    # initrd.
-    V=2.5.3.git200608202239-1~
-    if [ "${1:-}" = "configure" ] && [ -n "${2:-}" ] \
-        && dpkg --compare-versions $2 ge 2.5.2-10 \
-        && dpkg --compare-versions $2 lt $V; then
-
-      # first, disable the rules
-      rm -f /etc/udev/rules.d/z60_mdadm.rules
-
-      if echo "0843432c9c01ed95c42481eee0cf6fbf  /etc/udev/mdadm.rules" \
-          | md5sum -c >/dev/null; then
-        # no changes by user, so remove
-        rm -f /etc/udev/mdadm.rules
-      else
-        echo "W: mdadm: I tried to remove /etc/udev/mdadm.rules (see changelog)," >&2
-        echo "W: mdadm: but you have modified it, so I won't touch it. Please" >&2
-        echo "W: mdadm: remove the file at your leisure." >&2
-      fi
-    fi
-
     command -v update-initramfs >/dev/null 2>&1 && update-initramfs -u
     ;;
 esac
-
-# remove S04 installed as a fix to #294404 as it does not work
-# we only remove the startup links if the previous version was 1.9.0-2.1 (the
-# one with the erroneous fix) and the S04 link exists to make sure that
-# chances are minimised to overwrite admin changes (even though this would
-# not affect woody upgraders)
-if [ "${1:-}" = "configure" ] && [ "${2:-}" = "1.9.0-2.1" ] \
-   && test -L /etc/rcS.d/S04mdadm-raid;
-then
-  update-rc.d -f mdadm-raid remove
-fi
-
-if [ "${1:-}" = "configure" ] && dpkg --compare-versions ${2:-2.6.7-1} lt 2.6.7-1; then
-  # stop RAIDs a bit later, see #486012
-  for i in 0 6; do
-    test -L /etc/rc${i}.d/S50mdadm-raid && test ! -L /etc/rc${i}.d/S60mdadm-raid \
-      && mv /etc/rc${i}.d/S50mdadm-raid /etc/rc${i}.d/S60mdadm-raid
-  done
-fi
 
 # See #369953
 set +u

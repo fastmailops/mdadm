@@ -106,7 +106,6 @@ if [ ! -f $CONFIG ]; then
   else
     # we failed to auto-generate, so let the emergency procedure take over
     warn "failed to auto-generate the mdadm.conf file."
-    warn "please read /usr/share/doc/mdadm/README.upgrading-2.5.3.gz ."
   fi
 
 else
@@ -117,7 +116,6 @@ else
     # work. We thus better create one and start all arrays to be sure.
 
     warn "unchecked configuration file: $CONFIG"
-    warn "please read /usr/share/doc/mdadm/README.upgrading-2.5.3.gz ."
 
     use_temp=1
   elif ! grep -q '^ARRAY' $CONFIG; then
