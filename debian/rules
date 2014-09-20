@@ -73,6 +73,8 @@ install: build $(INTERPOLATED_FILES)
 		$(DESTDIR)/usr/share/initramfs-tools/hooks/mdadm
 	install -m0755 debian/initramfs/script.local-top \
 		$(DESTDIR)/usr/share/initramfs-tools/scripts/local-top/mdadm
+	install -D -m0644 debian/mdadm.modules \
+		$(DESTDIR)/etc/modprobe.d/mdadm.conf
 
 	install -m0755 debian/mkconf $(DESTDIR)/usr/share/mdadm
 	install -m0755 debian/checkarray $(DESTDIR)/usr/share/mdadm

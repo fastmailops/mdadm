@@ -49,9 +49,6 @@ if [ ! -f /proc/mdstat ]; then
   exit 0
 fi
 
-# prevent writes/syncs so that resuming works (#415441).
-echo 1 > /sys/module/md_mod/parameters/start_ro
-
 # handle /dev/md/X nodes
 mkdir -p /dev/md
 
