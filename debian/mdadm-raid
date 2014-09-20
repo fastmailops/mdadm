@@ -78,164 +78,165 @@ is_true()
 {
   case "${1:-}" in
     [Yy]es|[Yy]|1|[Tt]rue|[Tt]) return 0;;
-    *) return 1;
+    *) return 1;;
   esac
 }
 
 case "${1:-}" in
+
   start)
     PREFIX="Assembling MD array"
 
-    if is_true $AUTOSTART || is_true ${MDADM_FORCE_AUTOSTART__:-0}; then
-      if [ ! -f /proc/mdstat ] && [ -x "$(command -v modprobe)" ] ; then
-        modprobe -q md 2>/dev/null || :
-      fi
-      if [ ! -f /proc/mdstat ]; then
-        log_problem "failed to load MD subsystem"
-        exit 0
-      fi
-
-      if [ -f $CONFIG ] || [ -f $ALTCONFIG ]; then
-        # handle devfs-style names and version-1 devices
-        # fail gracefully in case we're on a read-only filesystem, in which
-        # case it's safe to assume that the admin knows what s/he's doing.
-        # See (#382876).
-        mkdir --parent /dev/md || :
-
-        # ugly hack because shell sucks
-        IFSOLD=${IFS:-}
-        IFS='
-'
-        for line in $($MDADM --assemble --scan --auto=yes --symlink=no 2>&1); do
-          IFS=$IFSOLD
-          set -- $line
-          shift
-
-          case "$@" in
-
-            'No arrays found in config file'*)
-              # no point in carrying on.
-              shift
-              log_notice "no $*"
-              exit 0
-              ;;
-
-            'Unknown keyword'*)
-              # warn only
-              if [ -x $(command -v logger >/dev/null) ]; then
-                logger -t mdadm -p syslog.warning -- "$*"
-              elif [ -w /dev/console ]; then
-                echo "mdadm: $*" > /dev/console
-              else
-                echo "mdadm: $*" >&2
-              fi
-              ;;
-
-            *' is already active.')
-              log_dev 0 $1 "already running"
-              ;;
-
-            *'has been started with '[[:digit:]]*' drive'*' (out of '[[:digit:]]*') and '[[:digit:]]*' spare'*'.')
-              log_dev 0 $1 "initialising [$6/${10%).}]"
-              ;;
-
-            *'has been started with '[[:digit:]]*' drive'*' (out of '[[:digit:]]*').')
-              log_dev 0 $1 "degraded [$6/${10%).}]"
-              ;;
-
-            *'has been started with '[[:digit:]]*' drive'*'.')
-              log_dev 0 $1 "started [$6/$6]"
-              ;;
-
-            *'assembled from '[[:digit:]]*' drive'*' - not enough to start the array.')
-              log_dev 1 $1 "not enough devices"
-              ;;
-
-            'no devices found for '*)
-              log_dev 1 $5 "no devices found"
-              ;;
-
-            'failed to RUN_ARRAY '*': Input/output error')
-              log_dev 1 ${4%:} "RUN_ARRAY input/output error"
-              ;;
-
-            *) :;;
-          esac
-        done
-        ret=$?
-
-        log_action_begin_msg "Generating udev events for MD arrays"
-        [ -d $STATEDIR ] || mkdir -p $STATEDIR
-        for uevent in /sys/block/md*/uevent; do
-          test -e $uevent || break
-          sentinel=${uevent#/sys/block/}; sentinel=${sentinel%/uevent}-uevent
-          test -e $STATEDIR/$sentinel && continue
-          test -w $uevent || continue
-          echo add > $uevent
-          test -d $STATEDIR && : > $STATEDIR/$sentinel
-        done
-        log_action_end_msg 0
-
-        [ $ret -ne 0 ] && exit $ret
-
-      else
-        log_problem "no $CONFIG file"
-      fi
-    else
+    if ! is_true $AUTOSTART && ! is_true ${MDADM_FORCE_AUTOSTART__:-0}; then
       log_notice "disabled in $DEBIANCONFIG"
+      exit 0
     fi
+
+    if [ ! -f /proc/mdstat ] && [ -x "$(command -v modprobe)" ] ; then
+      modprobe -q md 2>/dev/null || :
+    fi
+    if [ ! -f /proc/mdstat ]; then
+      log_problem "failed to load MD subsystem"
+      exit 0
+    fi
+
+    if [ ! -f $CONFIG -a ! -f $ALTCONFIG ]; then
+      log_problem "no $CONFIG file"
+      exit 0
+    fi
+
+    # handle devfs-style names and version-1 devices
+    # fail gracefully in case we're on a read-only filesystem, in which
+    # case it's safe to assume that the admin knows what s/he's doing.
+    # See (#382876).
+    mkdir --parent /dev/md || :
+
+    # ugly hack because shell sucks
+    IFSOLD=${IFS:-}
+    IFS='
+'
+    for line in $($MDADM --assemble --scan --auto=yes --symlink=no 2>&1); do
+      IFS=$IFSOLD
+      set -- $line
+      shift
+
+      case "$@" in
+
+        'No arrays found in config file'*)
+          # no point in carrying on.
+          shift
+          log_notice "no $*"
+          exit 0
+          ;;
+
+        'Unknown keyword'*)
+          # warn only
+          if [ -x $(command -v logger >/dev/null) ]; then
+            logger -t mdadm -p syslog.warning -- "$*"
+          elif [ -w /dev/console ]; then
+            echo "mdadm: $*" > /dev/console
+          else
+            echo "mdadm: $*" >&2
+          fi
+          ;;
+
+        *' is already active.')
+          log_dev 0 $1 "already running"
+          ;;
+
+        *'has been started with '[[:digit:]]*' drive'*' (out of '[[:digit:]]*') and '[[:digit:]]*' spare'*'.')
+          log_dev 0 $1 "initialising [$6/${10%).}]"
+          ;;
+
+        *'has been started with '[[:digit:]]*' drive'*' (out of '[[:digit:]]*').')
+          log_dev 0 $1 "degraded [$6/${10%).}]"
+          ;;
+
+        *'has been started with '[[:digit:]]*' drive'*'.')
+          log_dev 0 $1 "started [$6/$6]"
+          ;;
+
+        *'assembled from '[[:digit:]]*' drive'*' - not enough to start the array.')
+          log_dev 1 $1 "not enough devices"
+          ;;
+
+        'no devices found for '*)
+          log_dev 1 $5 "no devices found"
+          ;;
+
+        'failed to RUN_ARRAY '*': Input/output error')
+          log_dev 1 ${4%:} "RUN_ARRAY input/output error"
+          ;;
+
+        *) :;;
+      esac
+    done
+    ret=$?
+
+    log_action_begin_msg "Generating udev events for MD arrays"
+    [ -d $STATEDIR ] || mkdir -p $STATEDIR
+    for uevent in /sys/block/md*/uevent; do
+      test -e $uevent || break
+      sentinel=${uevent#/sys/block/}; sentinel=${sentinel%/uevent}-uevent
+      test -e $STATEDIR/$sentinel && continue
+      test -w $uevent || continue
+      echo add > $uevent
+      test -d $STATEDIR && : > $STATEDIR/$sentinel
+    done
+    log_action_end_msg 0
+
+    exit $ret
     ;;
 
   stop)
     PREFIX="Stopping MD array"
 
-    if is_true $AUTOSTART; then
-      if [ ! -f /proc/mdstat ]; then
-        log_problem "no MD subsystem loaded"
-        exit 0
-      fi
-
-      # ugly hack because shell sucks
-      IFSOLD=${IFS:-}
-      IFS='
-'
-      set +e
-      for line in $($MDADM --stop --scan 2>&1); do
-        set -e
-        IFS=$IFSOLD
-        set -- $line
-        shift
-
-        case "$@" in
-
-          'Unknown keyword'*)
-            # warn only
-            if [ -x $(command -v logger >/dev/null) ]; then
-              logger -t mdadm -p syslog.warning -- "$*"
-            elif [ -w /dev/console ]; then
-              echo "mdadm: $*" > /dev/console
-            else
-              echo "mdadm: $*" >&2
-            fi
-            ;;
-
-          'stopped '*)
-            log_dev 0 $2 stopped
-            ;;
-
-          'fail to stop array '*': Device or resource busy')
-            log_dev 1 ${5%:} busy
-            ;;
-
-          *) :;;
-        esac
-      done || exit $?
-
-      rm -f $STATEDIR/md*-uevent
-
-    else
+    if ! is_true $AUTOSTART; then
       log_notice "disabled in $DEBIANCONFIG"
+      exit 0
     fi
+
+    if [ ! -f /proc/mdstat ]; then
+      log_problem "no MD subsystem loaded"
+      exit 0
+    fi
+
+    # ugly hack because shell sucks
+    IFSOLD=${IFS:-}
+    IFS='
+'
+    set +e
+    for line in $($MDADM --stop --scan 2>&1); do
+      set -e
+      IFS=$IFSOLD
+      set -- $line
+      shift
+      case "$@" in
+
+        'Unknown keyword'*)
+          # warn only
+          if [ -x $(command -v logger >/dev/null) ]; then
+            logger -t mdadm -p syslog.warning -- "$*"
+          elif [ -w /dev/console ]; then
+            echo "mdadm: $*" > /dev/console
+          else
+            echo "mdadm: $*" >&2
+          fi
+          ;;
+
+        'stopped '*)
+          log_dev 0 $2 stopped
+          ;;
+
+        'fail to stop array '*': Device or resource busy')
+          log_dev 1 ${5%:} busy
+          ;;
+
+        *) :;;
+      esac
+    done || exit $?
+
+    rm -f $STATEDIR/md*-uevent
     ;;
 
   restart|force-reload)
