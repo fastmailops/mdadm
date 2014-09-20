@@ -23,11 +23,6 @@ case "${1:-}" in
     ALTCONFIG=/etc/mdadm.conf
     MDADM=/sbin/mdadm
 
-    if [ -z "${2:-}" ] && [ -s /etc/mdctl/mdctl.conf ] \
-        && [ ! -f /etc/mdadm/mdadm.conf ]; then
-      cp -a /etc/mdctl/mdctl.conf /etc/mdadm/mdadm.conf
-    fi
-
     # load current settings, most of which will be overwritten.
     [ -f $DEBIANCONFIG ] && . $DEBIANCONFIG
 
