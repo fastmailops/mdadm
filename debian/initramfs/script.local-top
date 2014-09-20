@@ -17,7 +17,7 @@ maybe_break pre-mdadm
 
 if [ -e /scripts/local-top/md ]; then
   log_warning_msg "old md initialisation script found, getting out of its way..."
-  exit 1
+  exit 0
 fi
 
 MDADM=/sbin/mdadm
@@ -42,11 +42,11 @@ if [ "$MD_DEVS" = none ]; then
 fi
 
 if [ ! -f /proc/mdstat ] && ! modprobe -q md_mod; then
-  verbose && log_failure_msg "failed to load module md_mod."
+  verbose && log_warning_msg "failed to load module md_mod."
 fi
 if [ ! -f /proc/mdstat ]; then
-  verbose && panic "cannot initialise MD subsystem (/proc/mdstat missing)"
-  exit 1
+  verbose && log_warning_msg "cannot initialise MD subsystem (/proc/mdstat missing)"
+  exit 0
 fi
 
 # prevent writes/syncs so that resuming works (#415441).
