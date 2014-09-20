@@ -366,9 +366,6 @@ static int select_devices(struct mddev_dev *devlist,
 			tmpdev = NULL;
 			goto loop;
 		} else {
-			int rv = 0;
-			struct mddev_ident *match;
-
 			content = *contentp;
 			tst->ss->getinfo_super(tst, content, NULL);
 
@@ -377,25 +374,33 @@ static int select_devices(struct mddev_dev *devlist,
 					   report_mismatch ? devname : NULL))
 				goto loop;
 
-			match = conf_match(tst, content, devname,
-					   report_mismatch ? c->verbose : -1,
-					   &rv);
-			if (!match && rv == 2)
-				goto loop;
-			if (match && match->devname &&
-			    strcasecmp(match->devname, "<ignore>") == 0) {
-				if (report_mismatch)
-					pr_err("%s is a member of an explicitly ignored array\n",
-					       devname);
-				goto loop;
-			}
-			if (match && !ident_matches(match, content, tst,
-						    c->homehost, c->update,
-						    report_mismatch ? devname : NULL))
-				/* Array exists  in mdadm.conf but some
-				 * details don't match, so reject it
+			if (auto_assem) {
+				/* Never auto-assemble things that conflict
+				 * with mdadm.conf in some way
 				 */
-				goto loop;
+				struct mddev_ident *match;
+				int rv = 0;
+
+				match = conf_match(tst, content, devname,
+						   report_mismatch ? c->verbose : -1,
+						   &rv);
+				if (!match && rv == 2)
+					goto loop;
+				if (match && match->devname &&
+				    strcasecmp(match->devname, "<ignore>") == 0) {
+					if (report_mismatch)
+						pr_err("%s is a member of an explicitly ignored array\n",
+						       devname);
+					goto loop;
+				}
+				if (match && !ident_matches(match, content, tst,
+							    c->homehost, c->update,
+							    report_mismatch ? devname : NULL))
+					/* Array exists  in mdadm.conf but some
+					 * details don't match, so reject it
+					 */
+					goto loop;
+			}
 
 			/* should be safe to try an exclusive open now, we
 			 * have rejected anything that some other mdadm might
@@ -551,7 +556,7 @@ struct devs {
 };
 
 static int load_devices(struct devs *devices, char *devmap,
-			struct mddev_ident *ident, struct supertype *st,
+			struct mddev_ident *ident, struct supertype **stp,
 			struct mddev_dev *devlist, struct context *c,
 			struct mdinfo *content,
 			int mdfd, char *mddev,
@@ -567,10 +572,12 @@ static int load_devices(struct devs *devices, char *devmap,
 	int most_recent = -1;
 	int bestcnt = 0;
 	int *best = *bestp;
+	struct supertype *st = *stp;
 
 	for (tmpdev = devlist; tmpdev; tmpdev=tmpdev->next) {
 		char *devname = tmpdev->devname;
 		struct stat stb;
+		struct supertype *tst;
 		int i;
 
 		if (tmpdev->used != 1)
@@ -581,7 +588,6 @@ static int load_devices(struct devs *devices, char *devmap,
 			int dfd;
 			/* prepare useful information in info structures */
 			struct stat stb2;
-			struct supertype *tst;
 			int err;
 			fstat(mdfd, &stb2);
 
@@ -610,6 +616,9 @@ static int load_devices(struct devs *devices, char *devmap,
 				close(mdfd);
 				free(devices);
 				free(devmap);
+				tst->ss->free_super(tst);
+				free(tst);
+				*stp = st;
 				return -1;
 			}
 			tst->ss->getinfo_super(tst, content, devmap + devcnt * content->array.raid_disks);
@@ -636,6 +645,7 @@ static int load_devices(struct devs *devices, char *devmap,
 				close(dfd);
 				free(devices);
 				free(devmap);
+				*stp = st;
 				return -1;
 			}
 			if (strcmp(c->update, "uuid")==0 &&
@@ -657,15 +667,13 @@ static int load_devices(struct devs *devices, char *devmap,
 				else
 					bitmap_done = 1;
 			}
-			tst->ss->free_super(tst);
 		} else
 #endif
 		{
-			struct supertype *tst = dup_super(st);
-			int dfd;
-			dfd = dev_open(devname,
-				       tmpdev->disposition == 'I'
-				       ? O_RDWR : (O_RDWR|O_EXCL));
+			int dfd = dev_open(devname,
+					   tmpdev->disposition == 'I'
+					   ? O_RDWR : (O_RDWR|O_EXCL));
+			tst = dup_super(st);
 
 			if (dfd < 0 || tst->ss->load_super(tst, dfd, NULL) != 0) {
 				pr_err("cannot re-read metadata from %s - aborting\n",
@@ -675,10 +683,12 @@ static int load_devices(struct devs *devices, char *devmap,
 				close(mdfd);
 				free(devices);
 				free(devmap);
+				tst->ss->free_super(tst);
+				free(tst);
+				*stp = st;
 				return -1;
 			}
 			tst->ss->getinfo_super(tst, content, devmap + devcnt * content->array.raid_disks);
-			tst->ss->free_super(tst);
 			close(dfd);
 		}
 
@@ -698,9 +708,15 @@ static int load_devices(struct devs *devices, char *devmap,
 		if (devices[devcnt].i.disk.state == 6) {
 			if (most_recent < 0 ||
 			    devices[devcnt].i.events
-			    > devices[most_recent].i.events)
+			    > devices[most_recent].i.events) {
+				struct supertype *tmp = tst;
+				tst = st;
+				st = tmp;
 				most_recent = devcnt;
+			}
 		}
+		tst->ss->free_super(tst);
+		free(tst);
 
 		if (content->array.level == LEVEL_MULTIPATH)
 			/* with multipath, the raid_disk from the superblock is meaningless */
@@ -759,6 +775,7 @@ static int load_devices(struct devs *devices, char *devmap,
 				close(mdfd);
 				free(devices);
 				free(devmap);
+				*stp = st;
 				return -1;
 			}
 			if (best[i] == -1
@@ -772,6 +789,7 @@ static int load_devices(struct devs *devices, char *devmap,
 		*most_recentp = most_recent;
 	*bestcntp = bestcnt;
 	*bestp = best;
+	*stp = st;
 	return devcnt;
 }
 
@@ -803,7 +821,9 @@ static int force_array(struct mdinfo *content,
 		int chosen_drive = -1;
 		int i;
 
-		for (i = 0; i < content->array.raid_disks && i < bestcnt; i++) {
+		for (i = 0;
+		     i < content->array.raid_disks * 2 && i < bestcnt;
+		     i += 2) {
 			int j = best[i];
 			if (j>=0 &&
 			    !devices[j].uptodate &&
@@ -863,7 +883,9 @@ static int force_array(struct mdinfo *content,
 		/* If there are any other drives of the same vintage,
 		 * add them in as well.  We can't lose and we might gain
 		 */
-		for (i = 0; i < content->array.raid_disks && i < bestcnt ; i++) {
+		for (i = 0;
+		     i < content->array.raid_disks * 2 && i < bestcnt ;
+		     i += 2) {
 			int j = best[i];
 			if (j >= 0 &&
 			    !devices[j].uptodate &&
@@ -984,8 +1006,28 @@ static int start_array(int mdfd,
 					content->array.raid_disks);
 			fprintf(stderr, "\n");
 		}
+
+		if (st->ss->validate_container) {
+			struct mdinfo *devices_list;
+			struct mdinfo *info_devices = xmalloc(sizeof(struct mdinfo)*(okcnt+sparecnt));
+			unsigned int count;
+			devices_list = NULL;
+			for (count = 0; count < okcnt+sparecnt; count++) {
+				info_devices[count] = devices[count].i;
+				info_devices[count].next = devices_list;
+				devices_list = &info_devices[count];
+			}
+			if (st->ss->validate_container(devices_list))
+				pr_err("Mismatch detected!\n");
+			free(info_devices);
+		}
+
 		st->ss->free_super(st);
 		sysfs_uevent(content, "change");
+		if (err_ok && okcnt < (unsigned)content->array.raid_disks)
+			/* Was partial, is still partial, so signal an error
+			 * to ensure we don't retry */
+			return 1;
 		return 0;
 	}
 
@@ -1023,7 +1065,7 @@ static int start_array(int mdfd,
 					   "array_state", "readonly");
 			if (rv == 0)
 				rv = Grow_continue(mdfd, st, content,
-						   c->backup_file,
+						   c->backup_file, 0,
 						   c->freeze_reshape);
 		} else if (c->readonly &&
 			   sysfs_attribute_available(
@@ -1033,6 +1075,7 @@ static int start_array(int mdfd,
 		} else
 #endif
 			rv = ioctl(mdfd, RUN_ARRAY, NULL);
+		reopen_mddev(mdfd); /* drop O_EXCL */
 		if (rv == 0) {
 			if (c->verbose >= 0) {
 				pr_err("%s has been started with %d drive%s",
@@ -1415,7 +1458,7 @@ try_again:
 		/* This is a member of a container.  Try starting the array. */
 		int err;
 		err = assemble_container_content(st, mdfd, content, c,
-						 chosen_name);
+						 chosen_name, NULL);
 		close(mdfd);
 		return err;
 	}
@@ -1423,7 +1466,7 @@ try_again:
 	/* Ok, no bad inconsistancy, we can try updating etc */
 	devices = xcalloc(num_devs, sizeof(*devices));
 	devmap = xcalloc(num_devs, content->array.raid_disks);
-	devcnt = load_devices(devices, devmap, ident, st, devlist,
+	devcnt = load_devices(devices, devmap, ident, &st, devlist,
 			      c, content, mdfd, mddev,
 			      &most_recent, &bestcnt, &best, inargv);
 	if (devcnt < 0)
@@ -1528,7 +1571,7 @@ try_again:
 	 */
 	chosen_drive = -1;
 	st->ss->free_super(st);
-	for (i=0; chosen_drive < 0 && i<bestcnt; i++) {
+	for (i=0; chosen_drive < 0 && i<bestcnt; i+=2) {
 		int j = best[i];
 		int fd;
 
@@ -1658,6 +1701,8 @@ try_again:
 			pr_err(":%s has an active reshape - checking "
 			       "if critical section needs to be restored\n",
 			       chosen_name);
+		if (!c->backup_file)
+			c->backup_file = locate_backup(content->sys_name);
 		enable_fds(bestcnt/2);
 		for (i = 0; i < bestcnt/2; i++) {
 			int j = best[i*2];
@@ -1767,18 +1812,20 @@ try_again:
 #ifndef MDASSEMBLE
 int assemble_container_content(struct supertype *st, int mdfd,
 			       struct mdinfo *content, struct context *c,
-			       char *chosen_name)
+			       char *chosen_name, int *result)
 {
-	struct mdinfo *dev, *sra;
+	struct mdinfo *dev, *sra, *dev2;
 	int working = 0, preexist = 0;
 	int expansion = 0;
 	struct map_ent *map = NULL;
 	int old_raid_disks;
 	int start_reshape;
+	char *avail = NULL;
+	int err;
 
 	sysfs_init(content, mdfd, NULL);
 
-	sra = sysfs_read(mdfd, NULL, GET_VERSION);
+	sra = sysfs_read(mdfd, NULL, GET_VERSION|GET_DEVS);
 	if (sra == NULL || strcmp(sra->text_version, content->text_version) != 0) {
 		if (content->array.major_version == -1 &&
 		    content->array.minor_version == -2 &&
@@ -1805,10 +1852,27 @@ int assemble_container_content(struct supertype *st, int mdfd,
 	if (st->ss->external && content->recovery_blocked && start_reshape)
 		block_subarray(content);
 
-	if (sra)
-		sysfs_free(sra);
+	for (dev2 = sra->devs; dev2; dev2 = dev2->next) {
+		for (dev = content->devs; dev; dev = dev->next)
+			if (dev2->disk.major == dev->disk.major &&
+			    dev2->disk.minor == dev->disk.minor)
+				break;
+		if (dev)
+			continue;
+		/* Don't want this one any more */
+		if (sysfs_set_str(sra, dev2, "slot", "none") < 0 &&
+		    errno == EBUSY) {
+			pr_err("Cannot remove old device %s: not updating %s\n", dev2->sys_name, sra->sys_name);
+			sysfs_free(sra);
+			return 1;
+		}
+		sysfs_set_str(sra, dev2, "state", "remove");
+	}
 	old_raid_disks = content->array.raid_disks - content->delta_disks;
-	for (dev = content->devs; dev; dev = dev->next)
+	avail = xcalloc(content->array.raid_disks, 1);
+	for (dev = content->devs; dev; dev = dev->next) {
+		if (dev->disk.raid_disk >= 0)
+			avail[dev->disk.raid_disk] = 1;
 		if (sysfs_add_disk(content, dev, 1) == 0) {
 			if (dev->disk.raid_disk >= old_raid_disks &&
 			    content->reshape_active)
@@ -1817,92 +1881,22 @@ int assemble_container_content(struct supertype *st, int mdfd,
 				working++;
 		} else if (errno == EEXIST)
 			preexist++;
-	if (working + expansion == 0)
+	}
+	sysfs_free(sra);
+	if (working + expansion == 0 && c->runstop <= 0) {
+		free(avail);
 		return 1;/* Nothing new, don't try to start */
-
+	}
 	map_update(&map, fd2devnm(mdfd),
 		   content->text_version,
 		   content->uuid, chosen_name);
 
-	if (c->runstop > 0 ||
-	    (working + preexist + expansion) >=
-	    content->array.working_disks) {
-		int err;
 
-		if (start_reshape) {
-			int spare = content->array.raid_disks + expansion;
-			if (restore_backup(st, content,
-					   working,
-					   spare, c->backup_file, c->verbose) == 1)
-				return 1;
-
-			err = sysfs_set_str(content, NULL,
-					    "array_state", "readonly");
-			if (err)
-				return 1;
-
-			if (st->ss->external) {
-				if (!mdmon_running(st->container_devnm))
-					start_mdmon(st->container_devnm);
-				ping_monitor(st->container_devnm);
-				if (mdmon_running(st->container_devnm) &&
-				    st->update_tail == NULL)
-					st->update_tail = &st->updates;
-			}
-
-			err = Grow_continue(mdfd, st, content, c->backup_file,
-					    c->freeze_reshape);
-		} else switch(content->array.level) {
-			case LEVEL_LINEAR:
-			case LEVEL_MULTIPATH:
-			case 0:
-				err = sysfs_set_str(content, NULL, "array_state",
-						    c->readonly ? "readonly" : "active");
-				break;
-			default:
-				err = sysfs_set_str(content, NULL, "array_state",
-						    "readonly");
-				/* start mdmon if needed. */
-				if (!err) {
-					if (!mdmon_running(st->container_devnm))
-						start_mdmon(st->container_devnm);
-					ping_monitor(st->container_devnm);
-				}
-				break;
-			}
-		if (!err)
-			sysfs_set_safemode(content, content->safe_mode_delay);
-
-		/* Block subarray here if it is not reshaped now
-		 * It has be blocked a little later to allow mdmon to switch in
-		 * in to R/W state
-		 */
-		if (st->ss->external && content->recovery_blocked &&
-		    !start_reshape)
-			block_subarray(content);
-
-		if (c->verbose >= 0) {
-			if (err)
-				pr_err("array %s now has %d device%s",
-				       chosen_name, working + preexist,
-				       working + preexist == 1 ? "":"s");
-			else
-				pr_err("Started %s with %d device%s",
-				       chosen_name, working + preexist,
-				       working + preexist == 1 ? "":"s");
-			if (preexist)
-				fprintf(stderr, " (%d new)", working);
-			if (expansion)
-				fprintf(stderr, " ( + %d for expansion)",
-					expansion);
-			fprintf(stderr, "\n");
-		}
-		if (!err)
-			wait_for(chosen_name, mdfd);
-		return err;
-		/* FIXME should have an O_EXCL and wait for read-auto */
-	} else {
-		if (c->verbose >= 0) {
+	if (enough(content->array.level, content->array.raid_disks,
+		   content->array.layout, content->array.state & 1, avail) == 0) {
+		if (c->export && result)
+			*result |= INCR_NO;
+		else if (c->verbose >= 0) {
 			pr_err("%s assembled with %d device%s",
 			       chosen_name, preexist + working,
 			       preexist + working == 1 ? "":"s");
@@ -1910,7 +1904,104 @@ int assemble_container_content(struct supertype *st, int mdfd,
 				fprintf(stderr, " (%d new)", working);
 			fprintf(stderr, " but not started\n");
 		}
+		free(avail);
 		return 1;
 	}
+	free(avail);
+
+	if (c->runstop <= 0 &&
+	    (working + preexist + expansion) <
+	    content->array.working_disks) {
+		if (c->export && result)
+			*result |= INCR_UNSAFE;
+		else if (c->verbose >= 0) {
+			pr_err("%s assembled with %d device%s",
+			       chosen_name, preexist + working,
+			       preexist + working == 1 ? "":"s");
+			if (preexist)
+				fprintf(stderr, " (%d new)", working);
+			fprintf(stderr, " but not safe to start\n");
+		}
+		return 1;
+	}
+
+
+	if (start_reshape) {
+		int spare = content->array.raid_disks + expansion;
+		if (restore_backup(st, content,
+				   working,
+				   spare, &c->backup_file, c->verbose) == 1)
+			return 1;
+
+		err = sysfs_set_str(content, NULL,
+				    "array_state", "readonly");
+		if (err)
+			return 1;
+
+		if (st->ss->external) {
+			if (!mdmon_running(st->container_devnm))
+				start_mdmon(st->container_devnm);
+			ping_monitor(st->container_devnm);
+			if (mdmon_running(st->container_devnm) &&
+			    st->update_tail == NULL)
+				st->update_tail = &st->updates;
+		}
+
+		err = Grow_continue(mdfd, st, content, c->backup_file,
+				    0, c->freeze_reshape);
+	} else switch(content->array.level) {
+		case LEVEL_LINEAR:
+		case LEVEL_MULTIPATH:
+		case 0:
+			err = sysfs_set_str(content, NULL, "array_state",
+					    c->readonly ? "readonly" : "active");
+			break;
+		default:
+			err = sysfs_set_str(content, NULL, "array_state",
+					    "readonly");
+			/* start mdmon if needed. */
+			if (!err) {
+				if (!mdmon_running(st->container_devnm))
+					start_mdmon(st->container_devnm);
+				ping_monitor(st->container_devnm);
+			}
+			break;
+		}
+	if (!err)
+		sysfs_set_safemode(content, content->safe_mode_delay);
+
+	/* Block subarray here if it is not reshaped now
+	 * It has be blocked a little later to allow mdmon to switch in
+	 * in to R/W state
+	 */
+	if (st->ss->external && content->recovery_blocked &&
+	    !start_reshape)
+		block_subarray(content);
+
+	if (c->export && result) {
+		if (err)
+			*result |= INCR_NO;
+		else
+			*result |= INCR_YES;
+	} else if (c->verbose >= 0) {
+		if (err)
+			pr_err("array %s now has %d device%s",
+			       chosen_name, working + preexist,
+			       working + preexist == 1 ? "":"s");
+		else
+			pr_err("Started %s with %d device%s",
+			       chosen_name, working + preexist,
+			       working + preexist == 1 ? "":"s");
+		if (preexist)
+			fprintf(stderr, " (%d new)", working);
+		if (expansion)
+			fprintf(stderr, " ( + %d for expansion)",
+				expansion);
+		fprintf(stderr, "\n");
+	}
+	if (!err)
+		wait_for(chosen_name, mdfd);
+	return err;
+	/* FIXME should have an O_EXCL and wait for read-auto */
 }
 #endif

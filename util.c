@@ -307,7 +307,7 @@ int test_partition(int fd)
 	if (ioctl(fd, BLKPG, &a) == 0)
 		/* Very unlikely, but not a partition */
 		return 0;
-	if (errno == ENXIO)
+	if (errno == ENXIO || errno == ENOTTY)
 		/* not a partition */
 		return 0;
 
@@ -387,7 +387,6 @@ int enough_fd(int fd)
 {
 	struct mdu_array_info_s array;
 	struct mdu_disk_info_s disk;
-	int avail_disks = 0;
 	int i, rv;
 	char *avail;
 
@@ -407,7 +406,6 @@ int enough_fd(int fd)
 			continue;
 		if (disk.raid_disk < 0 || disk.raid_disk >= array.raid_disks)
 			continue;
-		avail_disks++;
 		avail[disk.raid_disk] = 1;
 	}
 	/* This is used on an active array, so assume it is clean */
@@ -873,12 +871,20 @@ void put_md_name(char *name)
 }
 #endif /* !defined(MDASSEMBLE) || defined(MDASSEMBLE) && defined(MDASSEMBLE_AUTO) */
 
+int get_maj_min(char *dev, int *major, int *minor)
+{
+	char *e;
+	*major = strtoul(dev, &e, 0);
+	return (e > dev && *e == ':' && e[1] &&
+		(*minor = strtoul(e+1, &e, 0)) >= 0 &&
+		*e == 0);
+}
+
 int dev_open(char *dev, int flags)
 {
 	/* like 'open', but if 'dev' matches %d:%d, create a temp
 	 * block device and open that
 	 */
-	char *e;
 	int fd = -1;
 	char devname[32];
 	int major;
@@ -887,10 +893,7 @@ int dev_open(char *dev, int flags)
 	if (!dev) return -1;
 	flags |= O_DIRECT;
 
-	major = strtoul(dev, &e, 0);
-	if (e > dev && *e == ':' && e[1] &&
-	    (minor = strtoul(e+1, &e, 0)) >= 0 &&
-	    *e == 0) {
+	if (get_maj_min(dev, &major, &minor)) {
 		snprintf(devname, sizeof(devname), "/dev/.tmp.md.%d:%d:%d",
 			 (int)getpid(), major, minor);
 		if (mknod(devname, S_IFBLK|0600, makedev(major, minor)) == 0) {
@@ -1690,7 +1693,7 @@ int start_mdmon(char *devnm)
 	char pathbuf[1024];
 	char *paths[4] = {
 		pathbuf,
-		"/sbin/mdmon",
+		BINDIR "/mdmon",
 		"./mdmon",
 		NULL
 	};
@@ -1948,7 +1951,25 @@ int in_initrd(void)
 {
 	/* This is based on similar function in systemd. */
 	struct statfs s;
+	/* statfs.f_type is signed long on s390x and MIPS, causing all
+	   sorts of sign extension problems with RAMFS_MAGIC being
+	   defined as 0x858458f6 */
 	return  statfs("/", &s) >= 0 &&
 		((unsigned long)s.f_type == TMPFS_MAGIC ||
-		 (unsigned long)s.f_type == RAMFS_MAGIC);
+		 ((unsigned long)s.f_type & 0xFFFFFFFFUL) ==
+		 ((unsigned long)RAMFS_MAGIC & 0xFFFFFFFFUL));
+}
+
+void reopen_mddev(int mdfd)
+{
+	/* Re-open without any O_EXCL, but keep
+	 * the same fd
+	 */
+	char *devnm;
+	int fd;
+	devnm = fd2devnm(mdfd);
+	close(mdfd);
+	fd = open_dev(devnm);
+	if (fd >= 0 && fd != mdfd)
+		dup2(fd, mdfd);
 }

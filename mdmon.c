@@ -232,6 +232,7 @@ static int make_control_sock(char *devname)
 
 	addr.sun_family = PF_LOCAL;
 	strcpy(addr.sun_path, path);
+	umask(077); /* ensure no world write access */
 	if (bind(sfd, &addr, sizeof(addr)) < 0) {
 		close(sfd);
 		return -1;
@@ -320,7 +321,7 @@ int main(int argc, char *argv[])
 			dofork = 0;
 			break;
 		case OffRootOpt:
-			/* silently ignore old option */
+			argv[0][0] = '@';
 			break;
 		case 'h':
 		default:
@@ -429,6 +430,7 @@ static int mdmon(char *devnm, int must_fork, int takeover)
 				wait(&status);
 				status = WEXITSTATUS(status);
 			}
+			close(pfd[0]);
 			return status;
 		}
 	} else
@@ -516,10 +518,12 @@ static int mdmon(char *devnm, int must_fork, int takeover)
 	container->sock = make_control_sock(devnm);
 
 	status = 0;
-	if (write(pfd[1], &status, sizeof(status)) < 0)
-		pr_err("failed to notify our parent: %d\n",
-			getppid());
-	close(pfd[1]);
+	if (pfd[1] >= 0) {
+		if (write(pfd[1], &status, sizeof(status)) < 0)
+			pr_err("failed to notify our parent: %d\n",
+			       getppid());
+		close(pfd[1]);
+	}
 
 	mlockall(MCL_CURRENT | MCL_FUTURE);
 
@@ -587,3 +591,10 @@ int save_stripes(int *source, unsigned long long *offsets,
 {
 	return 0;
 }
+
+struct superswitch super0 = {
+	.name = "0.90",
+};
+struct superswitch super1 = {
+	.name = "1.x",
+};

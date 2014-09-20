@@ -24,8 +24,10 @@
 #include	"mdadm.h"
 #include	"dlink.h"
 #include	<sys/mman.h>
+#include	<stddef.h>
 #include	<stdint.h>
 #include	<signal.h>
+#include	<sys/wait.h>
 
 #if ! defined(__BIG_ENDIAN) && ! defined(__LITTLE_ENDIAN)
 #error no endian defined
@@ -33,15 +35,11 @@
 #include	"md_u.h"
 #include	"md_p.h"
 
-#ifndef offsetof
-#define offsetof(t,f) ((size_t)&(((t*)0)->f))
-#endif
-
 int restore_backup(struct supertype *st,
 		   struct mdinfo *content,
 		   int working_disks,
 		   int next_spare,
-		   char *backup_file,
+		   char **backup_filep,
 		   int verbose)
 {
 	int i;
@@ -49,6 +47,7 @@ int restore_backup(struct supertype *st,
 	struct mdinfo *dev;
 	int err;
 	int disk_count = next_spare + working_disks;
+	char *backup_file = *backup_filep;
 
 	dprintf("Called restore_backup()\n");
 	fdlist = xmalloc(sizeof(int) * disk_count);
@@ -68,6 +67,11 @@ int restore_backup(struct supertype *st,
 			fdlist[dev->disk.raid_disk] = fd;
 		else
 			fdlist[next_spare++] = fd;
+	}
+
+	if (!backup_file) {
+		backup_file = locate_backup(content->sys_name);
+		*backup_filep = backup_file;
 	}
 
 	if (st->ss->external && st->ss->recover_backup)
@@ -612,9 +616,14 @@ static void unfreeze(struct supertype *st)
 		return unfreeze_container(st);
 	else {
 		struct mdinfo *sra = sysfs_read(-1, st->devnm, GET_VERSION);
+		char buf[20];
 
-		if (sra)
+		if (sra &&
+		    sysfs_get_str(sra, NULL, "sync_action", buf, 20) > 0
+		    && strcmp(buf, "frozen\n") == 0) {
+			printf("unfreeze\n");
 			sysfs_set_str(sra, NULL, "sync_action", "idle");
+		}
 		sysfs_free(sra);
 	}
 }
@@ -881,6 +890,7 @@ int reshape_open_backup_file(char *backup_file,
 			     long blocks,
 			     int *fdlist,
 			     unsigned long long *offsets,
+			     char *sys_name,
 			     int restart)
 {
 	/* Return 1 on success, 0 on any form of failure */
@@ -926,6 +936,14 @@ int reshape_open_backup_file(char *backup_file,
 		pr_err("%s: cannot create backup file %s: %s\n",
 			devname, backup_file, strerror(errno));
 		return 0;
+	}
+
+	if (!restart && strncmp(backup_file, MAP_DIR, strlen(MAP_DIR)) != 0) {
+		char *bu = make_backup(sys_name);
+		if (symlink(backup_file, bu))
+			pr_err("Recording backup file in " MAP_DIR "failed: %s\n",
+			       strerror(errno));
+		free(bu);
 	}
 
 	return 1;
@@ -1010,7 +1028,12 @@ char *analyse_change(char *devname, struct mdinfo *info, struct reshape *re)
 
 	switch (info->array.level) {
 	default:
-		return "Cannot understand this RAID level";
+		return "No reshape is possibly for this RAID level";
+	case LEVEL_LINEAR:
+		if (info->delta_disks != UnSet)
+			return "Only --add is supported for LINEAR, setting --raid-disks is not needed";
+		else
+			return "Only --add is supported for LINEAR, other --grow options are not meaningful";
 	case 1:
 		/* RAID1 can convert to RAID1 with different disks, or
 		 * raid5 with 2 disks, or
@@ -1322,7 +1345,6 @@ char *analyse_change(char *devname, struct mdinfo *info, struct reshape *re)
 
 		switch (re->level) {
 		case 4:
-			re->before.layout = 0;
 			re->after.layout = 0;
 			break;
 		case 5:
@@ -1495,8 +1517,8 @@ static int reshape_container(char *container, char *devname,
 			     struct supertype *st,
 			     struct mdinfo *info,
 			     int force,
-			     char *backup_file,
-			     int verbose, int restart, int freeze_reshape);
+			     char *backup_file, int verbose,
+			     int forked, int restart, int freeze_reshape);
 
 int Grow_reshape(char *devname, int fd,
 		 struct mddev_dev *devlist,
@@ -1796,7 +1818,7 @@ int Grow_reshape(char *devname, int fd,
 		if (s->size == MAX_SIZE)
 			s->size = 0;
 		array.size = s->size;
-		if ((unsigned)array.size != s->size) {
+		if (array.size != (signed)s->size) {
 			/* got truncated to 32bit, write to
 			 * component_size instead
 			 */
@@ -2048,7 +2070,7 @@ size_change_error:
 		 * performed at the level of the container
 		 */
 		rv = reshape_container(container, devname, -1, st, &info,
-				       c->force, c->backup_file, c->verbose, 0, 0);
+				       c->force, c->backup_file, c->verbose, 0, 0, 0);
 		frozen = 0;
 	} else {
 		/* get spare devices from external metadata
@@ -2666,7 +2688,7 @@ static int impose_level(int fd, int level, char *devname, int verbose)
 		for (d = 0, found = 0;
 		     d < MAX_DISKS && found < array.nr_disks;
 		     d++) {
-				mdu_disk_info_t disk;
+			mdu_disk_info_t disk;
 			disk.number = d;
 			if (ioctl(fd, GET_DISK_INFO, &disk) < 0)
 				continue;
@@ -2734,6 +2756,48 @@ static void catch_term(int sig)
 	sigterm = 1;
 }
 
+static int continue_via_systemd(char *devnm)
+{
+	int skipped, i, pid, status;
+	char pathbuf[1024];
+	/* In a systemd/udev world, it is best to get systemd to
+	 * run "mdadm --grow --continue" rather than running in the
+	 * background.
+	 */
+	switch(fork()) {
+	case  0:
+		/* FIXME yuk. CLOSE_EXEC?? */
+		skipped = 0;
+		for (i = 3; skipped < 20; i++)
+			if (close(i) < 0)
+				skipped++;
+			else
+				skipped = 0;
+
+		/* Don't want to see error messages from
+		 * systemctl.  If the service doesn't exist,
+		 * we fork ourselves.
+		 */
+		close(2);
+		open("/dev/null", O_WRONLY);
+		snprintf(pathbuf, sizeof(pathbuf), "mdadm-grow-continue@%s.service",
+			 devnm);
+		status = execl("/usr/bin/systemctl", "systemctl",
+			       "start",
+			       pathbuf, NULL);
+		status = execl("/bin/systemctl", "systemctl", "start",
+			       pathbuf, NULL);
+		exit(1);
+	case -1: /* Just do it ourselves. */
+		break;
+	default: /* parent - good */
+		pid = wait(&status);
+		if (pid >= 0 && status == 0)
+			return 1;
+	}
+	return 0;
+}
+
 static int reshape_array(char *container, int fd, char *devname,
 			 struct supertype *st, struct mdinfo *info,
 			 int force, struct mddev_dev *devlist,
@@ -2763,6 +2827,7 @@ static int reshape_array(char *container, int fd, char *devname,
 	unsigned long long array_size;
 	int done;
 	struct mdinfo *sra = NULL;
+	char buf[20];
 
 	/* when reshaping a RAID0, the component_size might be zero.
 	 * So try to fix that up.
@@ -2810,7 +2875,9 @@ static int reshape_array(char *container, int fd, char *devname,
 		goto release;
 	}
 
-	if (st->ss->external && restart && (info->reshape_progress == 0)) {
+	if (st->ss->external && restart && (info->reshape_progress == 0) &&
+	    !((sysfs_get_str(info, NULL, "sync_action", buf, sizeof(buf)) > 0) &&
+	      (strncmp(buf, "reshape", 7) == 0))) {
 		/* When reshape is restarted from '0', very begin of array
 		 * it is possible that for external metadata reshape and array
 		 * configuration doesn't happen.
@@ -2838,6 +2905,10 @@ static int reshape_array(char *container, int fd, char *devname,
 			       devname);
 			goto release;
 		}
+
+		if (!backup_file)
+			backup_file = locate_backup(sra->sys_name);
+
 		goto started;
 	}
 	/* The container is frozen but the array may not be.
@@ -3167,6 +3238,7 @@ started:
 			if (!reshape_open_backup_file(backup_file, fd, devname,
 						      (signed)blocks,
 						      fdlist+d, offsets+d,
+						      sra->sys_name,
 						      restart)) {
 				goto release;
 			}
@@ -3207,6 +3279,14 @@ started:
 			sra->reshape_progress);
 		return 1;
 	}
+
+	if (!forked && !check_env("MDADM_NO_SYSTEMCTL"))
+		if (continue_via_systemd(container ?: sra->sys_name)) {
+			free(fdlist);
+			free(offsets);
+			sysfs_free(sra);
+			return 0;
+		}
 
 	/* Now we just need to kick off the reshape and watch, while
 	 * handling backups of the data...
@@ -3287,8 +3367,21 @@ started:
 	free(fdlist);
 	free(offsets);
 
-	if (backup_file && done)
+	if (backup_file && done) {
+		char *bul;
+		bul = make_backup(sra->sys_name);
+		if (bul) {
+			char buf[1024];
+			int l = readlink(bul, buf, sizeof(buf));
+			if (l > 0) {
+				buf[l]=0;
+				unlink(buf);
+			}
+			unlink(bul);
+			free(bul);
+		}
 		unlink(backup_file);
+	}
 	if (!done) {
 		abort_reshape(sra);
 		goto out;
@@ -3362,8 +3455,8 @@ int reshape_container(char *container, char *devname,
 		      struct supertype *st,
 		      struct mdinfo *info,
 		      int force,
-		      char *backup_file,
-		      int verbose, int restart, int freeze_reshape)
+		      char *backup_file, int verbose,
+		      int forked, int restart, int freeze_reshape)
 {
 	struct mdinfo *cc = NULL;
 	int rv = restart;
@@ -3388,7 +3481,11 @@ int reshape_container(char *container, char *devname,
 	 */
 	ping_monitor(container);
 
-	switch (fork()) {
+	if (!forked && !freeze_reshape && !check_env("MDADM_NO_SYSTEMCTL"))
+		if (continue_via_systemd(container))
+			return 0;
+
+	switch (forked ? 0 : fork()) {
 	case -1: /* error */
 		perror("Cannot fork to complete reshape\n");
 		unfreeze(st);
@@ -4316,7 +4413,12 @@ int child_monitor(int afd, struct mdinfo *sra, struct reshape *reshape,
 	}
 
 	/* FIXME maybe call progress_reshape one more time instead */
-	abort_reshape(sra); /* remove any remaining suspension */
+	/* remove any remaining suspension */
+	sysfs_set_num(sra, NULL, "suspend_lo", 0x7FFFFFFFFFFFFFFFULL);
+	sysfs_set_num(sra, NULL, "suspend_hi", 0);
+	sysfs_set_num(sra, NULL, "suspend_lo", 0);
+	sysfs_set_num(sra, NULL, "sync_min", 0);
+
 	if (reshape->before.data_disks == reshape->after.data_disks)
 		sysfs_set_num(sra, NULL, "sync_speed_min", speed);
 	free(buf);
@@ -4824,7 +4926,7 @@ int Grow_continue_command(char *devname, int fd,
 
 	/* continue reshape
 	 */
-	ret_val = Grow_continue(fd, st, content, backup_file, 0);
+	ret_val = Grow_continue(fd, st, content, backup_file, 1, 0);
 
 Grow_continue_command_exit:
 	if (fd2 > -1)
@@ -4840,7 +4942,7 @@ Grow_continue_command_exit:
 }
 
 int Grow_continue(int mdfd, struct supertype *st, struct mdinfo *info,
-		  char *backup_file, int freeze_reshape)
+		  char *backup_file, int forked, int freeze_reshape)
 {
 	int ret_val = 2;
 
@@ -4857,15 +4959,40 @@ int Grow_continue(int mdfd, struct supertype *st, struct mdinfo *info,
 		close(cfd);
 		ret_val = reshape_container(st->container_devnm, NULL, mdfd,
 					    st, info, 0, backup_file,
-					    0,
+					    0, forked,
 					    1 | info->reshape_active,
 					    freeze_reshape);
 	} else
 		ret_val = reshape_array(NULL, mdfd, "array", st, info, 1,
 					NULL, INVALID_SECTORS,
-					backup_file, 0, 0,
+					backup_file, 0, forked,
 					1 | info->reshape_active,
 					freeze_reshape);
 
 	return ret_val;
+}
+
+char *make_backup(char *name)
+{
+	char *base = "backup_file-";
+	int len;
+	char *fname;
+
+	len = strlen(MAP_DIR) + 1 + strlen(base) + strlen(name)+1;
+	fname = xmalloc(len);
+	sprintf(fname, "%s/%s%s", MAP_DIR, base, name);
+	return fname;
+}
+
+char *locate_backup(char *name)
+{
+	char *fl = make_backup(name);
+	struct stat stb;
+
+	if (stat(fl, &stb) == 0 &&
+	    S_ISREG(stb.st_mode))
+		return fl;
+
+	free(fl);
+	return NULL;
 }

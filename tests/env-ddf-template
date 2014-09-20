@@ -1,3 +1,16 @@
+sha1_sum() {
+    sha1sum "$1" | cut -c 1-40
+}
+
+get_rootdev() {
+    local dev=$(stat -c %D /)
+    local maj=$(expr $dev : '\(..*\)..')
+    local min=${dev#$maj}
+    local bd=/dev/$(basename $(readlink /sys/dev/block/$((0x$maj)):$((0x$min))))
+    [ -b $bd ] || exit 1
+    echo $bd
+}
+
 get_sysdir() {
     local mddev=$1
     [ -L $mddev ] && mddev=$(readlink -f $mddev)
@@ -89,9 +102,12 @@ ddf_check() {
     esac
 }
 
-container=/dev/md/ddf
+container=/dev/md/ddf0
 member0=/dev/md/vol0
 member1=/dev/md/vol1
 member2=/dev/md/vol2
 member3=/dev/md/vol3
 member4=/dev/md/vol4
+
+# We don't want systemd to start system mdmon; start our own
+export MDADM_NO_SYSTEMCTL=1

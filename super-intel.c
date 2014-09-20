@@ -4422,8 +4422,9 @@ static int load_super_imsm(struct supertype *st, int fd, char *devname)
 {
 	struct intel_super *super;
 	int rv;
+	int retry;
 
-	if (!st->ignore_hw_compat && test_partition(fd))
+	if (test_partition(fd))
 		/* IMSM not allowed on partitions */
 		return 1;
 
@@ -4443,6 +4444,22 @@ static int load_super_imsm(struct supertype *st, int fd, char *devname)
 		return 2;
 	}
 	rv = load_and_parse_mpb(fd, super, devname, 0);
+
+	/* retry the load if we might have raced against mdmon */
+	if (rv == 3) {
+		struct mdstat_ent *mdstat = mdstat_by_component(fd2devnm(fd));
+
+		if (mdstat && mdmon_running(mdstat->devnm) && getpid() != mdmon_pid(mdstat->devnm)) {
+			for (retry = 0; retry < 3; retry++) {
+				usleep(3000);
+				rv = load_and_parse_mpb(fd, super, devname, 0);
+				if (rv != 3)
+					break;
+			}
+		}
+
+		free_mdstat(mdstat);
+	}
 
 	if (rv) {
 		if (devname)
@@ -5210,6 +5227,8 @@ static int create_array(struct supertype *st, int dev_idx)
 		int idx = get_imsm_disk_idx(dev, i, MAP_X);
 
 		disk = get_imsm_disk(super, idx);
+		if (!disk)
+			disk = get_imsm_missing(super, idx);
 		serialcpy(inf[i].serial, disk->serial);
 	}
 	append_metadata_update(st, u, len);
@@ -8568,7 +8587,7 @@ static void imsm_process_update(struct supertype *st,
 	}
 	case update_add_remove_disk: {
 		/* we may be able to repair some arrays if disks are
-		 * being added, check teh status of add_remove_disk
+		 * being added, check the status of add_remove_disk
 		 * if discs has been added.
 		 */
 		if (add_remove_disk_update(super)) {
@@ -8588,8 +8607,8 @@ static void imsm_process_update(struct supertype *st,
 
 static struct mdinfo *get_spares_for_grow(struct supertype *st);
 
-static void imsm_prepare_update(struct supertype *st,
-				struct metadata_update *update)
+static int imsm_prepare_update(struct supertype *st,
+			       struct metadata_update *update)
 {
 	/**
 	 * Allocate space to hold new disk entries, raid-device entries or a new
@@ -8598,19 +8617,28 @@ static void imsm_prepare_update(struct supertype *st,
 	 * integrated by the monitor thread without worrying about live pointers
 	 * in the manager thread.
 	 */
-	enum imsm_update_type type = *(enum imsm_update_type *) update->buf;
+	enum imsm_update_type type;
 	struct intel_super *super = st->sb;
 	struct imsm_super *mpb = super->anchor;
 	size_t buf_len;
 	size_t len = 0;
 
+	if (update->len < (int)sizeof(type))
+		return 0;
+
+	type = *(enum imsm_update_type *) update->buf;
+
 	switch (type) {
 	case update_general_migration_checkpoint:
+		if (update->len < (int)sizeof(struct imsm_update_general_migration_checkpoint))
+			return 0;
 		dprintf("imsm: prepare_update() "
 			"for update_general_migration_checkpoint called\n");
 		break;
 	case update_takeover: {
 		struct imsm_update_takeover *u = (void *)update->buf;
+		if (update->len < (int)sizeof(*u))
+			return 0;
 		if (u->direction == R0_TO_R10) {
 			void **tail = (void **)&update->space_list;
 			struct imsm_dev *dev = get_imsm_dev(super, u->subarray);
@@ -8651,6 +8679,9 @@ static void imsm_prepare_update(struct supertype *st,
 		struct intel_dev *dl;
 		void **space_tail = (void**)&update->space_list;
 
+		if (update->len < (int)sizeof(*u))
+			return 0;
+
 		dprintf("imsm: imsm_prepare_update() for update_reshape\n");
 
 		for (dl = super->devlist; dl; dl = dl->next) {
@@ -8682,6 +8713,9 @@ static void imsm_prepare_update(struct supertype *st,
 		int size;
 		void *s;
 		int current_level = -1;
+
+		if (update->len < (int)sizeof(*u))
+			return 0;
 
 		dprintf("imsm: imsm_prepare_update() for update_reshape\n");
 
@@ -8750,6 +8784,13 @@ static void imsm_prepare_update(struct supertype *st,
 		break;
 	}
 	case update_size_change: {
+		if (update->len < (int)sizeof(struct imsm_update_size_change))
+			return 0;
+		break;
+	}
+	case update_activate_spare: {
+		if (update->len < (int)sizeof(struct imsm_update_activate_spare))
+			return 0;
 		break;
 	}
 	case update_create_array: {
@@ -8761,6 +8802,9 @@ static void imsm_prepare_update(struct supertype *st,
 		struct disk_info *inf;
 		int i;
 		int activate = 0;
+
+		if (update->len < (int)sizeof(*u))
+			return 0;
 
 		inf = get_disk_info(u);
 		len = sizeof_imsm_dev(dev, 1);
@@ -8783,9 +8827,22 @@ static void imsm_prepare_update(struct supertype *st,
 		}
 		len += activate * sizeof(struct imsm_disk);
 		break;
-	default:
+	}
+	case update_kill_array: {
+		if (update->len < (int)sizeof(struct imsm_update_kill_array))
+			return 0;
 		break;
 	}
+	case update_rename_array: {
+		if (update->len < (int)sizeof(struct imsm_update_rename_array))
+			return 0;
+		break;
+	}
+	case update_add_remove_disk:
+		/* no update->len needed */
+		break;
+	default:
+		return 0;
 	}
 
 	/* check if we need a larger metadata buffer */
@@ -8809,6 +8866,7 @@ static void imsm_prepare_update(struct supertype *st,
 		else
 			super->next_buf = NULL;
 	}
+	return 1;
 }
 
 /* must be called while manager is quiesced */
@@ -8990,6 +9048,47 @@ int open_backup_targets(struct mdinfo *info, int raid_disks, int *raid_fds,
 	return 0;
 }
 
+/*******************************************************************************
+ * Function:	validate_container_imsm
+ * Description: This routine validates container after assemble,
+ *		eg. if devices in container are under the same controller.
+ *
+ * Parameters:
+ *	info	: linked list with info about devices used in array
+ * Returns:
+ *	1 : HBA mismatch
+ *	0 : Success
+ ******************************************************************************/
+int validate_container_imsm(struct mdinfo *info)
+{
+	if (!check_env("IMSM_NO_PLATFORM")) {
+		struct sys_dev *idev;
+		struct mdinfo *dev;
+		char *hba_path = NULL;
+		char *dev_path = devt_to_devpath(makedev(info->disk.major,
+										info->disk.minor));
+
+		for (idev = find_intel_devices(); idev; idev = idev->next) {
+			if (strstr(dev_path, idev->path)) {
+				hba_path = idev->path;
+				break;
+			}
+		}
+		free(dev_path);
+
+		if (hba_path) {
+			for (dev = info->next; dev; dev = dev->next) {
+				if (!devt_attached_to_hba(makedev(dev->disk.major,
+						dev->disk.minor), hba_path)) {
+					pr_err("WARNING - IMSM container assembled with disks under different HBAs!\n"
+						"       This operation is not supported and can lead to data loss.\n");
+					return 1;
+				}
+			}
+		}
+	}
+	return 0;
+}
 #ifndef MDASSEMBLE
 /*******************************************************************************
  * Function:	init_migr_record_imsm
@@ -9338,7 +9437,7 @@ static const char *imsm_get_disk_controller_domain(const char *path)
 	char *drv=NULL;
 	struct stat st;
 
-	strncpy(disk_path, disk_by_path, PATH_MAX - 1);
+	strcpy(disk_path, disk_by_path);
 	strncat(disk_path, path, PATH_MAX - strlen(disk_path) - 1);
 	if (stat(disk_path, &st) == 0) {
 		struct sys_dev* hba;
@@ -9697,8 +9796,8 @@ static void imsm_update_metadata_locally(struct supertype *st,
 	mu.space = NULL;
 	mu.space_list = NULL;
 	mu.next = NULL;
-	imsm_prepare_update(st, &mu);
-	imsm_process_update(st, &mu);
+	if (imsm_prepare_update(st, &mu))
+		imsm_process_update(st, &mu);
 
 	while (mu.space_list) {
 		void **space = mu.space_list;
@@ -10465,6 +10564,7 @@ abort:
 
 	return ret_val;
 }
+
 #endif /* MDASSEMBLE */
 
 struct superswitch super_imsm = {
@@ -10508,6 +10608,7 @@ struct superswitch super_imsm = {
 	.free_super	= free_super_imsm,
 	.match_metadata_desc = match_metadata_desc_imsm,
 	.container_content = container_content_imsm,
+	.validate_container = validate_container_imsm,
 
 	.external	= 1,
 	.name = "imsm",

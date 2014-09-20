@@ -170,7 +170,7 @@ static void remove_devices(char *devnm, char *path)
 	free(path2);
 }
 
-int Manage_run(char *devname, int fd, int verbose)
+int Manage_run(char *devname, int fd, struct context *c)
 {
 	/* Run the array.  Array must already be configured
 	 *  Requires >= 0.90.0
@@ -187,7 +187,7 @@ int Manage_run(char *devname, int fd, int verbose)
 		return 1;
 	}
 	strcpy(nm, nmp);
-	return IncrementalScan(verbose, nm);
+	return IncrementalScan(c, nm);
 }
 
 int Manage_stop(char *devname, int fd, int verbose, int will_retry)
@@ -783,7 +783,8 @@ int Manage_add(int fd, int tfd, struct mddev_dev *dv,
 				break;
 			}
 		/* FIXME this is a bad test to be using */
-		if (!tst->sb && dv->disposition != 'a') {
+		if (!tst->sb && (dv->disposition != 'a'
+				 && dv->disposition != 'S')) {
 			/* we are re-adding a device to a
 			 * completely dead array - have to depend
 			 * on kernel to check
@@ -813,7 +814,7 @@ int Manage_add(int fd, int tfd, struct mddev_dev *dv,
 			dev_st = dup_super(tst);
 			dev_st->ss->load_super(dev_st, tfd, NULL);
 		}
-		if (dev_st && dev_st->sb) {
+		if (dev_st && dev_st->sb && dv->disposition != 'S') {
 			int rv = attempt_re_add(fd, tfd, dv,
 						dev_st, tst,
 						rdev,
@@ -846,13 +847,14 @@ int Manage_add(int fd, int tfd, struct mddev_dev *dv,
 					continue;
 				if (disc.major == 0 && disc.minor == 0)
 					continue;
+				found++;
 				if (!(disc.state & (1<<MD_DISK_SYNC)))
 					continue;
 				avail[disc.raid_disk] = 1;
-				found++;
 			}
 			array_failed = !enough(array->level, array->raid_disks,
 					       array->layout, 1, avail);
+			free(avail);
 		} else
 			array_failed = 0;
 		if (array_failed) {
@@ -1236,6 +1238,7 @@ int Manage_subdevs(char *devname, int fd,
 	 *  'a' - add the device
 	 *	   try HOT_ADD_DISK
 	 *         If that fails EINVAL, try ADD_NEW_DISK
+	 *  'S' - add the device as a spare - don't try re-add
 	 *  'A' - re-add the device
 	 *  'r' - remove the device: HOT_REMOVE_DISK
 	 *        device can be 'faulty' or 'detached' in which case all
@@ -1261,7 +1264,6 @@ int Manage_subdevs(char *devname, int fd,
 	mdu_array_info_t array;
 	unsigned long long array_size;
 	struct mddev_dev *dv;
-	struct stat stb;
 	int tfd = -1;
 	struct supertype *tst;
 	char *subarray = NULL;
@@ -1293,9 +1295,10 @@ int Manage_subdevs(char *devname, int fd,
 		goto abort;
 	}
 
-	stb.st_rdev = 0;
 	for (dv = devlist; dv; dv = dv->next) {
+		unsigned long rdev = 0; /* device to add/remove etc */
 		int rv;
+		int mj,mn;
 
 		if (strcmp(dv->devname, "failed") == 0 ||
 		    strcmp(dv->devname, "faulty") == 0) {
@@ -1388,10 +1391,9 @@ int Manage_subdevs(char *devname, int fd,
 			sysfd = sysfs_open(fd2devnm(fd), dname, "block/dev");
 			if (sysfd >= 0) {
 				char dn[20];
-				int mj,mn;
 				if (sysfs_fd_get_str(sysfd, dn, 20) > 0 &&
 				    sscanf(dn, "%d:%d", &mj,&mn) == 2) {
-					stb.st_rdev = makedev(mj,mn);
+					rdev = makedev(mj,mn);
 					found = 1;
 				}
 				close(sysfd);
@@ -1406,7 +1408,14 @@ int Manage_subdevs(char *devname, int fd,
 					goto abort;
 				}
 			}
+		} else if ((dv->disposition == 'r' || dv->disposition == 'f')
+			   && get_maj_min(dv->devname, &mj, &mn)) {
+			/* for 'fail' and 'remove', the device might
+			 * not exist.
+			 */
+			rdev = makedev(mj, mn);
 		} else {
+			struct stat stb;
 			tfd = dev_open(dv->devname, O_RDONLY);
 			if (tfd >= 0)
 				fstat(tfd, &stb);
@@ -1439,6 +1448,7 @@ int Manage_subdevs(char *devname, int fd,
 					goto abort;
 				}
 			}
+			rdev = stb.st_rdev;
 		}
 		switch(dv->disposition){
 		default:
@@ -1446,6 +1456,7 @@ int Manage_subdevs(char *devname, int fd,
 				dv->devname, dv->disposition);
 			goto abort;
 		case 'a':
+		case 'S': /* --add-spare */
 		case 'A':
 		case 'M': /* --re-add missing */
 		case 'F': /* --re-add faulty  */
@@ -1458,8 +1469,7 @@ int Manage_subdevs(char *devname, int fd,
 			}
 			if (dv->disposition == 'F')
 				/* Need to remove first */
-				ioctl(fd, HOT_REMOVE_DISK,
-				      (unsigned long)stb.st_rdev);
+				ioctl(fd, HOT_REMOVE_DISK, rdev);
 			/* Make sure it isn't in use (in 2.6 or later) */
 			tfd = dev_open(dv->devname, O_RDONLY|O_EXCL);
 			if (tfd >= 0) {
@@ -1485,7 +1495,7 @@ int Manage_subdevs(char *devname, int fd,
 			}
 			rv = Manage_add(fd, tfd, dv, tst, &array,
 					force, verbose, devname, update,
-					stb.st_rdev, array_size);
+					rdev, array_size);
 			close(tfd);
 			tfd = -1;
 			if (rv < 0)
@@ -1503,7 +1513,7 @@ int Manage_subdevs(char *devname, int fd,
 				rv = -1;
 			} else
 				rv = Manage_remove(tst, fd, dv, sysfd,
-						   stb.st_rdev, verbose,
+						   rdev, verbose,
 						   devname);
 			if (sysfd >= 0)
 				close(sysfd);
@@ -1518,7 +1528,7 @@ int Manage_subdevs(char *devname, int fd,
 			/* FIXME check current member */
 			if ((sysfd >= 0 && write(sysfd, "faulty", 6) != 6) ||
 			    (sysfd < 0 && ioctl(fd, SET_DISK_FAULTY,
-						(unsigned long) stb.st_rdev))) {
+						rdev))) {
 				if (errno == EBUSY)
 					busy = 1;
 				pr_err("set device faulty failed for %s:  %s\n",
@@ -1549,7 +1559,7 @@ int Manage_subdevs(char *devname, int fd,
 						frozen = -1;
 				}
 				rv = Manage_replace(tst, fd, dv,
-						    stb.st_rdev, verbose,
+						    rdev, verbose,
 						    devname);
 			}
 			if (rv < 0)
@@ -1563,7 +1573,7 @@ int Manage_subdevs(char *devname, int fd,
 			goto abort;
 		case 'w': /* --with device which was matched */
 			rv = Manage_with(tst, fd, dv,
-					 stb.st_rdev, verbose, devname);
+					 rdev, verbose, devname);
 			if (rv < 0)
 				goto abort;
 			break;

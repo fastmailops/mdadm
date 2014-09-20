@@ -22,6 +22,7 @@
  *    Email: <neilb@suse.de>
  */
 
+#include <stddef.h>
 #include "mdadm.h"
 /*
  * The version-1 superblock :
@@ -133,9 +134,6 @@ struct misc_dev_info {
 					|MD_FEATURE_NEW_OFFSET		\
 					)
 
-#ifndef offsetof
-#define offsetof(t,f) ((size_t)&(((t*)0)->f))
-#endif
 static unsigned int calc_sb_1_csum(struct mdp_superblock_1 * sb)
 {
 	unsigned int disk_csum, csum;
@@ -1559,7 +1557,7 @@ static int write_init_super1(struct supertype *st)
 	unsigned long long data_offset;
 
 	for (di = st->info; di; di = di->next) {
-		if (di->disk.state == 1)
+		if (di->disk.state & (1 << MD_DISK_FAULTY))
 			continue;
 		if (di->fd < 0)
 			continue;
@@ -1689,6 +1687,10 @@ static int write_init_super1(struct supertype *st)
 			       st->minor_version, di->devname);
 			rv = -EINVAL;
 			goto out;
+		}
+		if (conf_get_create_info()->bblist == 0) {
+			sb->bblog_size = 0;
+			sb->bblog_offset = 0;
 		}
 
 		sb->sb_csum = calc_sb_1_csum(sb);
@@ -2046,8 +2048,8 @@ add_internal_bitmap1(struct supertype *st,
 			 * been left.
 			 */
 			offset = 0;
-			room = choose_bm_space(__le64_to_cpu(sb->size));
 			bbl_size = 8;
+			room = choose_bm_space(__le64_to_cpu(sb->size)) + bbl_size;
 		} else {
 			room = __le64_to_cpu(sb->super_offset)
 				- __le64_to_cpu(sb->data_offset)
@@ -2073,8 +2075,8 @@ add_internal_bitmap1(struct supertype *st,
 	case 2: /* between superblock and data */
 		if (creating) {
 			offset = 4*2;
-			room = choose_bm_space(__le64_to_cpu(sb->size));
 			bbl_size = 8;
+			room = choose_bm_space(__le64_to_cpu(sb->size)) + bbl_size;
 		} else {
 			room = __le64_to_cpu(sb->data_offset)
 				- __le64_to_cpu(sb->super_offset);
@@ -2102,6 +2104,10 @@ add_internal_bitmap1(struct supertype *st,
 	if (chunk == UnSet && room > 128*2)
 		/* Limit to 128K of bitmap when chunk size not requested */
 		room = 128*2;
+
+	if (room <= 1)
+		/* No room for a bitmap */
+		return 0;
 
 	max_bits = (room * 512 - sizeof(bitmap_super_t)) * 8;
 

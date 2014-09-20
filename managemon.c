@@ -697,7 +697,7 @@ static void manage_new(struct mdstat_ent *mdstat,
 	new->resync_start_fd = sysfs_open(new->info.sys_name, NULL, "resync_start");
 	new->metadata_fd = sysfs_open(new->info.sys_name, NULL, "metadata_version");
 	new->sync_completed_fd = sysfs_open(new->info.sys_name, NULL, "sync_completed");
-	dprintf("%s: inst: %d action: %d state: %d\n", __func__, atoi(inst),
+	dprintf("%s: inst: %s action: %d state: %d\n", __func__, inst,
 		new->action_fd, new->info.state_fd);
 
 	if (sigterm)
@@ -819,7 +819,8 @@ static void handle_message(struct supertype *container, struct metadata_update *
 		mu->space_list = NULL;
 		mu->next = NULL;
 		if (container->ss->prepare_update)
-			container->ss->prepare_update(container, mu);
+			if (!container->ss->prepare_update(container, mu))
+				free_updates(&mu);
 		queue_metadata_update(mu);
 	}
 }
