@@ -8,6 +8,7 @@ mdadm (3.3.2-1) UNRELEASED; urgency=low
     from fatal error to warning (Closes: #733574)
   * create /etc/modprobe.d/mdadm.conf to set start_ro=1 there
     instead of doing it in the initramfs
+  * use install -D in d/rules consistently and remove dirs from d/mdadm.dirs
 
  -- Michael Tokarev <mjt@tls.msk.ru>  Sat, 20 Sep 2014 08:49:59 +0400
 

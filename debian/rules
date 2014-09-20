@@ -69,23 +69,23 @@ install: build $(INTERPOLATED_FILES)
 
 	$(MAKE) install DESTDIR=$(DESTDIR)
 
-	install -m0755 debian/initramfs/hook \
+	install -Dm0755 debian/initramfs/hook \
 		$(DESTDIR)/usr/share/initramfs-tools/hooks/mdadm
-	install -m0755 debian/initramfs/script.local-top \
+	install -Dm0755 debian/initramfs/script.local-top \
 		$(DESTDIR)/usr/share/initramfs-tools/scripts/local-top/mdadm
-	install -D -m0644 debian/mdadm.modules \
+	install -Dm0644 debian/mdadm.modules \
 		$(DESTDIR)/etc/modprobe.d/mdadm.conf
 
-	install -m0755 debian/mkconf $(DESTDIR)/usr/share/mdadm
-	install -m0755 debian/checkarray $(DESTDIR)/usr/share/mdadm
-	install -m0755 debian/bugscript $(DESTDIR)/usr/share/bug/mdadm/script
-	install -m0644 debian/presubj $(DESTDIR)/usr/share/bug/mdadm
+	install -Dm0755 debian/mkconf $(DESTDIR)/usr/share/mdadm/mkconf
+	install -Dm0755 debian/checkarray $(DESTDIR)/usr/share/mdadm/checkarray
+	install -Dm0755 debian/bugscript $(DESTDIR)/usr/share/bug/mdadm/script
+	install -Dm0644 debian/presubj $(DESTDIR)/usr/share/bug/mdadm/presubj
 
-	install -m0755 debian/mdadm-startall $(DESTDIR)/sbin
+	install -Dm0755 debian/mdadm-startall $(DESTDIR)/sbin/mdadm-startall
 
-	install -m0755 mdadm.udeb $(DESTDIR_UDEB)/sbin/mdadm
-	install -m0755 mdmon.udeb $(DESTDIR_UDEB)/sbin/mdmon
-	install -m0644 udev-md-raid-arrays.rules $(DESTDIR_UDEB)/lib/udev/rules.d/63-md-raid-arrays.rules
+	install -Dm0755 mdadm.udeb $(DESTDIR_UDEB)/sbin/mdadm
+	install -Dm0755 mdmon.udeb $(DESTDIR_UDEB)/sbin/mdmon
+	install -Dm0644 udev-md-raid-arrays.rules $(DESTDIR_UDEB)/lib/udev/rules.d/63-md-raid-arrays.rules
 
 binary-indep: build install
 
