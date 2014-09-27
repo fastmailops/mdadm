@@ -51,8 +51,6 @@ mdadm (2.6.7-2) unstable; urgency=low
 
       mdadm --assemble --scan --auto=yes
 
-    instead of mdrun. Or make use of /usr/share/mdadm/startall .
-
  -- martin f. krafft <madduck@debian.org>  Wed, 02 Jul 2008 10:57:32 +0200
 
 mdadm (2.5.3.git200608201206-1) unstable; urgency=low

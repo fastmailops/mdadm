@@ -547,8 +547,6 @@ The latest version of this FAQ is available here:
 
   instead of mdrun.
 
-  Or make use of /usr/share/mdadm/startall .
-
 25. Why are my arrays marked auto-read-only in /proc/mdstat?
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
   Arrays are kept read-only until the first write occurs. This allows md to

@@ -19,12 +19,8 @@ endif
 .PHONY: configure
 configure:
 
-debian/mdadm-startall.8: debian/mdadm-startall.sgml
-	docbook-to-man $< > $@.tmp
-	mv $@.tmp $@
-
 build: configure build-stamp
-build-stamp: debian/mdadm-startall.8
+build-stamp:
 	dh_testdir
 	$(MAKE) -f debian/rules mdadm.udeb DEBIAN=yes
 	$(MAKE) clean
@@ -52,7 +48,7 @@ clean:
 	rm -f $(INTERPOLATED_FILES)
 	rm -f build-stamp
 	[ ! -f Makefile ] || $(MAKE) clean
-	rm -f mdadm.udeb mdmon.udeb mdadm debian/mdadm-startall.8
+	rm -f mdadm.udeb mdmon.udeb mdadm
 	dh_clean
 	debconf-updatepo
 
@@ -80,8 +76,6 @@ install: build $(INTERPOLATED_FILES)
 	install -Dm0755 debian/checkarray $(DESTDIR)/usr/share/mdadm/checkarray
 	install -Dm0755 debian/bugscript $(DESTDIR)/usr/share/bug/mdadm/script
 	install -Dm0644 debian/presubj $(DESTDIR)/usr/share/bug/mdadm/presubj
-
-	install -Dm0755 debian/mdadm-startall $(DESTDIR)/sbin/mdadm-startall
 
 	install -Dm0755 mdadm.udeb $(DESTDIR_UDEB)/sbin/mdadm
 	install -Dm0755 mdmon.udeb $(DESTDIR_UDEB)/sbin/mdmon
