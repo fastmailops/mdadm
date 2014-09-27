@@ -6,15 +6,10 @@
 
 #export DH_VERBOSE=1
 
-CXFLAGS = -ggdb
+LDFLAGS = $(shell dpkg-buildflags --get LDFLAGS)
+CXFLAGS = $(shell dpkg-buildflags --get CFLAGS) \
+	  $(shell dpkg-buildflags --get CPPFLAGS)
 CXFLAGS_UDEB := $(CXFLAGS) -fomit-frame-pointer
-ifneq (,$(findstring noopt,$(DEB_BUILD_OPTIONS)))
-    CXFLAGS += -O0
-    CXFLAGS_UDEB += -O0
-else
-    CXFLAGS += -O2
-    CXFLAGS_UDEB += -Os
-endif
 
 .PHONY: configure
 configure:
@@ -27,7 +22,7 @@ build-stamp:
 	$(MAKE) -f debian/rules mdadm DEBIAN=yes
 	touch $@
 
-mdadm.udeb: FLAGS = CXFLAGS="$(CXFLAGS_UDEB)" CONFFILE=/tmp/mdadm.conf
+mdadm.udeb: FLAGS = CXFLAGS="$(CXFLAGS_UDEB)" LDFLAGS="$(LDFLAGS)" CONFFILE=/tmp/mdadm.conf
 mdadm.udeb: configure
 	dh_testdir
 	$(MAKE) $(FLAGS) all
@@ -35,7 +30,7 @@ mdadm.udeb: configure
 	mv mdmon mdmon.udeb
 .PHONY: mdadm.udeb mdmon.udeb
 
-mdadm: FLAGS = CXFLAGS="$(CXFLAGS)" CONFFILE=/etc/mdadm/mdadm.conf CONFFILE2=/etc/mdadm.conf
+mdadm: FLAGS = CXFLAGS="$(CXFLAGS)" LDFLAGS="$(LDFLAGS)" CONFFILE=/etc/mdadm/mdadm.conf CONFFILE2=/etc/mdadm.conf
 mdadm: configure
 	dh_testdir
 	$(MAKE) $(FLAGS) all

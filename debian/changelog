@@ -19,6 +19,8 @@ mdadm (3.3.2-1) UNRELEASED; urgency=low
     and these days, better alternatives exist online
   * removed debian-specific mdadm-startall script which does nothing more than
     "mdadm --assemble --scan".  Remove docbook-to-man from build-deps.
+  * pass dpkg-buildflags to upstream build system and
+    stop using our own -O0, -Os etc
 
  -- Michael Tokarev <mjt@tls.msk.ru>  Sat, 20 Sep 2014 08:49:59 +0400
 
