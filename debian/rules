@@ -9,7 +9,7 @@
 LDFLAGS = $(shell dpkg-buildflags --get LDFLAGS)
 CXFLAGS = $(shell dpkg-buildflags --get CFLAGS) \
 	  $(shell dpkg-buildflags --get CPPFLAGS)
-CXFLAGS_UDEB := $(CXFLAGS) -fomit-frame-pointer
+BUILDFLAGS = CXFLAGS="$(CXFLAGS)" LDFLAGS="$(LDFLAGS)"
 
 .PHONY: configure
 configure:
@@ -22,18 +22,16 @@ build-stamp:
 	$(MAKE) -f debian/rules mdadm DEBIAN=yes
 	touch $@
 
-mdadm.udeb: FLAGS = CXFLAGS="$(CXFLAGS_UDEB)" LDFLAGS="$(LDFLAGS)" CONFFILE=/tmp/mdadm.conf
 mdadm.udeb: configure
 	dh_testdir
-	$(MAKE) $(FLAGS) all
+	$(MAKE) mdadm mdmon $(BUILDFLAGS) CONFFILE=/tmp/mdadm.conf
 	mv mdadm mdadm.udeb
 	mv mdmon mdmon.udeb
 .PHONY: mdadm.udeb mdmon.udeb
 
-mdadm: FLAGS = CXFLAGS="$(CXFLAGS)" LDFLAGS="$(LDFLAGS)" CONFFILE=/etc/mdadm/mdadm.conf CONFFILE2=/etc/mdadm.conf
 mdadm: configure
 	dh_testdir
-	$(MAKE) $(FLAGS) all
+	$(MAKE) all $(BUILDFLAGS) CONFFILE=/etc/mdadm/mdadm.conf CONFFILE2=/etc/mdadm.conf
 .PHONY: mdadm
 
 INTERPOLATED_FILES = debian/bugscript debian/mkconf
