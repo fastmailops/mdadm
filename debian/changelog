@@ -13,6 +13,10 @@ mdadm (3.3.2-1) UNRELEASED; urgency=low
   * remove references to very old (pre-wheeze) breaks/replaces/depends
   * remove support of makedev
   * reformat mdadm-raid initscript a bit
+  * remove rebuilding-raid.html (had invisible refs) and
+    RAID5_versus_RAID10.txt docs.  Maybe it's a good idea to remove
+    other docs shipped with the package, since these becoming stale
+    and these days, better alternatives exist online
 
  -- Michael Tokarev <mjt@tls.msk.ru>  Sat, 20 Sep 2014 08:49:59 +0400
 

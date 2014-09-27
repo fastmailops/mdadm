@@ -30,8 +30,6 @@ To RAID5 or not to RAID5
 See http://www.miracleas.com/BAARF/BAARF2.html . The package maintainer could
 not possibly come up with so much emotion over such a technical topic.
 
-See also the RAID5_versus_RAID10.txt.gz document included with this package.
-
 Further reading
 ~~~~~~~~~~~~~~~
 The documentation for the kernel md driver is included in
