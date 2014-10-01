@@ -23,6 +23,7 @@ mdadm (3.3.2-1) UNRELEASED; urgency=low
     stop using our own -O0, -Os etc
   * remove separate CFLAGS for udeb and simplify *FLAGS handling
   * bump Standards-Version to 3.9.5 (no changes needed)
+  * fix VCS links to point to anonscm.d.o
 
  -- Michael Tokarev <mjt@tls.msk.ru>  Sat, 20 Sep 2014 08:49:59 +0400
 
