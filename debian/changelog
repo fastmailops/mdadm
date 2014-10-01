@@ -1,4 +1,4 @@
-mdadm (3.3.2-1) UNRELEASED; urgency=low
+mdadm (3.3.2-1) unstable; urgency=low
 
   * new minor/bugfix upstream release (Closes: #731884, #763080)
   * removed remove-bashism-from-makefile.patch (applied upstream)
@@ -25,7 +25,7 @@ mdadm (3.3.2-1) UNRELEASED; urgency=low
   * bump Standards-Version to 3.9.5 (no changes needed)
   * fix VCS links to point to anonscm.d.o
 
- -- Michael Tokarev <mjt@tls.msk.ru>  Sat, 20 Sep 2014 08:49:59 +0400
+ -- Michael Tokarev <mjt@tls.msk.ru>  Wed, 01 Oct 2014 15:09:07 +0400
 
 mdadm (3.3-2) unstable; urgency=low
 
