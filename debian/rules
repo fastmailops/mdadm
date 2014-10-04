@@ -50,6 +50,7 @@ install-arch: build-arch
 
 	$(MAKE) install install-systemd DESTDIR=$(DESTDIR)
 
+	mkdir -p $(DESTDIR)/etc/mdadm
 	install -Dm0755 debian/initramfs/hook \
 		$(DESTDIR)/usr/share/initramfs-tools/hooks/mdadm
 	install -Dm0755 debian/initramfs/script.local-top \
