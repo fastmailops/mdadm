@@ -74,7 +74,7 @@ binary-arch: build install
 	dh_testroot
 	dh_installdebconf
 	dh_installdocs
-	dh_installexamples debian/mdadd.sh
+	dh_installexamples -pmdadm mdadm.conf-example misc/syslog-events
 	dh_installinit --init-script=mdadm-raid --no-restart-on-upgrade -- start 25 S . start 60 0 6 .
 	dh_installinit --init-script=mdadm-waitidle --no-start -- stop 98 0 6 .
 	dh_installinit -- defaults 25
@@ -84,7 +84,7 @@ binary-arch: build install
 	dh_installlogcheck
 	dh_link
 	dh_strip
-	dh_compress -Xmdadd.sh
+	dh_compress
 	dh_fixperms
 	dh_installdeb
 	dh_shlibdeps
