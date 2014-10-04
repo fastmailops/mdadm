@@ -42,7 +42,4 @@ case "$1" in
   *) :;;
 esac
 
-# See #369953
-set +u
 #DEBHELPER#
-set -u
