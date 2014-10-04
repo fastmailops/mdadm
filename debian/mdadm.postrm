@@ -14,16 +14,6 @@ case "${1:-}" in
     fi
     ;;
 
-  purge)
-    GEN_SENTINEL=/var/lib/mdadm/mdadm.conf-generated
-    if [ -r $GEN_SENTINEL ]; then
-      rm -f "$(sed -rne 's,[[:xdigit:]]+  ,,p' $GEN_SENTINEL)"
-    fi
-    rm -f /etc/default/mdadm /etc/mdadm.conf /etc/mdadm/mdadm.conf
-    rm -rf /var/lib/mdadm
-    ;;
-
-  *) :;;
 esac
 
 # just in case somebody actually purges mdadm, we need this to make debconf

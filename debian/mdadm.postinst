@@ -109,6 +109,11 @@ _eof
     db_stop
 
     command -v update-initramfs >/dev/null 2>&1 && update-initramfs -u
+
+    if dpkg --compare-versions "$2" le 3.3.2-1; then
+      rm -f /var/lib/mdadm/CONF-UNCHECKED
+      rm -f /var/lib/mdadm/mdadm.conf-generated
+    fi
     ;;
 esac
 

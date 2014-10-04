@@ -110,28 +110,18 @@ if [ ! -f $CONFIG ]; then
 
 else
 
-  use_temp=0
-  if [ -e /var/lib/mdadm/CONF-UNCHECKED ]; then
-    # the file comes from an old installation and hence is not guaranteed to
-    # work. We thus better create one and start all arrays to be sure.
+  if grep -q '^ARRAY' $CONFIG; then
 
-    warn "unchecked configuration file: $CONFIG"
-
-    use_temp=1
-  elif ! grep -q '^ARRAY' $CONFIG; then
-    # the file defines no ARRAYs. We better create a temporary file to be
-    # sure.
-
-    warn "$CONFIG defines no arrays."
-    use_temp=1
-
-  else
     # this is the ideal case
     install_config $CONFIG $DESTMDADMCONF
     info "using configuration file: $CONFIG"
-  fi
 
-  if [ $use_temp -eq 1 ]; then
+  else
+
+    # the file defines no ARRAYs. We better create a temporary file to be sure.
+
+    warn "$CONFIG defines no arrays."
+
     mkdir --parents ${DESTMDADMCONF%/*}
     tmpfile="${DESTMDADMCONF}.tmp"
     if /usr/share/mdadm/mkconf > $tmpfile; then
@@ -149,6 +139,7 @@ else
       fi
     fi
     rm -f $tmpfile
+
   fi
 
 fi
