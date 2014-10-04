@@ -100,10 +100,6 @@ DAEMON_OPTIONS="$DAEMON_OPTIONS"
 #   if this variable is set to true, mdadm will be a little more verbose e.g.
 #   when creating the initramfs.
 VERBOSE=${VERBOSE:-false}
-
-# MAIL_TO:
-#   this variable is now managed in /etc/mdadm/mdadm.conf (MAILADDR).
-#   Please see mdadm.conf(5).
 _eof
 
     db_stop
