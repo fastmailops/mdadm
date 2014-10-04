@@ -16,6 +16,8 @@ case "${1:-}" in
 
 esac
 
+[ -d /run/systemd/system ] && systemctl --system daemon-reload >/dev/null || :
+
 # just in case somebody actually purges mdadm, we need this to make debconf
 # (added by dh_installdebconf) behave. See #369953
 set +u

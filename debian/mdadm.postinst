@@ -106,6 +106,8 @@ _eof
     ;;
 esac
 
+[ -d /run/systemd/system ] && systemctl --system daemon-reload >/dev/null || :
+
 # See #369953
 set +u
 #DEBHELPER#

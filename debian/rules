@@ -48,7 +48,7 @@ install-arch: build-arch
 	dh_clean -k
 	dh_installdirs
 
-	$(MAKE) install DESTDIR=$(DESTDIR)
+	$(MAKE) install install-systemd DESTDIR=$(DESTDIR)
 
 	install -Dm0755 debian/initramfs/hook \
 		$(DESTDIR)/usr/share/initramfs-tools/hooks/mdadm
@@ -74,7 +74,9 @@ binary-arch: install-arch
 	dh_installexamples -pmdadm mdadm.conf-example misc/syslog-events
 	dh_installinit --init-script=mdadm-raid --no-restart-on-upgrade -- start 25 S . start 60 0 6 .
 	dh_installinit --init-script=mdadm-waitidle --no-start -- stop 98 0 6 .
+	dh_link -pmdadm /dev/null /lib/systemd/system/mdadm-waitidle.service
 	dh_installinit -- defaults 25
+	dh_link -pmdadm /dev/null /lib/systemd/system/mdadm.service
 	dh_installman
 	dh_installcron
 	dh_installchangelogs ChangeLog

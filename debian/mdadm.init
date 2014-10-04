@@ -1,6 +1,7 @@
 #!/bin/sh
 #
 # Start the MD monitor daemon for all active MD arrays if desired.
+# This script is not used under systemd.
 #
 # Copyright © 2001-2005 Mario Jou/3en <joussen@debian.org>
 # Copyright © 2005-2009 Martin F. Krafft <madduck@debian.org>
