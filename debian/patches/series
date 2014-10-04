@@ -2,3 +2,4 @@ debian-conffile-location.diff
 debian-no-Werror.diff
 sha1-includes.diff
 use-external-blkid.diff
+build-sys-no-check_rundir.patch
