@@ -148,28 +148,6 @@ msgstr ""
 
 #. Type: boolean
 #. Description
-#: ../mdadm.templates:9001
-msgid "Do you want to start MD arrays automatically?"
-msgstr "Chcete spouštět MD pole automaticky?"
-
-#. Type: boolean
-#. Description
-#: ../mdadm.templates:9001
-msgid ""
-"Once the base system has booted, mdadm can start all MD arrays (RAIDs) "
-"specified in /etc/mdadm/mdadm.conf which have not yet been started. This is "
-"recommended unless multiple device (MD) support is compiled into the kernel "
-"and all partitions are marked as belonging to MD arrays, with type 0xfd (as "
-"those and only those will be started automatically by the kernel)."
-msgstr ""
-"Po zavedení základního systému může mdadm spustit všechna dosud nespuštěná "
-"MD (RAID) pole uvedená v souboru /etc/mdadm/mdadm.conf. Pokud nemáte "
-"zakompilovanou podporu multiple device (MD) přímo v jádře (kdy se všechna MD "
-"pole označená typem oblasti 0xfd spustí zcela automaticky), pravděpodobně "
-"budete chtít tuto možnost povolit."
-
-#. Type: boolean
-#. Description
 #: ../mdadm.templates:10001
 msgid "Should mdadm run monthly redundancy checks of the MD arrays?"
 msgstr "Má mdadm spouštět měsíční kontroly redundance MD polí?"

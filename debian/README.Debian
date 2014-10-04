@@ -10,10 +10,9 @@ The latest version of this document is available here:
 Autostarting devices
 ~~~~~~~~~~~~~~~~~~~~
 The mdadm.conf file controls which devices are to be started automatically by
-mdadm during boot (assuming AUTOSTART is set to true in /etc/default/mdadm),
-and various other parameters about how they are to be started. The file can
-also contain some control parameters for the mdadm monitor daemon. See
-mdadm.conf(5) for more information.
+mdadm during boot, and various other parameters about how they are to be started.
+The file can also contain some control parameters for the mdadm monitor daemon.
+See mdadm.conf(5) for more information.
 
 Note: this only applies to modular kernels. If you use a monolithic kernel,
 you can control which devices are started automatically by changing the

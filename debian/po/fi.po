@@ -136,28 +136,6 @@ msgstr ""
 
 #. Type: boolean
 #. Description
-#: ../mdadm.templates:9001
-msgid "Do you want to start MD arrays automatically?"
-msgstr "Tulisiko MD-pakat käynnistää automaattisesti?"
-
-#. Type: boolean
-#. Description
-#: ../mdadm.templates:9001
-msgid ""
-"Once the base system has booted, mdadm can start all MD arrays (RAIDs) "
-"specified in /etc/mdadm/mdadm.conf which have not yet been started. This is "
-"recommended unless multiple device (MD) support is compiled into the kernel "
-"and all partitions are marked as belonging to MD arrays, with type 0xfd (as "
-"those and only those will be started automatically by the kernel)."
-msgstr ""
-"Kun perusjärjestelmä on käynnistynyt, mdadm voi käynnistää kaikki "
-"tiedostossa /etc/mdadm/mdadm.conf luetellut MD-pakat (RAIDit), joita ei ole "
-"vielä käynnistetty. Tämä on suositeltavaa, paitsi jos MD-tuki on käännetty "
-"ytimeen ja kaikki osiot on merkitty kuulumaan MD-pakkoihin tyypillä 0xfd "
-"(koska ydin käynnistää automaattisesti nämä ja vain nämä)."
-
-#. Type: boolean
-#. Description
 #: ../mdadm.templates:10001
 msgid "Should mdadm run monthly redundancy checks of the MD arrays?"
 msgstr "Tulisiko mdadm:n tarkistaa kuukausittain MD-pakkojen eheys?"

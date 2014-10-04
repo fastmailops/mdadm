@@ -31,7 +31,6 @@ DEBIANCONFIG=/etc/default/mdadm
 
 test -x "$MDADM" || exit 0
 
-AUTOSTART=true
 STATEDIR=/run/mdadm
 test -f $DEBIANCONFIG && . $DEBIANCONFIG
 
@@ -86,11 +85,6 @@ case "${1:-}" in
 
   start)
     PREFIX="Assembling MD array"
-
-    if ! is_true $AUTOSTART && ! is_true ${MDADM_FORCE_AUTOSTART__:-0}; then
-      log_notice "disabled in $DEBIANCONFIG"
-      exit 0
-    fi
 
     if [ ! -f /proc/mdstat ] && [ -x "$(command -v modprobe)" ] ; then
       modprobe -q md 2>/dev/null || :
@@ -190,11 +184,6 @@ case "${1:-}" in
 
   stop)
     PREFIX="Stopping MD array"
-
-    if ! is_true $AUTOSTART; then
-      log_notice "disabled in $DEBIANCONFIG"
-      exit 0
-    fi
 
     if [ ! -f /proc/mdstat ]; then
       log_problem "no MD subsystem loaded"

@@ -54,8 +54,6 @@ case "${1:-}" in
 
     db_get mdadm/initrdstart
     INITRDSTART="${RET:-all}"
-    db_get mdadm/autostart
-    AUTOSTART="${RET:-true}"
     db_get mdadm/autocheck
     AUTOCHECK="${RET:-true}"
     db_get mdadm/start_daemon
@@ -77,11 +75,6 @@ case "${1:-}" in
 #   loads. This list *must* include the array holding your root filesystem. Use
 #   'none' to prevent any array from being started from the initial ramdisk.
 INITRDSTART='$INITRDSTART'
-
-# AUTOSTART:
-#   should mdadm start arrays listed in /etc/mdadm/mdadm.conf automatically
-#   during boot?
-AUTOSTART=$AUTOSTART
 
 # AUTOCHECK:
 #   should mdadm run periodic redundancy checks over your arrays? See

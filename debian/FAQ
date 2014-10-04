@@ -529,9 +529,8 @@ The latest version of this FAQ is available here:
 
 23. mdadm's init script fails because it cannot find any arrays. What gives?
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-  If you don't have any arrays on your system, then mdadm's init script will
-  fail to assemble them and print a warning. If you don't like that, disable
-  AUTOSTART in /etc/default/mdadm.
+  This does not happen anymore, if no arrays present in config file, no arrays
+  will be started.
 
 24. What happened to mdrun? How do I replace it?
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

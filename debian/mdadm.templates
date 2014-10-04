@@ -68,17 +68,6 @@ _Description: Start arrays not listed in mdadm.conf?
  can simply continue. Alternatively, choose not to continue and enter 'none'
  when prompted which arrays to start from the initial ramdisk.
 
-Template: mdadm/autostart
-Type: boolean
-Default: true
-_Description: Do you want to start MD arrays automatically?
- Once the base system has booted, mdadm can start all MD arrays
- (RAIDs) specified in /etc/mdadm/mdadm.conf which have not yet been
- started. This is recommended unless multiple device (MD) support is
- compiled into the kernel and all partitions are marked as belonging
- to MD arrays, with type 0xfd (as those and only those will be started
- automatically by the kernel).
-
 Template: mdadm/autocheck
 Type: boolean
 Default: true

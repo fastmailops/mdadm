@@ -145,29 +145,6 @@ msgstr ""
 
 #. Type: boolean
 #. Description
-#: ../mdadm.templates:9001
-msgid "Do you want to start MD arrays automatically?"
-msgstr "Voleu arrencar automàticament les matrius MD?"
-
-#. Type: boolean
-#. Description
-#: ../mdadm.templates:9001
-msgid ""
-"Once the base system has booted, mdadm can start all MD arrays (RAIDs) "
-"specified in /etc/mdadm/mdadm.conf which have not yet been started. This is "
-"recommended unless multiple device (MD) support is compiled into the kernel "
-"and all partitions are marked as belonging to MD arrays, with type 0xfd (as "
-"those and only those will be started automatically by the kernel)."
-msgstr ""
-"«mdadm» pot iniciar totes les matrius MD (RAIDs) especificades a «/etc/mdadm/"
-"mdadm.conf» quan s'hagi arrancat el sistema base, i en el ben entès que "
-"encara no s'hagin arrancat. Això és recomanable a no ser que el suport de "
-"dispositiu múltiple (MD) sigui compilat en el nucli i totes les particions "
-"que formen la matriu MD siguin marcades amb el tipus «0xfd»  (donat que "
-"només aquestes seran arrancades de forma automàtica pel nucli)."
-
-#. Type: boolean
-#. Description
 #: ../mdadm.templates:10001
 msgid "Should mdadm run monthly redundancy checks of the MD arrays?"
 msgstr ""

@@ -151,29 +151,6 @@ msgstr ""
 
 #. Type: boolean
 #. Description
-#: ../mdadm.templates:9001
-msgid "Do you want to start MD arrays automatically?"
-msgstr "RAID-apparaten automatisch activeren?"
-
-#. Type: boolean
-#. Description
-#: ../mdadm.templates:9001
-msgid ""
-"Once the base system has booted, mdadm can start all MD arrays (RAIDs) "
-"specified in /etc/mdadm/mdadm.conf which have not yet been started. This is "
-"recommended unless multiple device (MD) support is compiled into the kernel "
-"and all partitions are marked as belonging to MD arrays, with type 0xfd (as "
-"those and only those will be started automatically by the kernel)."
-msgstr ""
-"Nadat het basissysteem eenmaal is opgestart, kan mdadm zorgdragen voor het "
-"activeren van alle RAID-reeksen die voorkomen in /etc/mdadm/mdadm.conf, maar "
-"nog niet zijn geactiveerd. Dit wordt aanbevolen tenzij \"multiple device"
-"\" (MD) ondersteuning is meegecompileerd in de kernel en alle partities die "
-"deel uitmaken van RAID-reeksen zijn gedefinieerd als type 0xfd (aangezien ze "
-"alleen dan automatisch door de kernel geactiveerd zullen worden)."
-
-#. Type: boolean
-#. Description
 #: ../mdadm.templates:10001
 msgid "Should mdadm run monthly redundancy checks of the MD arrays?"
 msgstr "Maandelijkse redundantiecontrole van RAID-reeksen uitvoeren?"

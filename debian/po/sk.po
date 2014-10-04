@@ -141,28 +141,6 @@ msgstr ""
 
 #. Type: boolean
 #. Description
-#: ../mdadm.templates:9001
-msgid "Do you want to start MD arrays automatically?"
-msgstr "Chcete spúšťať polia MD automaticky?"
-
-#. Type: boolean
-#. Description
-#: ../mdadm.templates:9001
-msgid ""
-"Once the base system has booted, mdadm can start all MD arrays (RAIDs) "
-"specified in /etc/mdadm/mdadm.conf which have not yet been started. This is "
-"recommended unless multiple device (MD) support is compiled into the kernel "
-"and all partitions are marked as belonging to MD arrays, with type 0xfd (as "
-"those and only those will be started automatically by the kernel)."
-msgstr ""
-"Po zavedení základného systému môže mdadm spustiť všetky polia MD (RAIDy) "
-"definované v /etc/mdadm/mdadm.conf, ktoré ešte neboli spustené. Toto je "
-"odporúčané, ibaže máte v jadre zakompilovanú podporu multiple device (MD) a "
-"všetky partície sú označené ako patriace do polí MD s typom 0xfd (pretože "
-"tieto a len tieto budú automaticky spúšťané jadrom)."
-
-#. Type: boolean
-#. Description
 #: ../mdadm.templates:10001
 msgid "Should mdadm run monthly redundancy checks of the MD arrays?"
 msgstr "Má mdadm spúšťať mesačnú kontrolu redundancie polí MD?"
