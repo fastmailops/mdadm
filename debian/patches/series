@@ -5,3 +5,4 @@ use-external-blkid.diff
 build-sys-no-check_rundir.patch
 rebuildmap-strip-local-host-name-from-device-name.patch
 readlink-path.patch
+mdmonitor-service-simplify.diff

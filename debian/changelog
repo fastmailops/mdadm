@@ -12,6 +12,8 @@ mdadm (3.3.2-3) UNRELEASED; urgency=low
     as when doing inital assembly
   * readlink-path.patch: readlink is in /bin not /usr/bin on debian
     (Closes: #766416)
+  * mdmonitor-service-simplify.diff: simplify mdmonitor.service
+    systemd file, do not try to read non-existing files (Closes: #764647)
 
  -- Michael Tokarev <mjt@tls.msk.ru>  Mon, 06 Oct 2014 11:28:42 +0400
 
