@@ -10,6 +10,8 @@ mdadm (3.3.2-3) UNRELEASED; urgency=low
     nodes after assembling arrays (eg, when switching from initramfs
     without preserving /dev and /run), to choose the same device names
     as when doing inital assembly
+  * readlink-path.patch: readlink is in /bin not /usr/bin on debian
+    (Closes: #766416)
 
  -- Michael Tokarev <mjt@tls.msk.ru>  Mon, 06 Oct 2014 11:28:42 +0400
 
