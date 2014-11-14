@@ -3,3 +3,4 @@ debian-no-Werror.diff
 sha1-includes.diff
 use-external-blkid.diff
 build-sys-no-check_rundir.patch
+rebuildmap-strip-local-host-name-from-device-name.patch
