@@ -3,10 +3,9 @@
 # Copyright © 2005-2008 Martin F. Krafft <madduck@debian.org>
 # Distributable under the terms of the GNU GPL version 2.
 #
+set -e
 
 . /usr/share/debconf/confmodule
-# See #369953 for ordering
-set -eu
 
 case "${1:-}" in
   configure|reconfigure)

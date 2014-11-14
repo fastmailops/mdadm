@@ -3,7 +3,7 @@
 # Copyright © 2006-2008 Martin F. Krafft <madduck@debian.org>
 # Distributable under the terms of the GNU GPL version 2.
 #
-set -eu
+set -e
 
 case "${1:-}" in
   remove)
