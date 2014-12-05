@@ -98,9 +98,11 @@ _eof
 
     command -v update-initramfs >/dev/null 2>&1 && update-initramfs -u
 
-    if dpkg --compare-versions "$2" le 3.3.2-1; then
+    if dpkg --compare-versions "$2" le 3.3.2-3; then
       rm -f /var/lib/mdadm/CONF-UNCHECKED /var/lib/mdadm/mdadm.conf-generated
-      rm --ignore-fail-on-non-empty /var/lib/mdadm
+      if [ -d /var/lib/mdadm ]; then
+        rmdir --ignore-fail-on-non-empty /var/lib/mdadm
+      fi
     fi
     ;;
 esac
