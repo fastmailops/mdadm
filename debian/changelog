@@ -1,11 +1,11 @@
-mdadm (3.3.2-4) UNRELEASED; urgency=medium
+mdadm (3.3.2-4) unstable; urgency=medium
 
   * really remove /var/lib/mdadm in postinst, fixing a brown-paper bag
     bug in previous upload (I fixed it earlier but forgot to commit it
     before 3.3.2-3 release).  (Closes: #764036 #771852)
   * mention closing of #588965 #599352 #694513 by 3.3-1
 
- -- Michael Tokarev <mjt@tls.msk.ru>  Fri, 05 Dec 2014 11:10:02 +0300
+ -- Michael Tokarev <mjt@tls.msk.ru>  Fri, 05 Dec 2014 17:29:22 +0300
 
 mdadm (3.3.2-3) unstable; urgency=medium
 
