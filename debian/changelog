@@ -1,3 +1,14 @@
+mdadm (3.3.2-5) UNRELEASED; urgency=low
+
+  * use-tempnode-not-devnode.patch: change udev rules file to use
+    $tempnode which works both on wheezy and jessie udev, instead
+    of $devnode which only works in jessie.  At this stage it is
+    better to make rules file compatible with old version instead
+    of adding versioned dependency.  Should be removed for jessie+1.
+    (Closes: #770883)
+
+ -- Michael Tokarev <mjt@tls.msk.ru>  Fri, 05 Dec 2014 19:10:57 +0300
+
 mdadm (3.3.2-4) unstable; urgency=medium
 
   * really remove /var/lib/mdadm in postinst, fixing a brown-paper bag
