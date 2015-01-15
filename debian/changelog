@@ -1,4 +1,4 @@
-mdadm (3.3.2-5) UNRELEASED; urgency=low
+mdadm (3.3.2-5) unstable; urgency=medium
 
   * use-tempnode-not-devnode.patch: change udev rules file to use
     $tempnode which works both on wheezy and jessie udev, instead
@@ -8,7 +8,7 @@ mdadm (3.3.2-5) UNRELEASED; urgency=low
     (Closes: #770883)
   * fix Closes: list in previous entry (Closes: #771852)
 
- -- Michael Tokarev <mjt@tls.msk.ru>  Fri, 05 Dec 2014 19:10:57 +0300
+ -- Michael Tokarev <mjt@tls.msk.ru>  Sat, 20 Dec 2014 11:48:44 +0300
 
 mdadm (3.3.2-4) unstable; urgency=medium
 
