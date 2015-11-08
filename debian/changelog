@@ -1,5 +1,8 @@
 mdadm (3.3.4-1) unstable; urgency=medium
 
+  * Adopting the package as per mjt delegation. Thank you for your
+    service mainting this package over the years, your contributions
+    are highly appreciated by all of Debian and derivate communities.
   * New upstream release.
 
  -- Dimitri John Ledkov <xnox@debian.org>  Sun, 08 Nov 2015 11:48:03 +0000
