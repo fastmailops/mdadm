@@ -6,6 +6,7 @@
 
 #export DH_VERBOSE=1
 
+export CROSS_COMPILE=$(shell dpkg-architecture -qDEB_HOST_GNU_TYPE)-
 LDFLAGS = $(shell dpkg-buildflags --get LDFLAGS)
 CXFLAGS = $(shell dpkg-buildflags --get CFLAGS) \
 	  $(shell dpkg-buildflags --get CPPFLAGS)
