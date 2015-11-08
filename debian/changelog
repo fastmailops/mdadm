@@ -7,6 +7,7 @@ mdadm (3.3.4-1) unstable; urgency=medium
   * New upstream release.
   * Bump standards version to 3.9.6.0, no changes required.
   * Use dh_prep instead of dh_clean -k
+  * Drop cherrypicked patches.
 
   [ Helmut Grohne ]
   * Fix FTCBFS. Export CROSS_COMPILE=<triplet>- (Closes: #794335)
