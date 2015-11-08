@@ -134,7 +134,7 @@ static void free_aa(struct active_array *aa)
 	/* Note that this doesn't close fds if they are being used
 	 * by a clone.  ->container will be set for a clone
 	 */
-	dprintf("%s: sys_name: %s\n", __func__, aa->info.sys_name);
+	dprintf("sys_name: %s\n", aa->info.sys_name);
 	if (!aa->container)
 		close_aa(aa);
 	while (aa->info.devs) {
@@ -273,8 +273,7 @@ static void add_disk_to_container(struct supertype *st, struct mdinfo *sd)
 		.state = 0,
 	};
 
-	dprintf("%s: add %d:%d to container\n",
-		__func__, sd->disk.major, sd->disk.minor);
+	dprintf("add %d:%d to container\n", sd->disk.major, sd->disk.minor);
 
 	sd->next = st->devs;
 	st->devs = sd;
@@ -325,8 +324,8 @@ static void remove_disk_from_container(struct supertype *st, struct mdinfo *sd)
 		.raid_disk = -1,
 		.state = 0,
 	};
-	dprintf("%s: remove %d:%d from container\n",
-		__func__, sd->disk.major, sd->disk.minor);
+	dprintf("remove %d:%d from container\n",
+		sd->disk.major, sd->disk.minor);
 
 	st->update_tail = &update;
 	st->ss->remove_from_super(st, &dk);
@@ -402,6 +401,22 @@ static void manage_container(struct mdstat_ent *mdstat,
 	}
 }
 
+static int sysfs_open2(char *devnum, char *name, char *attr)
+{
+	int fd = sysfs_open(devnum, name, attr);
+	if (fd >= 0) {
+		/* seq_file in the kernel allocates buffer space
+		 * on the first read.  Do that now so 'monitor'
+		 * never needs too.
+		 */
+		char buf[200];
+		if (read(fd, buf, sizeof(buf)) < 0)
+			/* pretend not to ignore return value */
+			return fd;
+	}
+	return fd;
+}
+
 static int disk_init_and_add(struct mdinfo *disk, struct mdinfo *clone,
 			     struct active_array *aa)
 {
@@ -409,10 +424,11 @@ static int disk_init_and_add(struct mdinfo *disk, struct mdinfo *clone,
 		return -1;
 
 	*disk = *clone;
-	disk->recovery_fd = sysfs_open(aa->info.sys_name, disk->sys_name, "recovery_start");
+	disk->recovery_fd = sysfs_open2(aa->info.sys_name, disk->sys_name,
+					"recovery_start");
 	if (disk->recovery_fd < 0)
 		return -1;
-	disk->state_fd = sysfs_open(aa->info.sys_name, disk->sys_name, "state");
+	disk->state_fd = sysfs_open2(aa->info.sys_name, disk->sys_name, "state");
 	if (disk->state_fd < 0) {
 		close(disk->recovery_fd);
 		return -1;
@@ -525,7 +541,7 @@ static void manage_member(struct mdstat_ent *mdstat,
 		/* prevent the kernel from activating the disk(s) before we
 		 * finish adding them
 		 */
-		dprintf("%s: freezing %s\n", __func__,  a->info.sys_name);
+		dprintf("freezing %s\n", a->info.sys_name);
 		sysfs_set_str(&a->info, NULL, "sync_action", "frozen");
 
 		/* Add device to array and set offset/size/slot.
@@ -550,8 +566,7 @@ static void manage_member(struct mdstat_ent *mdstat,
 		if (sysfs_set_str(&a->info, NULL, "sync_action", "recover")
 		    == 0)
 			newa->prev_action = recover;
-		dprintf("%s: recovery started on %s\n", __func__,
-			a->info.sys_name);
+		dprintf("recovery started on %s\n", a->info.sys_name);
  out:
 		while (newdev) {
 			d = newdev->next;
@@ -692,12 +707,13 @@ static void manage_new(struct mdstat_ent *mdstat,
 		}
 	}
 
-	new->action_fd = sysfs_open(new->info.sys_name, NULL, "sync_action");
-	new->info.state_fd = sysfs_open(new->info.sys_name, NULL, "array_state");
-	new->resync_start_fd = sysfs_open(new->info.sys_name, NULL, "resync_start");
-	new->metadata_fd = sysfs_open(new->info.sys_name, NULL, "metadata_version");
-	new->sync_completed_fd = sysfs_open(new->info.sys_name, NULL, "sync_completed");
-	dprintf("%s: inst: %s action: %d state: %d\n", __func__, inst,
+	new->action_fd = sysfs_open2(new->info.sys_name, NULL, "sync_action");
+	new->info.state_fd = sysfs_open2(new->info.sys_name, NULL, "array_state");
+	new->resync_start_fd = sysfs_open2(new->info.sys_name, NULL, "resync_start");
+	new->metadata_fd = sysfs_open2(new->info.sys_name, NULL, "metadata_version");
+	new->sync_completed_fd = sysfs_open2(new->info.sys_name, NULL, "sync_completed");
+
+	dprintf("inst: %s action: %d state: %d\n", inst,
 		new->action_fd, new->info.state_fd);
 
 	if (sigterm)

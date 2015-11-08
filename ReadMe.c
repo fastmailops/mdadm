@@ -1,7 +1,7 @@
 /*
  * mdadm - manage Linux "md" devices aka RAID arrays.
  *
- * Copyright (C) 2001-2014 Neil Brown <neilb@suse.de>
+ * Copyright (C) 2001-2015 Neil Brown <neilb@suse.de>
  *
  *
  *    This program is free software; you can redistribute it and/or modify
@@ -25,12 +25,12 @@
 #include "mdadm.h"
 
 #ifndef VERSION
-#define VERSION "3.3.2"
+#define VERSION "3.3.4"
 #endif
 #ifndef VERS_DATE
-#define VERS_DATE "21st August 2014"
+#define VERS_DATE "3rd August 2015"
 #endif
-char Version[] = Name " - v" VERSION " - " VERS_DATE "\n";
+char Version[] = "mdadm - v" VERSION " - " VERS_DATE "\n";
 
 /*
  * File: ReadMe.c
@@ -593,7 +593,7 @@ char Help_incr[] =
 ;
 
 char Help_config[] =
-"The /etc/mdadm/mdadm.conf config file:\n\n"
+"The /etc/mdadm.conf config file:\n\n"
 " The config file contains, apart from blank lines and comment lines that\n"
 " start with a hash(#), array lines, device lines, and various\n"
 " configuration lines.\n"

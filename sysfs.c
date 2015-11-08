@@ -413,7 +413,7 @@ int sysfs_set_str(struct mdinfo *sra, struct mdinfo *dev,
 	n = write(fd, val, strlen(val));
 	close(fd);
 	if (n != strlen(val)) {
-		dprintf(Name ": failed to write '%s' to '%s' (%s)\n",
+		dprintf("failed to write '%s' to '%s' (%s)\n",
 			val, fname, strerror(errno));
 		return -1;
 	}
@@ -450,7 +450,7 @@ int sysfs_uevent(struct mdinfo *sra, char *event)
 	n = write(fd, event, strlen(event));
 	close(fd);
 	if (n != (int)strlen(event)) {
-		dprintf(Name ": failed to write '%s' to '%s' (%s)\n",
+		dprintf("failed to write '%s' to '%s' (%s)\n",
 			event, fname, strerror(errno));
 		return -1;
 	}
@@ -490,7 +490,7 @@ int sysfs_fd_get_ll(int fd, unsigned long long *val)
 
 	lseek(fd, 0, 0);
 	n = read(fd, buf, sizeof(buf));
-	if (n <= 0)
+	if (n <= 0 || n == sizeof(buf))
 		return -2;
 	buf[n] = 0;
 	*val = strtoull(buf, &ep, 0);
@@ -526,7 +526,7 @@ int sysfs_fd_get_two(int fd, unsigned long long *v1, unsigned long long *v2)
 
 	lseek(fd, 0, 0);
 	n = read(fd, buf, sizeof(buf));
-	if (n <= 0)
+	if (n <= 0 || n == sizeof(buf))
 		return -2;
 	buf[n] = 0;
 	*v1 = strtoull(buf, &ep, 0);
@@ -562,7 +562,7 @@ int sysfs_fd_get_str(int fd, char *val, int size)
 
 	lseek(fd, 0, 0);
 	n = read(fd, val, size);
-	if (n <= 0)
+	if (n <= 0 || n == size)
 		return -1;
 	val[n] = 0;
 	return n;
@@ -623,8 +623,7 @@ int sysfs_set_array(struct mdinfo *info, int vers)
 		if ((vers % 100) < 2 ||
 		    sysfs_set_str(info, NULL, "metadata_version",
 				  ver) < 0) {
-			pr_err("This kernel does not "
-				"support external metadata.\n");
+			pr_err("This kernel does not support external metadata.\n");
 			return 1;
 		}
 	}
@@ -644,9 +643,7 @@ int sysfs_set_array(struct mdinfo *info, int vers)
 		rc = sysfs_set_num(info, NULL, "array_size",
 				   info->custom_array_size/2);
 		if (rc && errno == ENOENT) {
-			pr_err("This kernel does not "
-				"have the md/array_size attribute, "
-				"the array may be larger than expected\n");
+			pr_err("This kernel does not have the md/array_size attribute, the array may be larger than expected\n");
 			rc = 0;
 		}
 		rv |= rc;
@@ -718,7 +715,7 @@ int sysfs_disk_to_sg(int fd)
 	struct stat st;
 	char path[256];
 	char sg_path[256];
-	char sg_major_minor[8];
+	char sg_major_minor[10];
 	char *c;
 	DIR *dir;
 	struct dirent *de;
@@ -753,7 +750,7 @@ int sysfs_disk_to_sg(int fd)
 
 	rv = read(fd, sg_major_minor, sizeof(sg_major_minor));
 	close(fd);
-	if (rv < 0)
+	if (rv < 0 || rv == sizeof(sg_major_minor))
 		return -1;
 	else
 		sg_major_minor[rv - 1] = '\0';

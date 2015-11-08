@@ -180,6 +180,8 @@ extern __off64_t lseek64 __P ((int __fd, __off64_t __offset, int __whence));
 
 #define ARRAY_SIZE(x) (sizeof(x)/sizeof(x[0]))
 
+extern const char Name[];
+
 /* general information that might be extracted from a superblock */
 struct mdinfo {
 	mdu_array_info_t	array;
@@ -261,8 +263,6 @@ struct createinfo {
 	int	bblist;
 	struct supertype *supertype;
 };
-
-#define Name "mdadm"
 
 enum mode {
 	ASSEMBLE=1,
@@ -453,7 +453,6 @@ typedef struct mapping {
 } mapping_t;
 
 struct mdstat_ent {
-	char		*dev;
 	char		devnm[32];
 	int		active;
 	char		*level;
@@ -491,18 +490,8 @@ extern int map_update(struct map_ent **mpp, char *devnm, char *metadata,
 		      int uuid[4], char *path);
 extern void map_remove(struct map_ent **map, char *devnm);
 extern struct map_ent *map_by_uuid(struct map_ent **map, int uuid[4]);
-#ifdef MDASSEMBLE
-static inline struct map_ent *map_by_devnm(struct map_ent **map, char *name)
-{
-	return NULL;
-}
-static inline void map_free(struct map_ent *map)
-{
-}
-#else
 extern struct map_ent *map_by_devnm(struct map_ent **map, char *devnm);
 extern void map_free(struct map_ent *map);
-#endif
 extern struct map_ent *map_by_name(struct map_ent **map, char *name);
 extern void map_read(struct map_ent **melp);
 extern int map_write(struct map_ent *mel);
@@ -1440,9 +1429,13 @@ static inline char *to_subarray(struct mdstat_ent *ent, char *container)
 
 #ifdef DEBUG
 #define dprintf(fmt, arg...) \
+	fprintf(stderr, "%s: %s: "fmt, Name, __func__, ##arg)
+#define dprintf_cont(fmt, arg...) \
 	fprintf(stderr, fmt, ##arg)
 #else
 #define dprintf(fmt, arg...) \
+        ({ if (0) fprintf(stderr, "%s: %s: " fmt, Name, __func__, ##arg); 0; })
+#define dprintf_cont(fmt, arg...) \
         ({ if (0) fprintf(stderr, fmt, ##arg); 0; })
 #endif
 #include <assert.h>
@@ -1457,7 +1450,11 @@ static inline int xasprintf(char **strp, const char *fmt, ...) {
 	return ret;
 }
 
-#define pr_err(fmt ...) fprintf(stderr, Name ": " fmt)
+#ifdef DEBUG
+#define pr_err(fmt, args...) fprintf(stderr, "%s: %s: "fmt, Name, __func__, ##args)
+#else
+#define pr_err(fmt, args...) fprintf(stderr, "%s: "fmt, Name, ##args)
+#endif
 #define cont_err(fmt ...) fprintf(stderr, "       " fmt)
 
 void *xmalloc(size_t len);

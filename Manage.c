@@ -211,15 +211,11 @@ int Manage_stop(char *devname, int fd, int verbose, int will_retry)
 	if (md_get_version(fd) < 9000) {
 		if (ioctl(fd, STOP_MD, 0) == 0)
 			return 0;
-		pr_err("stopping device %s "
-		       "failed: %s\n",
+		pr_err("stopping device %s failed: %s\n",
 		       devname, strerror(errno));
 		return 1;
 	}
 
-	/* If this is an mdmon managed array, just write 'inactive'
-	 * to the array state and let mdmon clear up.
-	 */
 	strcpy(devnm, fd2devnm(fd));
 	/* Get EXCL access first.  If this fails, then attempting
 	 * to stop is probably a bad idea.
@@ -236,13 +232,17 @@ int Manage_stop(char *devname, int fd, int verbose, int will_retry)
 		container[0] = 0;
 	close(fd);
 	count = 5;
-	while (((fd = ((devnm[0] == '/')
+	while (((fd = ((devname[0] == '/')
 		       ?open(devname, O_RDONLY|O_EXCL)
 		       :open_dev_flags(devnm, O_RDONLY|O_EXCL))) < 0
 		|| strcmp(fd2devnm(fd), devnm) != 0)
 	       && container[0]
 	       && mdmon_running(container)
 	       && count) {
+		/* Can't open, so something might be wrong.  However it
+		 * is a container, so we might be racing with mdmon, so
+		 * retry for a bit.
+		 */
 		if (fd >= 0)
 			close(fd);
 		flush_mdmon(container);
@@ -252,13 +252,13 @@ int Manage_stop(char *devname, int fd, int verbose, int will_retry)
 		if (fd >= 0)
 			close(fd);
 		if (verbose >= 0)
-			pr_err("Cannot get exclusive access to %s:"
-			       "Perhaps a running "
-			       "process, mounted filesystem "
-			       "or active volume group?\n",
+			pr_err("Cannot get exclusive access to %s:Perhaps a running process, mounted filesystem or active volume group?\n",
 			       devname);
 		return 1;
 	}
+	/* If this is an mdmon managed array, just write 'inactive'
+	 * to the array state and let mdmon clear up.
+	 */
 	if (mdi &&
 	    mdi->array.level > 0 &&
 	    is_subarray(mdi->text_version)) {
@@ -266,7 +266,7 @@ int Manage_stop(char *devname, int fd, int verbose, int will_retry)
 		/* This is mdmon managed. */
 		close(fd);
 
-		/* As we have an O_EXCL open, any use of the device
+		/* As we had an O_EXCL open, any use of the device
 		 * which blocks STOP_ARRAY is probably a transient use,
 		 * so it is reasonable to retry for a while - 5 seconds.
 		 */
@@ -293,8 +293,7 @@ int Manage_stop(char *devname, int fd, int verbose, int will_retry)
 		fd = open_dev_excl(devnm);
 		if (fd < 0) {
 			if (verbose >= 0)
-				pr_err("failed to completely stop %s"
-				       ": Device is busy\n",
+				pr_err("failed to completely stop %s: Device is busy\n",
 				       devname);
 			rv = 1;
 			goto out;
@@ -320,9 +319,8 @@ int Manage_stop(char *devname, int fd, int verbose, int will_retry)
 			    metadata_container_matches(m->metadata_version+9,
 						       devnm)) {
 				if (verbose >= 0)
-					pr_err("Cannot stop container %s: "
-					       "member %s still active\n",
-					       devname, m->dev);
+					pr_err("Cannot stop container %s: member %s still active\n",
+					       devname, m->devnm);
 				free_mdstat(mds);
 				rv = 1;
 				goto out;
@@ -346,9 +344,7 @@ int Manage_stop(char *devname, int fd, int verbose, int will_retry)
 	    sysfs_attribute_available(mdi, NULL, "reshape_direction") &&
 	    sysfs_get_str(mdi, NULL, "sync_action", buf, 20) > 0 &&
 	    strcmp(buf, "reshape\n") == 0 &&
-	    sysfs_get_two(mdi, NULL, "raid_disks", &rd1, &rd2) == 2 &&
-	    sysfs_set_str(mdi, NULL, "sync_action", "frozen") == 0) {
-		/* Array is frozen */
+	    sysfs_get_two(mdi, NULL, "raid_disks", &rd1, &rd2) == 2) {
 		unsigned long long position, curr;
 		unsigned long long chunk1, chunk2;
 		unsigned long long rddiv, chunkdiv;
@@ -359,12 +355,28 @@ int Manage_stop(char *devname, int fd, int verbose, int will_retry)
 		int delay;
 		int scfd;
 
+		delay = 40;
+		while (rd1 > rd2 && delay > 0 &&
+		       sysfs_get_ll(mdi, NULL, "sync_max", &old_sync_max) == 0) {
+			/* must be in the critical section - wait a bit */
+			delay -= 1;
+			usleep(100000);
+		}
+
+		if (sysfs_set_str(mdi, NULL, "sync_action", "frozen") != 0)
+			goto done;
+		/* Array is frozen */
+
 		rd1 -= mdi->array.level == 6 ? 2 : 1;
 		rd2 -= mdi->array.level == 6 ? 2 : 1;
 		sysfs_get_str(mdi, NULL, "reshape_direction", buf, sizeof(buf));
 		if (strncmp(buf, "back", 4) == 0)
 			backwards = 1;
-		sysfs_get_ll(mdi, NULL, "reshape_position", &position);
+		if (sysfs_get_ll(mdi, NULL, "reshape_position", &position) != 0) {
+			/* reshape must have finished now */
+			sysfs_set_str(mdi, NULL, "sync_action", "idle");
+			goto done;
+		}
 		sysfs_get_two(mdi, NULL, "chunk_size", &chunk1, &chunk2);
 		chunk1 /= 512;
 		chunk2 /= 512;
@@ -381,9 +393,20 @@ int Manage_stop(char *devname, int fd, int verbose, int will_retry)
 			size &= ~(chunk1-1);
 			size &= ~(chunk2-1);
 			/* rd1 must be smaller */
+			/* Reshape may have progressed further backwards than
+			 * recorded, so target even further back (hence "-1")
+			 */
 			position = (position / sectors - 1) * sectors;
+			/* rd1 is always the conversion factor between 'sync'
+			 * position and 'reshape' position.
+			 * We read 1 "new" stripe worth of data from where-ever,
+			 * and when write out that full stripe.
+			 */
 			sync_max = size - position/rd1;
 		} else {
+			/* Reshape will very likely be beyond position, and it may
+			 * be too late to stop at '+1', so aim for '+2'
+			 */
 			position = (position / sectors + 2) * sectors;
 			sync_max = position/rd1;
 		}
@@ -406,6 +429,7 @@ int Manage_stop(char *devname, int fd, int verbose, int will_retry)
 		delay = 3000;
 		scfd = sysfs_open(mdi->sys_name, NULL, "sync_completed");
 		while (scfd >= 0 && delay > 0 && old_sync_max > 0) {
+			unsigned long long max_completed;
 			sysfs_get_ll(mdi, NULL, "reshape_position", &curr);
 			sysfs_fd_get_str(scfd, buf, sizeof(buf));
 			if (strncmp(buf, "none", 4) == 0) {
@@ -419,7 +443,10 @@ int Manage_stop(char *devname, int fd, int verbose, int will_retry)
 					break;
 			}
 
-			if (sysfs_fd_get_ll(scfd, &completed) == 0 &&
+			if (sysfs_fd_get_two(scfd, &completed,
+					     &max_completed) == 2 &&
+			    /* 'completed' sometimes reads as max-uulong */
+			    completed < max_completed &&
 			    (completed > sync_max ||
 			     (completed == sync_max && curr != position))) {
 				while (completed > sync_max) {
@@ -443,6 +470,7 @@ int Manage_stop(char *devname, int fd, int verbose, int will_retry)
 			close(scfd);
 
 	}
+done:
 
 	/* As we have an O_EXCL open, any use of the device
 	 * which blocks STOP_ARRAY is probably a transient use,
@@ -460,9 +488,7 @@ int Manage_stop(char *devname, int fd, int verbose, int will_retry)
 			pr_err("failed to stop array %s: %s\n",
 			       devname, strerror(errno));
 			if (errno == EBUSY)
-				cont_err("Perhaps a running "
-					 "process, mounted filesystem "
-					 "or active volume group?\n");
+				cont_err("Perhaps a running process, mounted filesystem or active volume group?\n");
 		}
 		rv = 1;
 		goto out;
@@ -652,8 +678,7 @@ int attempt_re_add(int fd, int tfd, struct mddev_dev *dv,
 			int rv = -1;
 			tfd = dev_open(dv->devname, O_RDWR);
 			if (tfd < 0) {
-				pr_err("failed to open %s for"
-				       " superblock update during re-add\n", dv->devname);
+				pr_err("failed to open %s for superblock update during re-add\n", dv->devname);
 				return -1;
 			}
 
@@ -673,8 +698,7 @@ int attempt_re_add(int fd, int tfd, struct mddev_dev *dv,
 				rv = dev_st->ss->store_super(dev_st, tfd);
 			close(tfd);
 			if (rv != 0) {
-				pr_err("failed to update"
-				       " superblock during re-add\n");
+				pr_err("failed to update superblock during re-add\n");
 				return -1;
 			}
 		}
@@ -717,17 +741,13 @@ int Manage_add(int fd, int tfd, struct mddev_dev *dv,
 	if (tst->ss == &super0 && ldsize > 4ULL*1024*1024*1024*1024) {
 		/* More than 4TB is wasted on v0.90 */
 		if (!force) {
-			pr_err("%s is larger than %s can "
-			       "effectively use.\n"
-			       "       Add --force is you "
-			       "really want to add this device.\n",
+			pr_err("%s is larger than %s can effectively use.\n"
+			       "       Add --force is you really want to add this device.\n",
 			       dv->devname, devname);
 			return -1;
 		}
-		pr_err("%s is larger than %s can "
-		       "effectively use.\n"
-		       "       Adding anyway as --force "
-		       "was given.\n",
+		pr_err("%s is larger than %s can effectively use.\n"
+		       "       Adding anyway as --force was given.\n",
 		       dv->devname, devname);
 	}
 	if (!tst->ss->external &&
@@ -795,7 +815,8 @@ int Manage_add(int fd, int tfd, struct mddev_dev *dv,
 		}
 
 		/* Make sure device is large enough */
-		if (tst->ss->avail_size(tst, ldsize/512, INVALID_SECTORS) <
+		if (tst->sb &&
+		    tst->ss->avail_size(tst, ldsize/512, INVALID_SECTORS) <
 		    array_size) {
 			if (dv->disposition == 'M')
 				return 0;
@@ -841,7 +862,7 @@ int Manage_add(int fd, int tfd, struct mddev_dev *dv,
 			int d;
 			int found = 0;
 
-			for (d = 0; d < MAX_DISKS && found < array->active_disks; d++) {
+			for (d = 0; d < MAX_DISKS && found < array->nr_disks; d++) {
 				disc.number = d;
 				if (ioctl(fd, GET_DISK_INFO, &disc))
 					continue;
@@ -949,8 +970,7 @@ int Manage_add(int fd, int tfd, struct mddev_dev *dv,
 
 		container_fd = open_dev_excl(devnm);
 		if (container_fd < 0) {
-			pr_err("add failed for %s:"
-			       " could not get exclusive access to container\n",
+			pr_err("add failed for %s: could not get exclusive access to container\n",
 			       dv->devname);
 			tst->ss->free_super(tst);
 			return -1;
@@ -989,8 +1009,7 @@ int Manage_add(int fd, int tfd, struct mddev_dev *dv,
 		 * would block add_disk */
 		tst->ss->free_super(tst);
 		if (sysfs_add_disk(sra, &new_mdi, 0) != 0) {
-			pr_err("add new device to external metadata"
-			       " failed for %s\n", dv->devname);
+			pr_err("add new device to external metadata failed for %s\n", dv->devname);
 			close(container_fd);
 			sysfs_free(sra);
 			return -1;
@@ -1032,8 +1051,7 @@ int Manage_remove(struct supertype *tst, int fd, struct mddev_dev *dv,
 		strcpy(devnm, fd2devnm(fd));
 		lfd = open_dev_excl(devnm);
 		if (lfd < 0) {
-			pr_err("Cannot get exclusive access "
-			       " to container - odd\n");
+			pr_err("Cannot get exclusive access  to container - odd\n");
 			return -1;
 		}
 		/* We may not be able to check on holders in
@@ -1093,8 +1111,7 @@ int Manage_remove(struct supertype *tst, int fd, struct mddev_dev *dv,
 		}
 	}
 	if (err) {
-		pr_err("hot remove failed "
-		       "for %s: %s\n",	dv->devname,
+		pr_err("hot remove failed for %s: %s\n",	dv->devname,
 		       strerror(errno));
 		if (lfd >= 0)
 			close(lfd);
@@ -1304,8 +1321,7 @@ int Manage_subdevs(char *devname, int fd,
 		    strcmp(dv->devname, "faulty") == 0) {
 			if (dv->disposition != 'A'
 			    && dv->disposition != 'r') {
-				pr_err("%s only meaningful "
-					"with -r or --re-add, not -%c\n",
+				pr_err("%s only meaningful with -r or --re-add, not -%c\n",
 					dv->devname, dv->disposition);
 				goto abort;
 			}
@@ -1315,8 +1331,7 @@ int Manage_subdevs(char *devname, int fd,
 		}
 		if (strcmp(dv->devname, "detached") == 0) {
 			if (dv->disposition != 'r' && dv->disposition != 'f') {
-				pr_err("%s only meaningful "
-					"with -r of -f, not -%c\n",
+				pr_err("%s only meaningful with -r of -f, not -%c\n",
 					dv->devname, dv->disposition);
 				goto abort;
 			}
@@ -1328,8 +1343,7 @@ int Manage_subdevs(char *devname, int fd,
 			struct mddev_dev *add_devlist = NULL;
 			struct mddev_dev **dp;
 			if (dv->disposition != 'A') {
-				pr_err("'missing' only meaningful "
-				       "with --re-add\n");
+				pr_err("'missing' only meaningful with --re-add\n");
 				goto abort;
 			}
 			add_devlist = conf_get_devs();
@@ -1381,8 +1395,7 @@ int Manage_subdevs(char *devname, int fd,
 			int found = 0;
 			char dname[55];
 			if (dv->disposition != 'r' && dv->disposition != 'f') {
-				pr_err("%s only meaningful "
-					"with -r or -f, not -%c\n",
+				pr_err("%s only meaningful with -r or -f, not -%c\n",
 					dv->devname, dv->disposition);
 				goto abort;
 			}
@@ -1402,8 +1415,7 @@ int Manage_subdevs(char *devname, int fd,
 			if (!found) {
 				sysfd = sysfs_open(fd2devnm(fd), dname, "state");
 				if (sysfd < 0) {
-					pr_err("%s does not appear "
-						"to be a component of %s\n",
+					pr_err("%s does not appear to be a component of %s\n",
 						dv->devname, devname);
 					goto abort;
 				}
@@ -1462,9 +1474,7 @@ int Manage_subdevs(char *devname, int fd,
 		case 'F': /* --re-add faulty  */
 			/* add the device */
 			if (subarray) {
-				pr_err("Cannot add disks to a"
-					" \'member\' array, perform this"
-					" operation on the parent container\n");
+				pr_err("Cannot add disks to a \'member\' array, perform this operation on the parent container\n");
 				goto abort;
 			}
 			if (dv->disposition == 'F')
@@ -1507,9 +1517,7 @@ int Manage_subdevs(char *devname, int fd,
 		case 'r':
 			/* hot remove */
 			if (subarray) {
-				pr_err("Cannot remove disks from a"
-					" \'member\' array, perform this"
-					" operation on the parent container\n");
+				pr_err("Cannot remove disks from a \'member\' array, perform this operation on the parent container\n");
 				rv = -1;
 			} else
 				rv = Manage_remove(tst, fd, dv, sysfd,
@@ -1547,9 +1555,7 @@ int Manage_subdevs(char *devname, int fd,
 			break;
 		case 'R': /* Mark as replaceable */
 			if (subarray) {
-				pr_err("Cannot replace disks in a"
-					" \'member\' array, perform this"
-					" operation on the parent container\n");
+				pr_err("Cannot replace disks in a \'member\' array, perform this operation on the parent container\n");
 				rv = -1;
 			} else {
 				if (!frozen) {

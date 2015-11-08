@@ -38,6 +38,7 @@ static int misc_list(struct mddev_dev *devlist,
 		     struct mddev_ident *ident,
 		     char *dump_directory,
 		     struct supertype *ss, struct context *c);
+const char Name[] = "mdadm";
 
 int main(int argc, char *argv[])
 {
@@ -336,13 +337,11 @@ int main(int argc, char *argv[])
 			}
 
 			if (devs_found > 0 && mode == MANAGE && !devmode) {
-				pr_err("Must give one of -a/-r/-f"
-					" for subsequent devices at %s\n", optarg);
+				pr_err("Must give one of -a/-r/-f for subsequent devices at %s\n", optarg);
 				exit(2);
 			}
 			if (devs_found > 0 && mode == GROW && !devmode) {
-				pr_err("Must give -a/--add for"
-				       " devices to add: %s\n", optarg);
+				pr_err("Must give -a/--add for devices to add: %s\n", optarg);
 				exit(2);
 			}
 			dv = xmalloc(sizeof(*dv));
@@ -369,8 +368,7 @@ int main(int argc, char *argv[])
 		case O(BUILD,'c'): /* chunk or rounding */
 		case O(BUILD,ChunkSize): /* chunk or rounding */
 			if (s.chunk) {
-				pr_err("chunk/rounding may only be specified once. "
-					"Second value is %s.\n", optarg);
+				pr_err("chunk/rounding may only be specified once. Second value is %s.\n", optarg);
 				exit(2);
 			}
 			s.chunk = parse_size(optarg);
@@ -420,8 +418,7 @@ int main(int argc, char *argv[])
 		case O(CREATE,'z'):
 		case O(BUILD,'z'): /* size */
 			if (s.size > 0) {
-				pr_err("size may only be specified once. "
-					"Second value is %s.\n", optarg);
+				pr_err("size may only be specified once. Second value is %s.\n", optarg);
 				exit(2);
 			}
 			if (strcmp(optarg, "max")==0)
@@ -441,8 +438,7 @@ int main(int argc, char *argv[])
 
 		case O(GROW,'Z'): /* array size */
 			if (array_size > 0) {
-				pr_err("array-size may only be specified once. "
-					"Second value is %s.\n", optarg);
+				pr_err("array-size may only be specified once. Second value is %s.\n", optarg);
 				exit(2);
 			}
 			if (strcmp(optarg, "max") == 0)
@@ -461,8 +457,7 @@ int main(int argc, char *argv[])
 		case O(CREATE,DataOffset):
 		case O(GROW,DataOffset):
 			if (data_offset != INVALID_SECTORS) {
-				pr_err("data-offset may only be specified one. "
-					"Second value is %s.\n", optarg);
+				pr_err("data-offset may only be specified one. Second value is %s.\n", optarg);
 				exit(2);
 			}
 			if (mode == CREATE &&
@@ -481,8 +476,7 @@ int main(int argc, char *argv[])
 		case O(CREATE,'l'):
 		case O(BUILD,'l'): /* set raid level*/
 			if (s.level != UnSet) {
-				pr_err("raid level may only be set once.  "
-					"Second value is %s.\n", optarg);
+				pr_err("raid level may only be set once.  Second value is %s.\n", optarg);
 				exit(2);
 			}
 			s.level = map_name(pers, optarg);
@@ -510,8 +504,7 @@ int main(int argc, char *argv[])
 		case O(GROW, 'p'): /* new layout */
 		case O(GROW, Layout):
 			if (s.layout_str) {
-				pr_err("layout may only be sent once.  "
-				       "Second value was %s\n", optarg);
+				pr_err("layout may only be sent once.  Second value was %s\n", optarg);
 				exit(2);
 			}
 			s.layout_str = optarg;
@@ -523,8 +516,7 @@ int main(int argc, char *argv[])
 		case O(BUILD,'p'): /* faulty layout */
 		case O(BUILD,Layout):
 			if (s.layout != UnSet) {
-				pr_err("layout may only be sent once.  "
-				       "Second value was %s\n", optarg);
+				pr_err("layout may only be sent once.  Second value was %s\n", optarg);
 				exit(2);
 			}
 			switch(s.level) {
@@ -655,8 +647,7 @@ int main(int argc, char *argv[])
 		case O(CREATE,'u'): /* uuid of array */
 		case O(ASSEMBLE,'u'): /* uuid of array */
 			if (ident.uuid_set) {
-				pr_err("uuid cannot be set twice.  "
-					"Second value %s.\n", optarg);
+				pr_err("uuid cannot be set twice.  Second value %s.\n", optarg);
 				exit(2);
 			}
 			if (parse_uuid(optarg, ident.uuid))
@@ -671,8 +662,7 @@ int main(int argc, char *argv[])
 		case O(ASSEMBLE,'N'):
 		case O(MISC,'N'):
 			if (ident.name[0]) {
-				pr_err("name cannot be set twice.   "
-					"Second value %s.\n", optarg);
+				pr_err("name cannot be set twice.   Second value %s.\n", optarg);
 				exit(2);
 			}
 			if (mode == MISC && !c.subarray) {
@@ -690,8 +680,7 @@ int main(int argc, char *argv[])
 		case O(ASSEMBLE,'m'): /* super-minor for array */
 		case O(ASSEMBLE,SuperMinor):
 			if (ident.super_minor != UnSet) {
-				pr_err("super-minor cannot be set twice.  "
-					"Second value: %s.\n", optarg);
+				pr_err("super-minor cannot be set twice.  Second value: %s.\n", optarg);
 				exit(2);
 			}
 			if (strcmp(optarg, "dev")==0)
@@ -714,14 +703,12 @@ int main(int argc, char *argv[])
 		case O(ASSEMBLE,'U'): /* update the superblock */
 		case O(MISC,'U'):
 			if (c.update) {
-				pr_err("Can only update one aspect"
-					" of superblock, both %s and %s given.\n",
+				pr_err("Can only update one aspect of superblock, both %s and %s given.\n",
 					c.update, optarg);
 				exit(2);
 			}
 			if (mode == MISC && !c.subarray) {
-				pr_err("Only subarrays can be"
-					" updated in misc mode\n");
+				pr_err("Only subarrays can be updated in misc mode\n");
 				exit(2);
 			}
 			c.update = optarg;
@@ -753,16 +740,14 @@ int main(int argc, char *argv[])
 				continue;
 			if (strcmp(c.update, "byteorder")==0) {
 				if (ss) {
-					pr_err("must not set metadata"
-					       " type with --update=byteorder.\n");
+					pr_err("must not set metadata type with --update=byteorder.\n");
 					exit(2);
 				}
 				for(i=0; !ss && superlist[i]; i++)
 					ss = superlist[i]->match_metadata_desc(
 						"0.swap");
 				if (!ss) {
-					pr_err("INTERNAL ERROR"
-						" cannot find 0.swap\n");
+					pr_err("INTERNAL ERROR cannot find 0.swap\n");
 					exit(2);
 				}
 
@@ -771,29 +756,29 @@ int main(int argc, char *argv[])
 			if (strcmp(c.update,"?") == 0 ||
 			    strcmp(c.update, "help") == 0) {
 				outf = stdout;
-				fprintf(outf, Name ": ");
+				fprintf(outf, "%s: ", Name);
 			} else {
 				outf = stderr;
 				fprintf(outf,
-					Name ": '--update=%s' is invalid.  ",
-					c.update);
+					"%s: '--update=%s' is invalid.  ",
+					Name, c.update);
 			}
 			fprintf(outf, "Valid --update options are:\n"
 		"     'sparc2.2', 'super-minor', 'uuid', 'name', 'resync',\n"
 		"     'summaries', 'homehost', 'byteorder', 'devicesize',\n"
-		"     'no-bitmap', 'metadata', 'revert-reshape'\n");
+		"     'no-bitmap', 'metadata', 'revert-reshape'\n"
+		"     'bbl', 'no-bbl'\n"
+				);
 			exit(outf == stdout ? 0 : 2);
 
 		case O(MANAGE,'U'):
 			/* update=devicesize is allowed with --re-add */
 			if (devmode != 'A') {
-				pr_err("--update in Manage mode only"
-					" allowed with --re-add.\n");
+				pr_err("--update in Manage mode only allowed with --re-add.\n");
 				exit(1);
 			}
 			if (c.update) {
-				pr_err("Can only update one aspect"
-					" of superblock, both %s and %s given.\n",
+				pr_err("Can only update one aspect of superblock, both %s and %s given.\n",
 					c.update, optarg);
 				exit(2);
 			}
@@ -801,8 +786,7 @@ int main(int argc, char *argv[])
 			if (strcmp(c.update, "devicesize") != 0 &&
 			    strcmp(c.update, "bbl") != 0 &&
 			    strcmp(c.update, "no-bbl") != 0) {
-				pr_err("only 'devicesize', 'bbl' and 'no-bbl' can be"
-					" updated with --re-add\n");
+				pr_err("only 'devicesize', 'bbl' and 'no-bbl' can be updated with --re-add\n");
 				exit(2);
 			}
 			continue;
@@ -824,8 +808,7 @@ int main(int argc, char *argv[])
 		case O(MONITOR,ConfigFile):
 		case O(CREATE,ConfigFile):
 			if (configfile) {
-				pr_err("configfile cannot be set twice.  "
-					"Second value is %s.\n", optarg);
+				pr_err("configfile cannot be set twice.  Second value is %s.\n", optarg);
 				exit(2);
 			}
 			configfile = optarg;
@@ -991,8 +974,7 @@ int main(int argc, char *argv[])
 		case O(MISC ,Action):
 			if (opt == KillSubarray || opt == UpdateSubarray) {
 				if (c.subarray) {
-					pr_err("subarray can only"
-						" be specified once\n");
+					pr_err("subarray can only be specified once\n");
 					exit(2);
 				}
 				c.subarray = optarg;
@@ -1039,12 +1021,10 @@ int main(int argc, char *argv[])
 			continue;
 		case O(MISC, UdevRules):
 			if (devmode && devmode != opt) {
-				pr_err("--udev-rules must"
-				       " be the only option.\n");
+				pr_err("--udev-rules must be the only option.\n");
 			} else {
 				if (udev_filename)
-					pr_err("only specify one udev "
-						"rule filename. %s ignored.\n",
+					pr_err("only specify one udev rule filename. %s ignored.\n",
 						optarg);
 				else
 					udev_filename = optarg;
@@ -1236,15 +1216,13 @@ int main(int argc, char *argv[])
 			/* non-existent device is OK */
 			mdfd = open_mddev(devlist->devname, 0);
 		if (mdfd == -2) {
-			pr_err("device %s exists but is not an "
-				"md array.\n", devlist->devname);
+			pr_err("device %s exists but is not an md array.\n", devlist->devname);
 			exit(1);
 		}
 		if ((int)ident.super_minor == -2) {
 			struct stat stb;
 			if (mdfd < 0) {
-				pr_err("--super-minor=dev given, and "
-					"listed device %s doesn't exist.\n",
+				pr_err("--super-minor=dev given, and listed device %s doesn't exist.\n",
 					devlist->devname);
 				exit(1);
 			}
@@ -1269,7 +1247,7 @@ int main(int argc, char *argv[])
 		}
 	}
 
-	if (c.homehost == NULL)
+	if (c.homehost == NULL && c.require_homehost)
 		c.homehost = conf_get_homehost(&c.require_homehost);
 	if (c.homehost == NULL || strcasecmp(c.homehost, "<system>")==0) {
 		if (gethostname(sys_hostname, sizeof(sys_hostname)) == 0) {
@@ -1482,8 +1460,7 @@ int main(int argc, char *argv[])
 			struct mdinfo sra;
 			int err;
 			if (s.raiddisks || s.level != UnSet) {
-				pr_err("cannot change array size in same operation "
-					"as changing raiddisks or level.\n"
+				pr_err("cannot change array size in same operation as changing raiddisks or level.\n"
 					"    Change size first, then check that data is still intact.\n");
 				rv = 1;
 				break;
@@ -1495,11 +1472,9 @@ int main(int argc, char *argv[])
 				err = sysfs_set_num(&sra, NULL, "array_size", array_size / 2);
 			if (err < 0) {
 				if (errno == E2BIG)
-					pr_err("--array-size setting"
-						" is too large.\n");
+					pr_err("--array-size setting is too large.\n");
 				else
-					pr_err("current kernel does"
-						" not support setting --array-size\n");
+					pr_err("current kernel does not support setting --array-size\n");
 				rv = 1;
 				break;
 			}
@@ -1507,8 +1482,7 @@ int main(int argc, char *argv[])
 		if (devs_found > 1 && s.raiddisks == 0 && s.level == UnSet) {
 			/* must be '-a'. */
 			if (s.size > 0 || s.chunk || s.layout_str != NULL || s.bitmap_file) {
-				pr_err("--add cannot be used with "
-					"other geometry changes in --grow mode\n");
+				pr_err("--add cannot be used with other geometry changes in --grow mode\n");
 				rv = 1;
 				break;
 			}
@@ -1521,9 +1495,7 @@ int main(int argc, char *argv[])
 		} else if (s.bitmap_file) {
 			if (s.size > 0 || s.raiddisks || s.chunk ||
 			    s.layout_str != NULL || devs_found > 1) {
-				pr_err("--bitmap changes cannot be "
-					"used with other geometry changes "
-					"in --grow mode\n");
+				pr_err("--bitmap changes cannot be used with other geometry changes in --grow mode\n");
 				rv = 1;
 				break;
 			}
@@ -1600,8 +1572,7 @@ static int scan_assemble(struct supertype *ss,
 	int failures, successes;
 
 	if (conf_verify_devnames(array_list)) {
-		pr_err("Duplicate MD device names in "
-		       "conf file were found.\n");
+		pr_err("Duplicate MD device names in conf file were found.\n");
 		return 1;
 	}
 	if (devlist == NULL) {
@@ -1614,9 +1585,7 @@ static int scan_assemble(struct supertype *ss,
 			a->autof = c->autof;
 	}
 	if (map_lock(&map))
-		pr_err("%s: failed to get "
-		       "exclusive lock on mapfile\n",
-		       __func__);
+		pr_err("failed to get exclusive lock on mapfile\n");
 	do {
 		failures = 0;
 		successes = 0;
@@ -1706,7 +1675,7 @@ static int misc_scan(char devmode, struct context *c)
 
 			if (!name) {
 				pr_err("cannot find device file for %s\n",
-					e->dev);
+					e->devnm);
 				continue;
 			}
 			if (devmode == 'D')
@@ -1741,7 +1710,7 @@ static int stop_scan(int verbose)
 
 			if (!name) {
 				pr_err("cannot find device file for %s\n",
-					e->dev);
+					e->devnm);
 				continue;
 			}
 			mdfd = open_mddev(name, 1);

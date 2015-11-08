@@ -310,15 +310,11 @@ static int check_one_sharer(int scan)
 		rv = stat(dir, &buf);
 		if (rv != -1) {
 			if (scan) {
-				pr_err("Only one "
-					"autorebuild process allowed"
-					" in scan mode, aborting\n");
+				pr_err("Only one autorebuild process allowed in scan mode, aborting\n");
 				fclose(fp);
 				return 1;
 			} else {
-				pr_err("Warning: One"
-					" autorebuild process already"
-					" running.\n");
+				pr_err("Warning: One autorebuild process already running.\n");
 			}
 		}
 		fclose(fp);
@@ -326,14 +322,11 @@ static int check_one_sharer(int scan)
 	if (scan) {
 		if (mkdir(MDMON_DIR, S_IRWXU) < 0 &&
 		    errno != EEXIST) {
-			pr_err("Can't create "
-				"autorebuild.pid file\n");
+			pr_err("Can't create autorebuild.pid file\n");
 		} else {
 			fp = fopen(path, "w");
 			if (!fp)
-				pr_err("Cannot create"
-					" autorebuild.pid"
-					"file\n");
+				pr_err("Cannot create autorebuild.pidfile\n");
 			else {
 				pid = getpid();
 				fprintf(fp, "%d\n", pid);
@@ -381,24 +374,21 @@ static void alert(char *event, char *dev, char *disc, struct alert_info *info)
 			if (info->mailfrom)
 				fprintf(mp, "From: %s\n", info->mailfrom);
 			else
-				fprintf(mp, "From: " Name " monitoring <root>\n");
+				fprintf(mp, "From: %s monitoring <root>\n", Name);
 			fprintf(mp, "To: %s\n", info->mailaddr);
 			fprintf(mp, "Subject: %s event on %s:%s\n\n",
 				event, dev, hname);
 
 			fprintf(mp,
-				"This is an automatically generated"
-				" mail message from " Name "\n");
+				"This is an automatically generated mail message from %s\n", Name);
 			fprintf(mp, "running on %s\n\n", hname);
 
 			fprintf(mp,
-				"A %s event had been detected on"
-				" md device %s.\n\n", event, dev);
+				"A %s event had been detected on md device %s.\n\n", event, dev);
 
 			if (disc && disc[0] != ' ')
 				fprintf(mp,
-					"It could be related to"
-					" component device %s.\n\n", disc);
+					"It could be related to component device %s.\n\n", disc);
 			if (disc && disc[0] == ' ')
 				fprintf(mp, "Extra information:%s.\n\n", disc);
 
@@ -409,8 +399,7 @@ static void alert(char *event, char *dev, char *disc, struct alert_info *info)
 				char buf[8192];
 				int n;
 				fprintf(mp,
-					"\nP.S. The /proc/mdstat file"
-					" currently contains the following:\n\n");
+					"\nP.S. The /proc/mdstat file currently contains the following:\n\n");
 				while ( (n=fread(buf, 1, sizeof(buf), mdstat)) > 0)
 					n=fwrite(buf, 1, n, mp);
 				fclose(mdstat);
@@ -437,10 +426,13 @@ static void alert(char *event, char *dev, char *disc, struct alert_info *info)
 		else
 			priority = LOG_INFO;
 
-		if (disc)
+		if (disc && disc[0] != ' ')
 			syslog(priority,
-			       "%s event detected on md device %s,"
-			       " component device %s", event, dev, disc);
+			       "%s event detected on md device %s, component device %s", event, dev, disc);
+		else if (disc)
+			syslog(priority,
+			       "%s event detected on md device %s: %s",
+			       event, dev, disc);
 		else
 			syslog(priority,
 			       "%s event detected on md device %s",
@@ -460,7 +452,7 @@ static int check_array(struct state *st, struct mdstat_ent *mdstat,
 	mdu_array_info_t array;
 	struct mdstat_ent *mse = NULL, *mse2;
 	char *dev = st->devname;
-	int fd;
+	int fd = -1;
 	int i;
 	int remaining_disks;
 	int last_disk;
@@ -468,6 +460,33 @@ static int check_array(struct state *st, struct mdstat_ent *mdstat,
 
 	if (test)
 		alert("TestMessage", dev, NULL, ainfo);
+	if (st->devnm[0])
+		fd = open("/sys/block", O_RDONLY|O_DIRECTORY);
+	if (fd >= 0) {
+		/* Don't open the device unless it is present and
+		 * active in sysfs.
+		 */
+		char buf[10];
+		close(fd);
+		fd = sysfs_open(st->devnm, NULL, "array_state");
+		if (fd < 0 ||
+		    read(fd, buf, 10) < 5 ||
+		    strncmp(buf,"clear",5) == 0 ||
+		    strncmp(buf,"inact",5) == 0) {
+			if (fd >= 0)
+				close(fd);
+			fd = sysfs_open(st->devnm, NULL, "level");
+			if (fd < 0 || read(fd, buf, 10) != 0) {
+				if (fd >= 0)
+					close(fd);
+				if (!st->err)
+					alert("DeviceDisappeared", dev, NULL, ainfo);
+				st->err++;
+				return 0;
+			}
+		}
+		close(fd);
+	}
 	fd = open(dev, O_RDONLY);
 	if (fd < 0) {
 		if (!st->err)
@@ -488,7 +507,7 @@ static int check_array(struct state *st, struct mdstat_ent *mdstat,
 	 */
 	if (array.level == 0 || array.level == -1) {
 		if (!st->err && !st->from_config)
-			alert("DeviceDisappeared", dev, "Wrong-Level", ainfo);
+			alert("DeviceDisappeared", dev, " Wrong-Level", ainfo);
 		st->err++;
 		close(fd);
 		return 0;
@@ -668,6 +687,7 @@ static int add_new_arrays(struct mdstat_ent *mdstat, struct state **statelist,
 {
 	struct mdstat_ent *mse;
 	int new_found = 0;
+	char *name;
 
 	for (mse=mdstat; mse; mse=mse->next)
 		if (mse->devnm[0] &&
@@ -678,7 +698,14 @@ static int add_new_arrays(struct mdstat_ent *mdstat, struct state **statelist,
 			struct state *st = xcalloc(1, sizeof *st);
 			mdu_array_info_t array;
 			int fd;
-			st->devname = xstrdup(get_md_name(mse->devnm));
+
+			name = get_md_name(mse->devnm);
+			if (!name) {
+				free(st);
+				continue;
+			}
+
+			st->devname = xstrdup(name);
 			if ((fd = open(st->devname, O_RDONLY)) < 0 ||
 			    ioctl(fd, GET_ARRAY_INFO, &array)< 0) {
 				/* no such array */
@@ -966,6 +993,7 @@ int Wait(char *dev)
 	struct stat stb;
 	char devnm[32];
 	int rv = 1;
+	int frozen_remaining = 3;
 
 	if (stat(dev, &stb) != 0) {
 		pr_err("Cannot find %s: %s\n", dev,
@@ -982,7 +1010,7 @@ int Wait(char *dev)
 			if (strcmp(e->devnm, devnm) == 0)
 				break;
 
-		if (e->percent == RESYNC_NONE) {
+		if (e && e->percent == RESYNC_NONE) {
 			/* We could be in the brief pause before something
 			 * starts. /proc/mdstat doesn't show that, but
 			 * sync_action does.
@@ -992,8 +1020,15 @@ int Wait(char *dev)
 			sysfs_init(&mdi, -1, devnm);
 			if (sysfs_get_str(&mdi, NULL, "sync_action",
 					  buf, 20) > 0 &&
-			    strcmp(buf,"idle\n") != 0)
+			    strcmp(buf,"idle\n") != 0) {
 				e->percent = RESYNC_UNKNOWN;
+				if (strcmp(buf, "frozen\n") == 0) {
+					if (frozen_remaining == 0)
+						e->percent = RESYNC_NONE;
+					else
+						frozen_remaining -= 1;
+				}
+			}
 		}
 		if (!e || e->percent == RESYNC_NONE) {
 			if (e && e->metadata_version &&
@@ -1035,8 +1070,7 @@ int WaitClean(char *dev, int sock, int verbose)
 	mdi = sysfs_read(fd, devnm, GET_VERSION|GET_LEVEL|GET_SAFEMODE);
 	if (!mdi) {
 		if (verbose)
-			pr_err("Failed to read sysfs attributes for "
-			       "%s\n", dev);
+			pr_err("Failed to read sysfs attributes for %s\n", dev);
 		close(fd);
 		return 0;
 	}

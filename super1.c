@@ -197,8 +197,7 @@ static int aread(struct align_fd *afd, void *buf, int len)
 
 	if (!bsize || bsize > 4096 || len > 4096) {
 		if (!bsize)
-			fprintf(stderr, "WARNING - aread() called with "
-				"invalid block size\n");
+			fprintf(stderr, "WARNING - aread() called with invalid block size\n");
 		return -1;
 	}
 	b = ROUND_UP_PTR((char *)abuf, 4096);
@@ -230,8 +229,7 @@ static int awrite(struct align_fd *afd, void *buf, int len)
 	bsize = afd->blk_sz;
 	if (!bsize || bsize > 4096 || len > 4096) {
 		if (!bsize)
-			fprintf(stderr, "WARNING - awrite() called with "
-				"invalid block size\n");
+			fprintf(stderr, "WARNING - awrite() called with invalid block size\n");
 		return -1;
 	}
 	b = ROUND_UP_PTR((char *)abuf, 4096);
@@ -811,7 +809,7 @@ static int examine_badblocks_super1(struct supertype *st, int fd, char *devname)
 
 	size = __le32_to_cpu(sb->bblog_size)* 512;
 	if (posix_memalign((void**)&bbl, 4096, size) != 0) {
-		pr_err("%s could not allocate badblocks list\n", __func__);
+		pr_err("could not allocate badblocks list\n");
 		return 0;
 	}
 	offset = __le64_to_cpu(sb->super_offset) +
@@ -1245,12 +1243,8 @@ static int update_super1(struct supertype *st, struct mdinfo *info,
 		/* set data_size to device size less data_offset */
 		struct misc_dev_info *misc = (struct misc_dev_info*)
 			(st->sb + MAX_SB_SIZE + BM_SUPER_SIZE);
-		printf("Size was %llu\n", (unsigned long long)
-		       __le64_to_cpu(sb->data_size));
 		sb->data_size = __cpu_to_le64(
 			misc->device_size - __le64_to_cpu(sb->data_offset));
-		printf("Size is %llu\n", (unsigned long long)
-		       __le64_to_cpu(sb->data_size));
 	} else if (strcmp(update, "revert-reshape") == 0) {
 		rv = -2;
 		if (!(sb->feature_map & __cpu_to_le32(MD_FEATURE_RESHAPE_ACTIVE)))
@@ -1332,7 +1326,7 @@ static int init_super1(struct supertype *st, mdu_array_info_t *info,
 	int sbsize;
 
 	if (posix_memalign((void**)&sb, 4096, SUPER1_SIZE) != 0) {
-		pr_err("%s could not allocate superblock\n", __func__);
+		pr_err("could not allocate superblock\n");
 		return 0;
 	}
 	memset(sb, 0, SUPER1_SIZE);
@@ -1682,8 +1676,7 @@ static int write_init_super1(struct supertype *st)
 			}
 			break;
 		default:
-			pr_err("Failed to write invalid "
-			       "metadata format 1.%i to %s\n",
+			pr_err("Failed to write invalid metadata format 1.%i to %s\n",
 			       st->minor_version, di->devname);
 			rv = -EINVAL;
 			goto out;
@@ -1730,7 +1723,7 @@ static int compare_super1(struct supertype *st, struct supertype *tst)
 
 	if (!first) {
 		if (posix_memalign((void**)&first, 4096, SUPER1_SIZE) != 0) {
-			pr_err("%s could not allocate superblock\n", __func__);
+			pr_err("could not allocate superblock\n");
 			return 1;
 		}
 		memcpy(first, second, SUPER1_SIZE);
@@ -1841,8 +1834,7 @@ static int load_super1(struct supertype *st, int fd, char *devname)
 	}
 
 	if (posix_memalign((void**)&super, 4096, SUPER1_SIZE) != 0) {
-		pr_err("%s could not allocate superblock\n",
-			__func__);
+		pr_err("could not allocate superblock\n");
 		return 1;
 	}
 

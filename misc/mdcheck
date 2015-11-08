@@ -77,6 +77,7 @@ find /var/lib/mdcheck -name "MD_UUID*" -type f -mtime +180 -exec rm {} \;
 cnt=0
 for dev in /dev/md?*
 do
+	[ -e "$dev" ] || continue
 	sys=`sysname $dev`
 	if [ ! -f "$sys/md/sync_action" ]
 	then # cannot check this array
@@ -87,7 +88,7 @@ do
 		continue
 	fi
 
-	mdadm --detail --export "$dev" > $tmp || continue
+	mdadm --detail --export "$dev" | grep '^MD_UUID=' > $tmp || continue
 	source $tmp
 	fl="/var/lib/mdcheck/MD_UUID_$MD_UUID"
 	if [ -z "$cont" ]

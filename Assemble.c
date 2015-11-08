@@ -25,21 +25,27 @@
 #include	"mdadm.h"
 #include	<ctype.h>
 
-static int name_matches(char *found, char *required, char *homehost)
+static int name_matches(char *found, char *required, char *homehost, int require_homehost)
 {
 	/* See if the name found matches the required name, possibly
 	 * prefixed with 'homehost'
 	 */
-	char fnd[33];
+	char *sep;
+	unsigned int l;
 
-	strncpy(fnd, found, 32);
-	fnd[32] = 0;
 	if (strcmp(found, required)==0)
 		return 1;
-	if (homehost) {
-		int l = strlen(homehost);
-		if (l < 32 && fnd[l] == ':' &&
-		    strcmp(fnd+l+1, required)==0)
+	sep = strchr(found, ':');
+	if (!sep)
+		return 0;
+	l = sep - found;
+	if (strncmp(found, "any:", 4) == 0 ||
+	    (homehost && strcmp(homehost, "any") == 0) ||
+	    !require_homehost ||
+	    (homehost && strlen(homehost) == l &&
+	     strncmp(found, homehost, l) == 0)) {
+		/* matching homehost */
+		if (strcmp(sep+1, required) == 0)
 			return 1;
 	}
 	return 0;
@@ -73,7 +79,7 @@ static int is_member_busy(char *metadata_version)
 static int ident_matches(struct mddev_ident *ident,
 			 struct mdinfo *content,
 			 struct supertype *tst,
-			 char *homehost,
+			 char *homehost, int require_homehost,
 			 char *update, char *devname)
 {
 
@@ -85,7 +91,7 @@ static int ident_matches(struct mddev_ident *ident,
 		return 0;
 	}
 	if (ident->name[0] && (!update || strcmp(update, "name")!= 0) &&
-	    name_matches(content->name, ident->name, homehost)==0) {
+	    name_matches(content->name, ident->name, homehost, require_homehost)==0) {
 		if (devname)
 			pr_err("%s has wrong name.\n", devname);
 		return 0;
@@ -233,8 +239,7 @@ static int select_devices(struct mddev_dev *devlist,
 				   !conf_test_metadata(tst->ss->name, (pol = devid_policy(stb.st_rdev)),
 						       tst->ss->match_home(tst, c->homehost) == 1)) {
 				if (report_mismatch)
-					pr_err("%s has metadata type %s for which "
-					       "auto-assembly is disabled\n",
+					pr_err("%s has metadata type %s for which auto-assembly is disabled\n",
 					       devname, tst->ss->name);
 				tmpdev->used = 2;
 			} else
@@ -245,7 +250,9 @@ static int select_devices(struct mddev_dev *devlist,
 					pr_err("no recogniseable superblock on %s\n",
 					       devname);
 				tmpdev->used = 2;
-			} else if (tst->ss->load_super(tst,dfd, NULL)) {
+			} else if ((tst->ignore_hw_compat = 0),
+				   tst->ss->load_super(tst, dfd,
+						       report_mismatch ? devname : NULL)) {
 				if (report_mismatch)
 					pr_err("no RAID superblock on %s\n",
 					       devname);
@@ -259,8 +266,7 @@ static int select_devices(struct mddev_dev *devlist,
 				   !conf_test_metadata(tst->ss->name, (pol = devid_policy(stb.st_rdev)),
 						       tst->ss->match_home(tst, c->homehost) == 1)) {
 				if (report_mismatch)
-					pr_err("%s has metadata type %s for which "
-					       "auto-assembly is disabled\n",
+					pr_err("%s has metadata type %s for which auto-assembly is disabled\n",
 					       devname, tst->ss->name);
 				tmpdev->used = 2;
 			}
@@ -327,7 +333,8 @@ static int select_devices(struct mddev_dev *devlist,
 			     content = content->next) {
 
 				if (!ident_matches(ident, content, tst,
-						   c->homehost, c->update,
+						   c->homehost, c->require_homehost,
+						   c->update,
 						   report_mismatch ? devname : NULL))
 					/* message already printed */;
 				else if (is_member_busy(content->text_version)) {
@@ -350,8 +357,7 @@ static int select_devices(struct mddev_dev *devlist,
 
 			st = tst; tst = NULL;
 			if (!auto_assem && inargv && tmpdev->next != NULL) {
-				pr_err("%s is a container, but is not "
-				       "only device given: confused and aborting\n",
+				pr_err("%s is a container, but is not only device given: confused and aborting\n",
 				       devname);
 				st->ss->free_super(st);
 				dev_policy_free(pol);
@@ -370,7 +376,8 @@ static int select_devices(struct mddev_dev *devlist,
 			tst->ss->getinfo_super(tst, content, NULL);
 
 			if (!ident_matches(ident, content, tst,
-					   c->homehost, c->update,
+					   c->homehost, c->require_homehost,
+					   c->update,
 					   report_mismatch ? devname : NULL))
 				goto loop;
 
@@ -394,7 +401,8 @@ static int select_devices(struct mddev_dev *devlist,
 					goto loop;
 				}
 				if (match && !ident_matches(match, content, tst,
-							    c->homehost, c->update,
+							    c->homehost, c->require_homehost,
+							    c->update,
 							    report_mismatch ? devname : NULL))
 					/* Array exists  in mdadm.conf but some
 					 * details don't match, so reject it
@@ -579,13 +587,13 @@ static int load_devices(struct devs *devices, char *devmap,
 		struct stat stb;
 		struct supertype *tst;
 		int i;
+		int dfd;
 
 		if (tmpdev->used != 1)
 			continue;
 		/* looks like a good enough match to update the super block if needed */
 #ifndef MDASSEMBLE
 		if (c->update) {
-			int dfd;
 			/* prepare useful information in info structures */
 			struct stat stb2;
 			int err;
@@ -636,8 +644,7 @@ static int load_devices(struct devs *devices, char *devmap,
 							    c->homehost);
 			if (err < 0) {
 				if (err == -1)
-					pr_err("--update=%s not understood"
-					       " for %s metadata\n",
+					pr_err("--update=%s not understood for %s metadata\n",
 					       c->update, tst->ss->name);
 				tst->ss->free_super(tst);
 				free(tst);
@@ -656,7 +663,6 @@ static int load_devices(struct devs *devices, char *devmap,
 			if (tst->ss->store_super(tst, dfd))
 				pr_err("Could not re-write superblock on %s.\n",
 				       devname);
-			close(dfd);
 
 			if (strcmp(c->update, "uuid")==0 &&
 			    ident->bitmap_fd >= 0 && !bitmap_done) {
@@ -670,9 +676,9 @@ static int load_devices(struct devs *devices, char *devmap,
 		} else
 #endif
 		{
-			int dfd = dev_open(devname,
-					   tmpdev->disposition == 'I'
-					   ? O_RDWR : (O_RDWR|O_EXCL));
+			dfd = dev_open(devname,
+				       tmpdev->disposition == 'I'
+				       ? O_RDWR : (O_RDWR|O_EXCL));
 			tst = dup_super(st);
 
 			if (dfd < 0 || tst->ss->load_super(tst, dfd, NULL) != 0) {
@@ -689,10 +695,10 @@ static int load_devices(struct devs *devices, char *devmap,
 				return -1;
 			}
 			tst->ss->getinfo_super(tst, content, devmap + devcnt * content->array.raid_disks);
-			close(dfd);
 		}
 
-		stat(devname, &stb);
+		fstat(dfd, &stb);
+		close(dfd);
 
 		if (c->verbose > 0)
 			pr_err("%s is identified as a member of %s, slot %d%s.\n",
@@ -762,12 +768,9 @@ static int load_devices(struct devs *devices, char *devmap,
 				 * Could be a mis-detection caused by overlapping
 				 * partitions.  fail-safe.
 				 */
-				pr_err("WARNING %s and %s appear"
-				       " to have very similar superblocks.\n"
-				       "      If they are really different, "
-				       "please --zero the superblock on one\n"
-				       "      If they are the same or overlap,"
-				       " please remove one from %s.\n",
+				pr_err("WARNING %s and %s appear to have very similar superblocks.\n"
+				       "      If they are really different, please --zero the superblock on one\n"
+				       "      If they are the same or overlap, please remove one from %s.\n",
 				       devices[best[i]].devname, devname,
 				       inargv ? "the list" :
 				       "the\n      DEVICE list in mdadm.conf"
@@ -825,12 +828,37 @@ static int force_array(struct mdinfo *content,
 		     i < content->array.raid_disks * 2 && i < bestcnt;
 		     i += 2) {
 			int j = best[i];
-			if (j>=0 &&
-			    !devices[j].uptodate &&
-			    devices[j].i.recovery_start == MaxSector &&
-			    (chosen_drive < 0 ||
+			if (j < 0)
+				continue;
+			if (devices[j].uptodate)
+				continue;
+			if (devices[j].i.recovery_start != MaxSector) {
+				int delta;
+				if (!devices[j].i.reshape_active ||
+				    devices[j].i.delta_disks <= 0)
+					continue;
+				/* When increasing number of devices, an
+				 * added device also appears to be
+				 * recovering.  It is safe to include it
+				 * as long as it won't be a source of
+				 * data.
+				 * For now, just allow for last data
+				 * devices in RAID4 or last devices in RAID4/5/6.
+				 */
+				delta = devices[j].i.delta_disks;
+				if (devices[j].i.array.level >= 4 &&
+				    devices[j].i.array.level <= 6 &&
+				    i/2 >= content->array.raid_disks - delta)
+					/* OK */;
+				else if (devices[j].i.array.level == 4 &&
+					 i/2 >= content->array.raid_disks - delta - 1)
+					/* OK */;
+				else
+					continue;
+			}
+			if (chosen_drive < 0 ||
 			     devices[j].i.events
-			     > devices[chosen_drive].i.events))
+			    > devices[chosen_drive].i.events)
 				chosen_drive = j;
 		}
 		if (chosen_drive < 0)
@@ -968,8 +996,7 @@ static int start_array(int mdfd,
 			rv = add_disk(mdfd, st, content, &devices[j].i);
 
 			if (rv) {
-				pr_err("failed to add "
-				       "%s to %s: %s\n",
+				pr_err("failed to add %s to %s: %s\n",
 				       devices[j].devname,
 				       mddev,
 				       strerror(errno));
@@ -993,13 +1020,12 @@ static int start_array(int mdfd,
 		} else if (c->verbose > 0 && i < content->array.raid_disks*2
 			   && (i&1) == 0)
 			pr_err("no uptodate device for slot %d of %s\n",
-			       i, mddev);
+			       i/2, mddev);
 	}
 
 	if (content->array.level == LEVEL_CONTAINER) {
 		if (c->verbose >= 0) {
-			pr_err("Container %s has been "
-			       "assembled with %d drive%s",
+			pr_err("Container %s has been assembled with %d drive%s",
 			       mddev, okcnt+sparecnt, okcnt+sparecnt==1?"":"s");
 			if (okcnt < (unsigned)content->array.raid_disks)
 				fprintf(stderr, " (out of %d)",
@@ -1094,12 +1120,16 @@ static int start_array(int mdfd,
 				/* might need to increase the size
 				 * of the stripe cache - default is 256
 				 */
-				if (256 < 4 * (content->array.chunk_size/4096)) {
+				int chunk_size = content->array.chunk_size;
+				if (content->reshape_active &&
+				    content->new_chunk > chunk_size)
+					chunk_size = content->new_chunk;
+				if (256 < 4 * ((chunk_size+4065)/4096)) {
 					struct mdinfo *sra = sysfs_read(mdfd, NULL, 0);
 					if (sra)
 						sysfs_set_num(sra, NULL,
 							      "stripe_cache_size",
-							      (4 * content->array.chunk_size / 4096) + 1);
+							      (4 * chunk_size / 4096) + 1);
 					sysfs_free(sra);
 				}
 			}
@@ -1141,15 +1171,12 @@ static int start_array(int mdfd,
 
 		if (!enough(content->array.level, content->array.raid_disks,
 			    content->array.layout, 1, avail))
-			pr_err("Not enough devices to "
-			       "start the array.\n");
+			pr_err("Not enough devices to start the array.\n");
 		else if (!enough(content->array.level,
 				 content->array.raid_disks,
 				 content->array.layout, clean,
 				 avail))
-			pr_err("Not enough devices to "
-			       "start the array while not clean "
-			       "- consider --force.\n");
+			pr_err("Not enough devices to start the array while not clean - consider --force.\n");
 
 		return 1;
 	}
@@ -1174,9 +1201,7 @@ static int start_array(int mdfd,
 				 content->array.raid_disks,
 				 content->array.layout, clean,
 				 avail))
-			fprintf(stderr, " - not enough to start the "
-				"array while not clean - consider "
-				"--force.\n");
+			fprintf(stderr, " - not enough to start the array while not clean - consider --force.\n");
 		else {
 			if (req_cnt == (unsigned)content->array.raid_disks)
 				fprintf(stderr, " - need all %d to start it", req_cnt);
@@ -1314,7 +1339,7 @@ try_again:
 		       mddev ? mddev : "further assembly");
 
 	content = &info;
-	if (st)
+	if (st && c->force)
 		st->ignore_hw_compat = 1;
 	num_devs = select_devices(devlist, ident, &st, &content, c,
 				  inargv, auto_assem);
@@ -1338,7 +1363,10 @@ try_again:
 	 */
 	if (map_lock(&map))
 		pr_err("failed to get exclusive lock on mapfile - continue anyway...\n");
-	mp = map_by_uuid(&map, content->uuid);
+	if (c->update && strcmp(c->update,"uuid") == 0)
+		mp = NULL;
+	else
+		mp = map_by_uuid(&map, content->uuid);
 	if (mp) {
 		struct mdinfo *dv;
 		/* array already exists. */
@@ -1541,9 +1569,7 @@ try_again:
 			if (i < content->array.raid_disks * 2) {
 				if (devices[j].i.recovery_start == MaxSector ||
 				    (content->reshape_active &&
-				     ((i >= content->array.raid_disks - content->delta_disks) ||
-				      (i >= content->array.raid_disks - content->delta_disks - 1
-				       && content->array.level == 4)))) {
+				     i >= content->array.raid_disks - content->delta_disks)) {
 					if (!avail[i/2]) {
 						okcnt++;
 						avail[i/2]=1;
@@ -1698,8 +1724,7 @@ try_again:
 		int err = 0;
 		int *fdlist = xmalloc(sizeof(int)* bestcnt);
 		if (c->verbose > 0)
-			pr_err(":%s has an active reshape - checking "
-			       "if critical section needs to be restored\n",
+			pr_err("%s has an active reshape - checking if critical section needs to be restored\n",
 			       chosen_name);
 		if (!c->backup_file)
 			c->backup_file = locate_backup(content->sys_name);
@@ -1727,8 +1752,7 @@ try_again:
 						   c->backup_file, c->verbose > 0);
 			if (err && c->invalid_backup) {
 				if (c->verbose > 0)
-					pr_err("continuing"
-					       " without restoring backup\n");
+					pr_err("continuing without restoring backup\n");
 				err = 0;
 			}
 		}

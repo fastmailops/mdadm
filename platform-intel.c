@@ -59,11 +59,14 @@ struct sys_dev *find_driver_devices(const char *bus, const char *driver)
 	struct sys_dev *list = NULL;
 	enum sys_dev_type type;
 	unsigned long long dev_id;
+	unsigned long long class;
 
 	if (strcmp(driver, "isci") == 0)
 		type = SYS_DEV_SAS;
 	else if (strcmp(driver, "ahci") == 0)
 		type = SYS_DEV_SATA;
+	else if (strcmp(driver, "nvme") == 0)
+		type = SYS_DEV_NVME;
 	else
 		type = SYS_DEV_UNKNOWN;
 
@@ -99,6 +102,9 @@ struct sys_dev *find_driver_devices(const char *bus, const char *driver)
 		if (devpath_to_ll(path, "device", &dev_id) != 0)
 			continue;
 
+		if (devpath_to_ll(path, "class", &class) != 0)
+			continue;
+
 		/* start / add list entry */
 		if (!head) {
 			head = xmalloc(sizeof(*head));
@@ -114,6 +120,7 @@ struct sys_dev *find_driver_devices(const char *bus, const char *driver)
 		}
 
 		list->dev_id = (__u16) dev_id;
+		list->class = (__u32) class;
 		list->type = type;
 		list->path = realpath(path, NULL);
 		list->next = NULL;
@@ -127,14 +134,14 @@ struct sys_dev *find_driver_devices(const char *bus, const char *driver)
 static struct sys_dev *intel_devices=NULL;
 static time_t valid_time = 0;
 
-static enum sys_dev_type device_type_by_id(__u16 device_id)
+struct sys_dev *device_by_id(__u16 device_id)
 {
 	struct sys_dev *iter;
 
-	for(iter = intel_devices; iter != NULL; iter = iter->next)
+	for (iter = intel_devices; iter != NULL; iter = iter->next)
 		if (iter->dev_id == device_id)
-			return iter->type;
-	return SYS_DEV_UNKNOWN;
+			return iter;
+	return NULL;
 }
 
 static int devpath_to_ll(const char *dev_path, const char *entry, unsigned long long *val)
@@ -179,7 +186,7 @@ static __u16 devpath_to_vendor(const char *dev_path)
 
 struct sys_dev *find_intel_devices(void)
 {
-	struct sys_dev *ahci, *isci;
+	struct sys_dev *ahci, *isci, *nvme;
 
 	if (valid_time > time(0) - 10)
 		return intel_devices;
@@ -189,14 +196,24 @@ struct sys_dev *find_intel_devices(void)
 
 	isci = find_driver_devices("pci", "isci");
 	ahci = find_driver_devices("pci", "ahci");
+	nvme = find_driver_devices("pci", "nvme");
 
-	if (!ahci) {
+	if (!isci && !ahci) {
+		ahci = nvme;
+	} else if (!ahci) {
 		ahci = isci;
+		struct sys_dev *elem = ahci;
+		while (elem->next)
+			elem = elem->next;
+		elem->next = nvme;
 	} else {
 		struct sys_dev *elem = ahci;
 		while (elem->next)
 			elem = elem->next;
 		elem->next = isci;
+		while (elem->next)
+			elem = elem->next;
+		elem->next = nvme;
 	}
 	intel_devices = ahci;
 	valid_time = time(0);
@@ -209,16 +226,82 @@ struct pciExpDataStructFormat {
 	__u8  ver[4];
 	__u16 vendorID;
 	__u16 deviceID;
+	__u16 devListOffset;
+	__u16 pciDataStructLen;
+	__u8 pciDataStructRev;
 } __attribute__ ((packed));
 
-static struct imsm_orom imsm_orom[SYS_DEV_MAX];
-static int populated_orom[SYS_DEV_MAX];
+struct orom_entry *orom_entries;
+
+const struct orom_entry *get_orom_entry_by_device_id(__u16 dev_id)
+{
+	struct orom_entry *entry;
+	struct devid_list *devid;
+
+	for (entry = orom_entries; entry; entry = entry->next) {
+		for (devid = entry->devid_list; devid; devid = devid->next) {
+			if (devid->devid == dev_id)
+				return entry;
+		}
+	}
+
+	return NULL;
+}
+
+const struct imsm_orom *get_orom_by_device_id(__u16 dev_id)
+{
+	const struct orom_entry *entry = get_orom_entry_by_device_id(dev_id);
+
+	if (entry)
+		return &entry->orom;
+
+	return NULL;
+}
+
+static struct orom_entry *add_orom(const struct imsm_orom *orom)
+{
+	struct orom_entry *list;
+	struct orom_entry *prev = NULL;
+
+	for (list = orom_entries; list; prev = list, list = list->next)
+		;
+
+	list = xmalloc(sizeof(struct orom_entry));
+	list->orom = *orom;
+	list->devid_list = NULL;
+	list->next = NULL;
+
+	if (prev == NULL)
+		orom_entries = list;
+	else
+		prev->next = list;
+
+	return list;
+}
+
+static void add_orom_device_id(struct orom_entry *entry, __u16 dev_id)
+{
+	struct devid_list *list;
+	struct devid_list *prev = NULL;
+
+	for (list = entry->devid_list; list; prev = list, list = list->next) {
+		if (list->devid == dev_id)
+			return;
+	}
+	list = xmalloc(sizeof(struct devid_list));
+	list->devid = dev_id;
+	list->next = NULL;
+
+	if (prev == NULL)
+		entry->devid_list = list;
+	else
+		prev->next = list;
+}
 
 static int scan(const void *start, const void *end, const void *data)
 {
 	int offset;
-	const struct imsm_orom *imsm_mem;
-	int dev;
+	const struct imsm_orom *imsm_mem = NULL;
 	int len = (end - start);
 	struct pciExpDataStructFormat *ptr= (struct pciExpDataStructFormat *)data;
 
@@ -231,81 +314,84 @@ static int scan(const void *start, const void *end, const void *data)
 		(ulong) __le16_to_cpu(ptr->vendorID),
 		(ulong) __le16_to_cpu(ptr->deviceID));
 
-	if (__le16_to_cpu(ptr->vendorID) == 0x8086) {
-		/* serach  attached intel devices by device id from OROM */
-		dev = device_type_by_id(__le16_to_cpu(ptr->deviceID));
-		if (dev == SYS_DEV_UNKNOWN)
-			return 0;
-	}
-	else
+	if (__le16_to_cpu(ptr->vendorID) != 0x8086)
 		return 0;
 
 	for (offset = 0; offset < len; offset += 4) {
-		imsm_mem = start + offset;
-		if ((memcmp(imsm_mem->signature, "$VER", 4) == 0)) {
-			imsm_orom[dev] = *imsm_mem;
-			populated_orom[dev] = 1;
-			return populated_orom[SYS_DEV_SATA] && populated_orom[SYS_DEV_SAS];
+		const void *mem = start + offset;
+
+		if ((memcmp(mem, IMSM_OROM_SIGNATURE, 4) == 0)) {
+			imsm_mem = mem;
+			break;
 		}
 	}
+
+	if (!imsm_mem)
+		return 0;
+
+	struct orom_entry *orom = add_orom(imsm_mem);
+
+	/* only PciDataStructure with revision 3 and above supports devices list. */
+	if (ptr->pciDataStructRev >= 3 && ptr->devListOffset) {
+		const __u16 *dev_list = (void *)ptr + ptr->devListOffset;
+		int i;
+
+		for (i = 0; dev_list[i] != 0; i++)
+			add_orom_device_id(orom, dev_list[i]);
+	} else {
+		add_orom_device_id(orom, __le16_to_cpu(ptr->deviceID));
+	}
+
 	return 0;
 }
 
-const struct imsm_orom *imsm_platform_test(enum sys_dev_type hba_id, int *populated,
-					   struct imsm_orom *imsm_orom)
+const struct imsm_orom *imsm_platform_test(struct sys_dev *hba)
 {
-	memset(imsm_orom, 0, sizeof(*imsm_orom));
-	imsm_orom->rlc = IMSM_OROM_RLC_RAID0 | IMSM_OROM_RLC_RAID1 |
-				IMSM_OROM_RLC_RAID10 | IMSM_OROM_RLC_RAID5;
-	imsm_orom->sss = IMSM_OROM_SSS_4kB | IMSM_OROM_SSS_8kB |
-				IMSM_OROM_SSS_16kB | IMSM_OROM_SSS_32kB |
-				IMSM_OROM_SSS_64kB | IMSM_OROM_SSS_128kB |
-				IMSM_OROM_SSS_256kB | IMSM_OROM_SSS_512kB |
-				IMSM_OROM_SSS_1MB | IMSM_OROM_SSS_2MB;
-	imsm_orom->dpa = IMSM_OROM_DISKS_PER_ARRAY;
-	imsm_orom->tds = IMSM_OROM_TOTAL_DISKS;
-	imsm_orom->vpa = IMSM_OROM_VOLUMES_PER_ARRAY;
-	imsm_orom->vphba = IMSM_OROM_VOLUMES_PER_HBA;
-	imsm_orom->attr = imsm_orom->rlc | IMSM_OROM_ATTR_ChecksumVerify;
-	*populated = 1;
+	struct imsm_orom orom = {
+		.signature = IMSM_OROM_SIGNATURE,
+		.rlc = IMSM_OROM_RLC_RAID0 | IMSM_OROM_RLC_RAID1 |
+					IMSM_OROM_RLC_RAID10 | IMSM_OROM_RLC_RAID5,
+		.sss = IMSM_OROM_SSS_4kB | IMSM_OROM_SSS_8kB |
+					IMSM_OROM_SSS_16kB | IMSM_OROM_SSS_32kB |
+					IMSM_OROM_SSS_64kB | IMSM_OROM_SSS_128kB |
+					IMSM_OROM_SSS_256kB | IMSM_OROM_SSS_512kB |
+					IMSM_OROM_SSS_1MB | IMSM_OROM_SSS_2MB,
+		.dpa = IMSM_OROM_DISKS_PER_ARRAY,
+		.tds = IMSM_OROM_TOTAL_DISKS,
+		.vpa = IMSM_OROM_VOLUMES_PER_ARRAY,
+		.vphba = IMSM_OROM_VOLUMES_PER_HBA
+	};
+	orom.attr = orom.rlc | IMSM_OROM_ATTR_ChecksumVerify;
 
 	if (check_env("IMSM_TEST_OROM_NORAID5")) {
-		imsm_orom->rlc = IMSM_OROM_RLC_RAID0 | IMSM_OROM_RLC_RAID1 |
+		orom.rlc = IMSM_OROM_RLC_RAID0 | IMSM_OROM_RLC_RAID1 |
 				IMSM_OROM_RLC_RAID10;
 	}
-	if (check_env("IMSM_TEST_AHCI_EFI_NORAID5") && (hba_id == SYS_DEV_SAS)) {
-		imsm_orom->rlc = IMSM_OROM_RLC_RAID0 | IMSM_OROM_RLC_RAID1 |
+	if (check_env("IMSM_TEST_AHCI_EFI_NORAID5") && (hba->type == SYS_DEV_SAS)) {
+		orom.rlc = IMSM_OROM_RLC_RAID0 | IMSM_OROM_RLC_RAID1 |
 				IMSM_OROM_RLC_RAID10;
 	}
-	if (check_env("IMSM_TEST_SCU_EFI_NORAID5") && (hba_id == SYS_DEV_SATA)) {
-		imsm_orom->rlc = IMSM_OROM_RLC_RAID0 | IMSM_OROM_RLC_RAID1 |
+	if (check_env("IMSM_TEST_SCU_EFI_NORAID5") && (hba->type == SYS_DEV_SATA)) {
+		orom.rlc = IMSM_OROM_RLC_RAID0 | IMSM_OROM_RLC_RAID1 |
 				IMSM_OROM_RLC_RAID10;
 	}
 
-	return imsm_orom;
+	struct orom_entry *ret = add_orom(&orom);
+
+	add_orom_device_id(ret, hba->dev_id);
+
+	return &ret->orom;
 }
 
-static const struct imsm_orom *find_imsm_hba_orom(enum sys_dev_type hba_id)
+static const struct imsm_orom *find_imsm_hba_orom(struct sys_dev *hba)
 {
 	unsigned long align;
 
-	if (hba_id >= SYS_DEV_MAX)
-		return NULL;
+	if (check_env("IMSM_TEST_OROM"))
+		return imsm_platform_test(hba);
 
-	/* it's static data so we only need to read it once */
-	if (populated_orom[hba_id]) {
-		dprintf("OROM CAP: %p, pid: %d pop: %d\n",
-			&imsm_orom[hba_id], (int) getpid(), populated_orom[hba_id]);
-		return &imsm_orom[hba_id];
-	}
-	if (check_env("IMSM_TEST_OROM")) {
-		dprintf("OROM CAP: %p,  pid: %d pop: %d\n",
-			&imsm_orom[hba_id], (int) getpid(), populated_orom[hba_id]);
-		return imsm_platform_test(hba_id, &populated_orom[hba_id], &imsm_orom[hba_id]);
-	}
 	/* return empty OROM capabilities in EFI test mode */
-	if (check_env("IMSM_TEST_AHCI_EFI") ||
-	    check_env("IMSM_TEST_SCU_EFI"))
+	if (check_env("IMSM_TEST_AHCI_EFI") || check_env("IMSM_TEST_SCU_EFI"))
 		return NULL;
 
 	find_intel_devices();
@@ -325,9 +411,7 @@ static const struct imsm_orom *find_imsm_hba_orom(enum sys_dev_type hba_id)
 	scan_adapter_roms(scan);
 	probe_roms_exit();
 
-	if (populated_orom[hba_id])
-		return &imsm_orom[hba_id];
-	return NULL;
+	return get_orom_by_device_id(hba->dev_id);
 }
 
 #define GUID_STR_MAX	37  /* according to GUID format:
@@ -341,22 +425,57 @@ static const struct imsm_orom *find_imsm_hba_orom(enum sys_dev_type hba_id)
   (d0), (d1), (d2), (d3), (d4), (d5), (d6), (d7) }})
 
 #define SYS_EFI_VAR_PATH "/sys/firmware/efi/vars"
+#define SYS_EFIVARS_PATH "/sys/firmware/efi/efivars"
 #define SCU_PROP "RstScuV"
 #define AHCI_PROP "RstSataV"
+#define AHCI_SSATA_PROP "RstsSatV"
+#define AHCI_CSATA_PROP "RstCSatV"
 
 #define VENDOR_GUID \
 	EFI_GUID(0x193dfefa, 0xa445, 0x4302, 0x99, 0xd8, 0xef, 0x3a, 0xad, 0x1a, 0x04, 0xc6)
 
-int populated_efi[SYS_DEV_MAX] = { 0, 0 };
+#define PCI_CLASS_RAID_CNTRL 0x010400
 
-static struct imsm_orom imsm_efi[SYS_DEV_MAX];
+static int read_efi_var(void *buffer, ssize_t buf_size, char *variable_name, struct efi_guid guid)
+{
+	char path[PATH_MAX];
+	char buf[GUID_STR_MAX];
+	int fd;
+	ssize_t n;
 
-int read_efi_variable(void *buffer, ssize_t buf_size, char *variable_name, struct efi_guid guid)
+	snprintf(path, PATH_MAX, "%s/%s-%s", SYS_EFIVARS_PATH, variable_name, guid_str(buf, guid));
+
+	fd = open(path, O_RDONLY);
+	if (fd < 0)
+		return 1;
+
+	/* read the variable attributes and ignore it */
+	n = read(fd, buf, sizeof(__u32));
+	if (n < 0) {
+		close(fd);
+		return 1;
+	}
+
+	/* read the variable data */
+	n = read(fd, buffer, buf_size);
+	close(fd);
+	if (n < buf_size)
+		return 1;
+
+	return 0;
+}
+
+static int read_efi_variable(void *buffer, ssize_t buf_size, char *variable_name, struct efi_guid guid)
 {
 	char path[PATH_MAX];
 	char buf[GUID_STR_MAX];
 	int dfd;
 	ssize_t n, var_data_len;
+
+	/* Try to read the variable using the new efivarfs interface first.
+	 * If that fails, fall back to the old sysfs-efivars interface. */
+	if (!read_efi_var(buffer, buf_size, variable_name, guid))
+		return 0;
 
 	snprintf(path, PATH_MAX, "%s/%s-%s/size", SYS_EFI_VAR_PATH, variable_name, guid_str(buf, guid));
 
@@ -395,55 +514,92 @@ int read_efi_variable(void *buffer, ssize_t buf_size, char *variable_name, struc
 	return 0;
 }
 
-const struct imsm_orom *find_imsm_efi(enum sys_dev_type hba_id)
+const struct imsm_orom *find_imsm_efi(struct sys_dev *hba)
 {
-	if (hba_id >= SYS_DEV_MAX)
-		return NULL;
+	struct imsm_orom orom;
+	struct orom_entry *ret;
+	int err;
 
-	dprintf("EFI CAP: %p,  pid: %d pop: %d\n",
-		&imsm_efi[hba_id], (int) getpid(), populated_efi[hba_id]);
+	if (check_env("IMSM_TEST_AHCI_EFI") || check_env("IMSM_TEST_SCU_EFI"))
+		return imsm_platform_test(hba);
 
-	/* it's static data so we only need to read it once */
-	if (populated_efi[hba_id]) {
-		dprintf("EFI CAP: %p, pid: %d pop: %d\n",
-			&imsm_efi[hba_id], (int) getpid(), populated_efi[hba_id]);
-		return &imsm_efi[hba_id];
-	}
-	if (check_env("IMSM_TEST_AHCI_EFI") ||
-	    check_env("IMSM_TEST_SCU_EFI")) {
-		dprintf("OROM CAP: %p,  pid: %d pop: %d\n",
-			&imsm_efi[hba_id], (int) getpid(), populated_efi[hba_id]);
-		return imsm_platform_test(hba_id, &populated_efi[hba_id], &imsm_efi[hba_id]);
-	}
 	/* OROM test is set, return that there is no EFI capabilities */
 	if (check_env("IMSM_TEST_OROM"))
 		return NULL;
 
-	if (read_efi_variable(&imsm_efi[hba_id], sizeof(imsm_efi[0]), hba_id == SYS_DEV_SAS ? SCU_PROP : AHCI_PROP, VENDOR_GUID)) {
-		populated_efi[hba_id] = 0;
+	if (hba->type == SYS_DEV_SATA && hba->class != PCI_CLASS_RAID_CNTRL)
 		return NULL;
+
+	err = read_efi_variable(&orom, sizeof(orom), hba->type == SYS_DEV_SAS ? SCU_PROP : AHCI_PROP, VENDOR_GUID);
+
+	/* try to read variable for second AHCI controller */
+	if (err && hba->type == SYS_DEV_SATA)
+		err = read_efi_variable(&orom, sizeof(orom), AHCI_SSATA_PROP, VENDOR_GUID);
+
+	/* try to read variable for combined AHCI controllers */
+	if (err && hba->type == SYS_DEV_SATA) {
+		static struct orom_entry *csata;
+
+		err = read_efi_variable(&orom, sizeof(orom), AHCI_CSATA_PROP, VENDOR_GUID);
+		if (!err) {
+			if (!csata)
+				csata = add_orom(&orom);
+			add_orom_device_id(csata, hba->dev_id);
+			return &csata->orom;
+		}
 	}
 
-	populated_efi[hba_id] = 1;
-	return &imsm_efi[hba_id];
+	if (err)
+		return NULL;
+
+	ret = add_orom(&orom);
+	add_orom_device_id(ret, hba->dev_id);
+
+	return &ret->orom;
 }
 
-/*
- * backward interface compatibility
- */
-const struct imsm_orom *find_imsm_orom(void)
+const struct imsm_orom *find_imsm_nvme(struct sys_dev *hba)
 {
-	return find_imsm_hba_orom(SYS_DEV_SATA);
+	static struct orom_entry *nvme_orom;
+
+	if (hba->type != SYS_DEV_NVME)
+		return NULL;
+
+	if (!nvme_orom) {
+		struct imsm_orom nvme_orom_compat = {
+			.signature = IMSM_NVME_OROM_COMPAT_SIGNATURE,
+			.rlc = IMSM_OROM_RLC_RAID0 | IMSM_OROM_RLC_RAID1 |
+						IMSM_OROM_RLC_RAID10 | IMSM_OROM_RLC_RAID5,
+			.sss = IMSM_OROM_SSS_4kB | IMSM_OROM_SSS_8kB |
+						IMSM_OROM_SSS_16kB | IMSM_OROM_SSS_32kB |
+						IMSM_OROM_SSS_64kB | IMSM_OROM_SSS_128kB,
+			.dpa = IMSM_OROM_DISKS_PER_ARRAY_NVME,
+			.tds = IMSM_OROM_TOTAL_DISKS_NVME,
+			.vpa = IMSM_OROM_VOLUMES_PER_ARRAY,
+			.vphba = IMSM_OROM_TOTAL_DISKS_NVME / 2 * IMSM_OROM_VOLUMES_PER_ARRAY,
+			.attr = IMSM_OROM_ATTR_2TB | IMSM_OROM_ATTR_2TB_DISK,
+			.driver_features = IMSM_OROM_CAPABILITIES_EnterpriseSystem
+		};
+		nvme_orom = add_orom(&nvme_orom_compat);
+	}
+	add_orom_device_id(nvme_orom, hba->dev_id);
+	return &nvme_orom->orom;
 }
 
-const struct imsm_orom *find_imsm_capability(enum sys_dev_type hba_id)
+const struct imsm_orom *find_imsm_capability(struct sys_dev *hba)
 {
-	const struct imsm_orom *cap=NULL;
+	const struct imsm_orom *cap = get_orom_by_device_id(hba->dev_id);
 
-	if ((cap = find_imsm_efi(hba_id)) != NULL)
+	if (cap)
 		return cap;
-	if ((cap = find_imsm_hba_orom(hba_id)) != NULL)
+
+	if (hba->type == SYS_DEV_NVME)
+		return find_imsm_nvme(hba);
+	if ((cap = find_imsm_efi(hba)) != NULL)
 		return cap;
+	if ((cap = find_imsm_hba_orom(hba)) != NULL)
+		return cap;
+
 	return NULL;
 }
 

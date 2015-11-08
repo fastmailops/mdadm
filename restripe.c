@@ -194,7 +194,8 @@ int geo_map(int block, unsigned long long stripe, int raid_disks,
 	}
 	return -1;
 }
-static int is_ddf(int layout)
+
+int is_ddf(int layout)
 {
 	switch (layout)
 	{
@@ -344,16 +345,28 @@ void ensure_zero_has_size(int chunk_size)
 /* Following was taken from linux/drivers/md/raid6recov.c */
 
 /* Recover two failed data blocks. */
+
 void raid6_2data_recov(int disks, size_t bytes, int faila, int failb,
-		       uint8_t **ptrs)
+		       uint8_t **ptrs, int neg_offset)
 {
 	uint8_t *p, *q, *dp, *dq;
 	uint8_t px, qx, db;
 	const uint8_t *pbmul;	/* P multiplier table for B data */
 	const uint8_t *qmul;		/* Q multiplier table (for both) */
 
-	p = ptrs[disks-2];
-	q = ptrs[disks-1];
+	if (faila > failb) {
+		int t = faila;
+		faila = failb;
+		failb = t;
+	}
+
+	if (neg_offset) {
+		p = ptrs[-1];
+		q = ptrs[-2];
+	} else {
+		p = ptrs[disks-2];
+		q = ptrs[disks-1];
+	}
 
 	/* Compute syndrome with zero for the missing data pages
 	   Use the dead data pages as temporary storage for
@@ -384,13 +397,19 @@ void raid6_2data_recov(int disks, size_t bytes, int faila, int failb,
 }
 
 /* Recover failure of one data block plus the P block */
-void raid6_datap_recov(int disks, size_t bytes, int faila, uint8_t **ptrs)
+void raid6_datap_recov(int disks, size_t bytes, int faila, uint8_t **ptrs,
+		       int neg_offset)
 {
 	uint8_t *p, *q, *dq;
 	const uint8_t *qmul;		/* Q multiplier table */
 
-	p = ptrs[disks-2];
-	q = ptrs[disks-1];
+	if (neg_offset) {
+		p = ptrs[-1];
+		q = ptrs[-2];
+	} else {
+		p = ptrs[disks-2];
+		q = ptrs[disks-1];
+	}
 
 	/* Compute syndrome with zero for the missing data page
 	   Use the dead data page as temporary storage for delta q */
@@ -636,16 +655,11 @@ int save_stripes(int *source, unsigned long long *offsets,
 			if (fblock[1] == data_disks)
 				/* One data failed, and parity failed */
 				raid6_datap_recov(syndrome_disks+2, chunk_size,
-						  fdisk[0], bufs);
+						  fdisk[0], bufs, 0);
 			else {
-				if (fdisk[0] > fdisk[1]) {
-					int t = fdisk[0];
-					fdisk[0] = fdisk[1];
-					fdisk[1] = t;
-				}
 				/* Two data blocks failed, P,Q OK */
 				raid6_2data_recov(syndrome_disks+2, chunk_size,
-						  fdisk[0], fdisk[1], bufs);
+						  fdisk[0], fdisk[1], bufs, 0);
 			}
 		}
 		if (dest) {
@@ -882,7 +896,8 @@ unsigned long long getnum(char *str, char **err)
 	return rv;
 }
 
-main(int argc, char *argv[])
+char const Name[] = "test_restripe";
+int main(int argc, char *argv[])
 {
 	/* save/restore file raid_disks chunk_size level layout start length devices...
 	 */
@@ -898,8 +913,7 @@ main(int argc, char *argv[])
 
 	char *err = NULL;
 	if (argc < 10) {
-		fprintf(stderr, "Usage: test_stripe save/restore file raid_disks"
-			" chunk_size level layout start length devices...\n");
+		fprintf(stderr, "Usage: test_stripe save/restore file raid_disks chunk_size level layout start length devices...\n");
 		exit(1);
 	}
 	if (strcmp(argv[1], "save")==0)

@@ -1,3 +1,9 @@
+mdadm (3.3.4-1) unstable; urgency=medium
+
+  * New upstream release.
+
+ -- Dimitri John Ledkov <xnox@debian.org>  Sun, 08 Nov 2015 11:48:03 +0000
+
 mdadm (3.3.2-5) unstable; urgency=medium
 
   * use-tempnode-not-devnode.patch: change udev rules file to use

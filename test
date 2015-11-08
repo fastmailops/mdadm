@@ -94,6 +94,15 @@ do_setup() {
   trap cleanup 0 1 3 15
   trap ctrl_c 2
 
+  # make sure there are no loop devices remaining.
+  # udev started things can sometimes prevent them being stopped
+  # immediately
+  while grep loop /proc/partitions > /dev/null 2>&1
+  do
+    mdadm -Ss
+    losetup -d /dev/loop[0-9]* 2> /dev/null
+    sleep 1
+  done
   devlist=
   for d in 0 1 2 3 4 5 6 7 8 9 10 11 12 13
   do
@@ -102,6 +111,8 @@ do_setup() {
     case $DEVTYPE in
     loop)
       [ -f $targetdir/mdtest$d ] || dd if=/dev/zero of=$targetdir/mdtest$d count=$sz bs=1K > /dev/null 2>&1
+      # make sure udev doesn't touch
+      mdadm --zero $targetdir/mdtest$d 2> /dev/null
       [ -b /dev/loop$d ] || mknod /dev/loop$d b 7 $d
       if [ $d -eq 7 ]
       then
@@ -143,15 +154,18 @@ do_setup() {
 mdadm() {
     rm -f $targetdir/stderr
     case $* in
-       *-S* ) udevadm settle;;
+	*-S* ) udevadm settle
+	       p=`cat /proc/sys/dev/raid/speed_limit_max`
+	       echo 20000 > /proc/sys/dev/raid/speed_limit_max
     esac
     case $* in
-       *-C* ) $mdadm 2> $targetdir/stderr --quiet "$@" --auto=yes;;
-        * )   $mdadm 2> $targetdir/stderr --quiet "$@"
+	*-C* ) $mdadm 2> $targetdir/stderr --quiet "$@" --auto=yes;;
+	* )    $mdadm 2> $targetdir/stderr --quiet "$@"
     esac
     rv=$?
     case $* in
-       *-S* ) udevadm settle;;
+	*-S* ) udevadm settle
+	       echo $p > /proc/sys/dev/raid/speed_limit_max
     esac
     cat >&2 $targetdir/stderr
     return $rv
@@ -176,15 +190,31 @@ check() {
 	  echo >&2 "ERROR algorithm $2 not found"; cat /proc/mdstat; exit 1;}
      ;;
     resync | recovery | reshape)
-      sleep 0.5
-      grep -s $1 /proc/mdstat > /dev/null || {
-		echo >&2 ERROR no $1 happening; cat /proc/mdstat; exit 1; }
-     ;;
+	cnt=5
+	while ! grep -s $1 /proc/mdstat > /dev/null
+	do
+	    if [ $cnt -gt 0 ] && grep -v idle /sys/block/md*/md/sync_action > /dev/null
+	    then # Something isn't idle - wait a bit
+		sleep 0.5
+		cnt=$[cnt-1]
+	    else
+		echo >&2 ERROR no $1 happening; cat /proc/mdstat; exit 1
+	    fi
+	done
+	;;
 
      nosync )
        sleep 0.5
+       # Since 4.2 we delay the close of recovery until there has been a chance for
+       # spares to be activated.  That means that a recovery that finds nothing
+       # to do can still take a little longer than expected.
+       # add an extra check: is sync_completed shows the end is reached, assume
+       # there is no recovery.
        if grep -s -E '(resync|recovery|reshape) *=' > /dev/null /proc/mdstat ; then
+	   incomplete=`grep / /sys/block/md*/md/sync_completed 2> /dev/null | sed '/^ *\([0-9]*\) \/ \1/d'`
+	   if [ -n "$incomplete" ]; then
 		echo >&2 "ERROR resync or recovery is happening!"; cat /proc/mdstat ; exit 1;
+	   fi
        fi
      ;;
 
@@ -192,7 +222,8 @@ check() {
       p=`cat /proc/sys/dev/raid/speed_limit_max`
       echo 2000000 > /proc/sys/dev/raid/speed_limit_max
       sleep 0.1
-      while grep -E '(resync|recovery|reshape|check|repair) *=' > /dev/null /proc/mdstat
+      while grep -E '(resync|recovery|reshape|check|repair) *=' > /dev/null /proc/mdstat ||
+	      grep -v idle > /dev/null /sys/block/md*/md/sync_action
       do sleep 0.5;
       done
       echo $p > /proc/sys/dev/raid/speed_limit_max
@@ -233,7 +264,7 @@ testdev() {
    dvsize=$3
    chunk=$4
    if [ -z "$5" ]; then
-      mkfs -j $dev > /dev/null 2>&1 && fsck -fn $dev >&2
+      mkfs.ext3 -F -j $dev > /dev/null 2>&1 && fsck -fn $dev >&2
    fi
    dsize=$[dvsize/chunk]
    dsize=$[dsize*chunk]
@@ -283,11 +314,13 @@ do_test() {
     else
       log=log
       cat $targetdir/stderr >> $targetdir/log
+      echo "=======================dmesg=================" >> $targetdir/log
+      dmesg | tail -n 200 >> $targetdir/log
       if [ $exitonerror == 0 ]; then
 	  log=log-`basename $_script`
-	  mv $targetdir/log $targetdir/$log
+	  mv $targetdir/log $logdir/$log
       fi
-      echo "FAILED - see $targetdir/$log for details"
+      echo "FAILED - see $logdir/$log for details"
       _fail=1
     fi
     if [ "$savelogs" == "1" ]; then
@@ -339,12 +372,6 @@ parse_args() {
       ;;
     --save-logs)
       savelogs=1
-      if [ ! -d $logdir ] ; then
-        mkdir $logdir
-        if [ $? -ne 0 ] ; then
-	  exit 1;
-	fi
-      fi
       ;;
     --keep-going | --no-error)
       exitonerror=0
@@ -380,9 +407,11 @@ parse_args() {
 done
 }
 
+logdir=$targetdir
 parse_args $@
 
 do_setup
+mkdir -p $logdir
 
 if [ "$savelogs" == "1" ]; then
   echo "Saving logs to $logdir"

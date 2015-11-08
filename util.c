@@ -368,6 +368,13 @@ int enough(int level, int raid_disks, int layout, int clean, char *avail)
 	case 1:
 		return avail_disks >= 1;
 	case 4:
+		if (avail_disks == raid_disks - 1 &&
+		    !avail[raid_disks - 1])
+			/* If just the parity device is missing, then we
+			 * have enough, even if not clean
+			 */
+			return 1;
+		/* FALL THROUGH */
 	case 5:
 		if (clean)
 			return avail_disks >= raid_disks-1;
@@ -671,13 +678,13 @@ char *human_size(long long bytes)
 	if (bytes < 5000*1024)
 		buf[0] = 0;
 	else if (bytes < 2*1024LL*1024LL*1024LL) {
-		long cMiB = (bytes / ( (1LL<<20) / 200LL ) +1) /2;
+		long cMiB = (bytes * 200LL / (1LL<<20) + 1) / 2;
 		long cMB  = (bytes / ( 1000000LL / 200LL ) +1) /2;
 		snprintf(buf, sizeof(buf), " (%ld.%02ld MiB %ld.%02ld MB)",
 			cMiB/100 , cMiB % 100,
 			cMB/100, cMB % 100);
 	} else {
-		long cGiB = (bytes / ( (1LL<<30) / 200LL ) +1) /2;
+		long cGiB = (bytes * 200LL / (1LL<<30) +1) / 2;
 		long cGB  = (bytes / (1000000000LL/200LL ) +1) /2;
 		snprintf(buf, sizeof(buf), " (%ld.%02ld GiB %ld.%02ld GB)",
 			cGiB/100 , cGiB % 100,
@@ -706,11 +713,11 @@ char *human_size_brief(long long bytes, int prefix)
 		buf[0] = 0;
 	else if (prefix == IEC) {
 		if (bytes < 2*1024LL*1024LL*1024LL) {
-			long cMiB = (bytes / ( (1LL<<20) / 200LL ) +1) /2;
+			long cMiB = (bytes * 200LL / (1LL<<20) +1) /2;
 			snprintf(buf, sizeof(buf), "%ld.%02ldMiB",
 				cMiB/100 , cMiB % 100);
 		} else {
-			long cGiB = (bytes / ( (1LL<<30) / 200LL ) +1) /2;
+			long cGiB = (bytes * 200LL / (1LL<<30) +1) /2;
 			snprintf(buf, sizeof(buf), "%ld.%02ldGiB",
 					cGiB/100 , cGiB % 100);
 		}
@@ -990,7 +997,7 @@ void wait_for(char *dev, int fd)
 			delay *= 2;
 	}
 	if (i == 25)
-		dprintf("%s: timeout waiting for %s\n", __func__, dev);
+		dprintf("timeout waiting for %s\n", dev);
 }
 
 struct superswitch *superlist[] =
@@ -1740,8 +1747,7 @@ int start_mdmon(char *devnm)
 			status = execl("/bin/systemctl", "systemctl", "start",
 				       pathbuf, NULL);
 			exit(1);
-		case -1: pr_err("cannot run mdmon. "
-				"Array remains readonly\n");
+		case -1: pr_err("cannot run mdmon. Array remains readonly\n");
 			return -1;
 		default: /* parent - good */
 			pid = wait(&status);
@@ -1766,14 +1772,12 @@ int start_mdmon(char *devnm)
 				      devnm, NULL);
 			}
 		exit(1);
-	case -1: pr_err("cannot run mdmon. "
-			 "Array remains readonly\n");
+	case -1: pr_err("cannot run mdmon. Array remains readonly\n");
 		return -1;
 	default: /* parent - good */
 		pid = wait(&status);
 		if (pid < 0 || status != 0) {
-			pr_err("failed to launch mdmon. "
-			       "Array remains readonly\n");
+			pr_err("failed to launch mdmon. Array remains readonly\n");
 			return -1;
 		}
 	}
@@ -1845,8 +1849,7 @@ int experimental(void)
 	if (check_env("MDADM_EXPERIMENTAL"))
 		return 1;
 	else {
-		pr_err("To use this feature MDADM_EXPERIMENTAL"
-				" environment variable has to be defined.\n");
+		pr_err("To use this feature MDADM_EXPERIMENTAL environment variable has to be defined.\n");
 		return 0;
 	}
 }
