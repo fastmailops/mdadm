@@ -14,6 +14,10 @@ mdadm (3.3.4-1) unstable; urgency=medium
   * Copy AUTO lines from host into initrd, when updating initrd.
     (Closes: #785104)
 
+  [ Martin von Wittich ]
+  * Ignore errors attempting to apply *nice to checkarray, it may be
+    done already. (Closes: #791554)
+
  -- Dimitri John Ledkov <xnox@debian.org>  Sun, 08 Nov 2015 11:48:03 +0000
 
 mdadm (3.3.2-5) unstable; urgency=medium

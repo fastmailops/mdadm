@@ -205,8 +205,8 @@ for array in $arrays; do
         resync_pid=$(ps -ef | awk -v dev=$array 'BEGIN { pattern = "^\\[" dev "_resync]$" } $8 ~ pattern { print $2 }')
         if [ -n "$resync_pid" ]; then
           [ $quiet -lt 1 ] && echo "$PROGNAME: I: selecting $ionice I/O scheduling class and $renice niceness for resync of $array." >&2
-          ionice -p "$resync_pid" $ioarg || :
-          renice -n $renice -p "$resync_pid" 1>/dev/null || :
+          ionice -p "$resync_pid" $ioarg 2>/dev/null || :
+          renice -n $renice -p "$resync_pid" 1>/dev/null 2>&1 || :
           break
         fi
         sleep 1
