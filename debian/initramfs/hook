@@ -90,9 +90,9 @@ install_config()
 {
   # install the configuration file
   mkdir -p ${2%/*}
-  # only copy ARRAY/DEVICE/HOMEHOST lines, and merge continuation lines into one
+  # only copy ARRAY/DEVICE/HOMEHOST/AUTO lines, and merge continuation lines into one
   if [ -f "$1" ] ; then
-    sed -e :a -re '$!N;s/\n[[:space:]]+/ /;ta' -ne '/^(ARRAY|DEVICE|HOMEHOST)/P;D' $1 > $2
+    sed -e :a -re '$!N;s/\n[[:space:]]+/ /;ta' -ne '/^(ARRAY|DEVICE|HOMEHOST|AUTO)/P;D' $1 > $2
   fi
 }
 

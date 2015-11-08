@@ -10,6 +10,10 @@ mdadm (3.3.4-1) unstable; urgency=medium
   [ Helmut Grohne ]
   * Fix FTCBFS. Export CROSS_COMPILE=<triplet>- (Closes: #794335)
 
+  [ Cyril B. ]
+  * Copy AUTO lines from host into initrd, when updating initrd.
+    (Closes: #785104)
+
  -- Dimitri John Ledkov <xnox@debian.org>  Sun, 08 Nov 2015 11:48:03 +0000
 
 mdadm (3.3.2-5) unstable; urgency=medium
