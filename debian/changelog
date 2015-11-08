@@ -4,6 +4,7 @@ mdadm (3.3.4-1) unstable; urgency=medium
     service mainting this package over the years, your contributions
     are highly appreciated by all of Debian and derivate communities.
   * New upstream release.
+  * Bump standards version to 3.9.6.0, no changes required.
 
  -- Dimitri John Ledkov <xnox@debian.org>  Sun, 08 Nov 2015 11:48:03 +0000
 
