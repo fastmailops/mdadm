@@ -43,7 +43,7 @@ KLIBC_GCC = gcc -nostdinc -iwithprefix include -I$(KLIBC)/klibc/include -I$(KLIB
 
 CC = $(CROSS_COMPILE)gcc
 CXFLAGS ?= -ggdb
-CWFLAGS = -Wall -Werror -Wstrict-prototypes -Wextra -Wno-unused-parameter
+CWFLAGS = -Wall -Wstrict-prototypes -Wextra -Wno-unused-parameter
 ifdef WARN_UNUSED
 CWFLAGS += -Wp,-D_FORTIFY_SOURCE=2 -O3
 endif
@@ -62,8 +62,8 @@ CPPFLAGS += -DBINDIR=\"$(BINDIR)\"
 PKG_CONFIG ?= pkg-config
 
 SYSCONFDIR = /etc
-CONFFILE = $(SYSCONFDIR)/mdadm.conf
-CONFFILE2 = $(SYSCONFDIR)/mdadm/mdadm.conf
+CONFFILE = $(SYSCONFDIR)/mdadm/mdadm.conf
+CONFFILE2 = $(SYSCONFDIR)/mdadm.conf
 MAILCMD =/usr/sbin/sendmail -t
 CONFFILEFLAGS = -DCONFFILE=\"$(CONFFILE)\" -DCONFFILE2=\"$(CONFFILE2)\"
 # Both MAP_DIR and MDMON_DIR should be somewhere that persists across the
