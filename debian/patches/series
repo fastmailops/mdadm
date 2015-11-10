@@ -5,3 +5,4 @@ use-external-blkid.diff
 use-tempnode-not-devnode.patch
 readlink-path.patch
 mdmonitor-service-simplify.diff
+disable-incremental-assembly.patch

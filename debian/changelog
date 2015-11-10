@@ -1,3 +1,11 @@
+mdadm (3.3.4-1.1) unstable; urgency=medium
+
+  * Non-maintainer upload.
+  * disable-incremental-assembly.patch: incremental assembly prevents booting
+    in degraded mode (Closes: #784070)
+
+ -- Yann Soubeyrand <yann-externe.soubeyrand@edf.fr>  Tue, 10 Nov 2015 11:18:39 +0100
+
 mdadm (3.3.4-1) unstable; urgency=medium
 
   [ Dimitri John Ledkov ]
