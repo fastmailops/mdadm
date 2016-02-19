@@ -78,6 +78,12 @@
 #define MD_DISK_ACTIVE		1 /* disk is running but may not be in sync */
 #define MD_DISK_SYNC		2 /* disk is in sync with the raid set */
 #define MD_DISK_REMOVED		3 /* disk is in sync with the raid set */
+#define MD_DISK_CLUSTER_ADD	4 /* Initiate a disk add across the cluster
+				   * For clustered enviroments only.
+				   */
+#define MD_DISK_CANDIDATE	5 /* disk is added as spare (local) until confirmed
+				   * For clustered enviroments only.
+				   */
 
 #define	MD_DISK_WRITEMOSTLY	9 /* disk is "write-mostly" is RAID1 config.
 				   * read requests will only be sent here in
@@ -85,6 +91,12 @@
 				   */
 
 #define MD_DISK_REPLACEMENT	17
+#define MD_DISK_JOURNAL		18 /* disk is used as the write journal in RAID-5/6 */
+
+#define MD_DISK_ROLE_SPARE	0xffff
+#define MD_DISK_ROLE_FAULTY	0xfffe
+#define MD_DISK_ROLE_JOURNAL	0xfffd
+#define MD_DISK_ROLE_MAX	0xff00 /* max value of regular disk role */
 
 typedef struct mdp_device_descriptor_s {
 	__u32 number;		/* 0 Device number in the entire set	      */
@@ -106,6 +118,7 @@ typedef struct mdp_device_descriptor_s {
 #define MD_SB_BLOCK_CONTAINER_RESHAPE 3 /* block container wide reshapes */
 #define MD_SB_BLOCK_VOLUME	4 /* block activation of array, other arrays
 				   * in container can be activated */
+#define MD_SB_CLUSTERED		5 /* MD is clustered  */
 #define	MD_SB_BITMAP_PRESENT	8 /* bitmap may be present nearby */
 
 typedef struct mdp_superblock_s {
@@ -194,5 +207,63 @@ static inline __u64 md_event(mdp_super_t *sb) {
 	__u64 ev = sb->events_hi;
 	return (ev<<32)| sb->events_lo;
 }
+
+struct r5l_payload_header {
+	__u16 type;
+	__u16 flags;
+} __attribute__ ((__packed__));
+
+enum r5l_payload_type {
+	R5LOG_PAYLOAD_DATA = 0,
+	R5LOG_PAYLOAD_PARITY = 1,
+	R5LOG_PAYLOAD_FLUSH = 2,
+};
+
+struct r5l_payload_data_parity {
+	struct r5l_payload_header header;
+	__u32 size; /* sector. data/parity size. each 4k has a checksum */
+	__u64 location; /* sector. For data, it's raid sector. For
+				parity, it's stripe sector */
+	__u32 checksum[];
+} __attribute__ ((__packed__));
+
+enum r5l_payload_data_parity_flag {
+	R5LOG_PAYLOAD_FLAG_DISCARD = 1, /* payload is discard */
+	/*
+	 * RESHAPED/RESHAPING is only set when there is reshape activity. Note,
+	 * both data/parity of a stripe should have the same flag set
+	 *
+	 * RESHAPED: reshape is running, and this stripe finished reshape
+	 * RESHAPING: reshape is running, and this stripe isn't reshaped
+	 * */
+	R5LOG_PAYLOAD_FLAG_RESHAPED = 2,
+	R5LOG_PAYLOAD_FLAG_RESHAPING = 3,
+};
+
+struct r5l_payload_flush {
+	struct r5l_payload_header header;
+	__u32 size; /* flush_stripes size, bytes */
+	__u64 flush_stripes[];
+} __attribute__ ((__packed__));
+
+enum r5l_payload_flush_flag {
+	R5LOG_PAYLOAD_FLAG_FLUSH_STRIPE = 1, /* data represents whole stripe */
+};
+
+struct r5l_meta_block {
+	__u32 magic;
+	__u32 checksum;
+	__u8 version;
+	__u8 __zero_pading_1;
+	__u16 __zero_pading_2;
+	__u32 meta_size; /* whole size of the block */
+
+	__u64 seq;
+	__u64 position; /* sector, start from rdev->data_offset, current position */
+	struct r5l_payload_header payloads[];
+} __attribute__ ((__packed__));
+
+#define R5LOG_VERSION 0x1
+#define R5LOG_MAGIC 0x6433c509
 
 #endif

@@ -74,6 +74,7 @@ int main(int argc, char *argv[])
 		.require_homehost = 1,
 	};
 	struct shape s = {
+		.journaldisks	= 0,
 		.level		= UnSet,
 		.layout		= UnSet,
 		.bitmap_chunk	= UnSet,
@@ -189,6 +190,7 @@ int main(int argc, char *argv[])
 		case 'a':
 		case Add:
 		case AddSpare:
+		case AddJournal:
 		case 'r':
 		case Remove:
 		case Replace:
@@ -196,6 +198,7 @@ int main(int argc, char *argv[])
 		case 'f':
 		case Fail:
 		case ReAdd: /* re-add */
+		case ClusterConfirm:
 			if (!mode) {
 				newmode = MANAGE;
 				shortopt = short_bitmap_options;
@@ -588,7 +591,23 @@ int main(int argc, char *argv[])
 			}
 			ident.raid_disks = s.raiddisks;
 			continue;
-
+		case O(ASSEMBLE, Nodes):
+		case O(CREATE, Nodes):
+			c.nodes = parse_num(optarg);
+			if (c.nodes <= 0) {
+				pr_err("invalid number for the number of cluster nodes: %s\n",
+					optarg);
+				exit(2);
+			}
+			continue;
+		case O(CREATE, ClusterName):
+		case O(ASSEMBLE, ClusterName):
+			c.homecluster = optarg;
+			if (strlen(c.homecluster) > 64) {
+				pr_err("Cluster name too big.\n");
+				exit(ERANGE);
+			}
+			continue;
 		case O(CREATE,'x'): /* number of spare (eXtra) disks */
 			if (s.sparedisks) {
 				pr_err("spare-devices set twice: %d and %s\n",
@@ -726,6 +745,10 @@ int main(int argc, char *argv[])
 				continue;
 			if (strcmp(c.update, "homehost")==0)
 				continue;
+			if (strcmp(c.update, "home-cluster")==0)
+				continue;
+			if (strcmp(c.update, "nodes")==0)
+				continue;
 			if (strcmp(c.update, "devicesize")==0)
 				continue;
 			if (strcmp(c.update, "no-bitmap")==0)
@@ -733,6 +756,8 @@ int main(int argc, char *argv[])
 			if (strcmp(c.update, "bbl") == 0)
 				continue;
 			if (strcmp(c.update, "no-bbl") == 0)
+				continue;
+			if (strcmp(c.update, "force-no-bbl") == 0)
 				continue;
 			if (strcmp(c.update, "metadata") == 0)
 				continue;
@@ -764,10 +789,10 @@ int main(int argc, char *argv[])
 					Name, c.update);
 			}
 			fprintf(outf, "Valid --update options are:\n"
-		"     'sparc2.2', 'super-minor', 'uuid', 'name', 'resync',\n"
-		"     'summaries', 'homehost', 'byteorder', 'devicesize',\n"
+		"     'sparc2.2', 'super-minor', 'uuid', 'name', 'nodes', 'resync',\n"
+		"     'summaries', 'homehost', 'home-cluster', 'byteorder', 'devicesize',\n"
 		"     'no-bitmap', 'metadata', 'revert-reshape'\n"
-		"     'bbl', 'no-bbl'\n"
+		"     'bbl', 'no-bbl', 'force-no-bbl'\n"
 				);
 			exit(outf == stdout ? 0 : 2);
 
@@ -785,8 +810,9 @@ int main(int argc, char *argv[])
 			c.update = optarg;
 			if (strcmp(c.update, "devicesize") != 0 &&
 			    strcmp(c.update, "bbl") != 0 &&
+			    strcmp(c.update, "force-no-bbl") != 0 &&
 			    strcmp(c.update, "no-bbl") != 0) {
-				pr_err("only 'devicesize', 'bbl' and 'no-bbl' can be updated with --re-add\n");
+				pr_err("only 'devicesize', 'bbl', 'no-bbl', and 'force-no-bbl' can be updated with --re-add\n");
 				exit(2);
 			}
 			continue;
@@ -903,6 +929,13 @@ int main(int argc, char *argv[])
 		case O(MANAGE,AddSpare): /* add drive - never re-add */
 			devmode = 'S';
 			continue;
+		case O(MANAGE,AddJournal): /* add journal */
+			if (s.journaldisks && (s.level < 4 || s.level > 6)) {
+				pr_err("--add-journal is only supported for RAID level 4/5/6.\n");
+				exit(2);
+			}
+			devmode = 'j';
+			continue;
 		case O(MANAGE,ReAdd):
 			devmode = 'A';
 			continue;
@@ -918,6 +951,9 @@ int main(int argc, char *argv[])
 					   * even though we will both fail and
 					   * remove the device */
 			devmode = 'f';
+			continue;
+		case O(MANAGE, ClusterConfirm):
+			devmode = 'c';
 			continue;
 		case O(MANAGE,Replace):
 			/* Mark these devices for replacement */
@@ -1097,6 +1133,15 @@ int main(int argc, char *argv[])
 				s.bitmap_file = optarg;
 				continue;
 			}
+			if (strcmp(optarg, "clustered")== 0) {
+				s.bitmap_file = optarg;
+				/* Set the default number of cluster nodes
+				 * to 4 if not already set by user
+				 */
+				if (c.nodes < 1)
+					c.nodes = 4;
+				continue;
+			}
 			/* probable typo */
 			pr_err("bitmap file must contain a '/', or be 'internal', or 'none'\n"
 				"       not '%s'\n", optarg);
@@ -1137,6 +1182,23 @@ int main(int argc, char *argv[])
 		case O(INCREMENTAL, IncrementalPath):
 			remove_path = optarg;
 			continue;
+		case O(CREATE, WriteJournal):
+			if (s.journaldisks) {
+				pr_err("Please specify only one journal device for the array.\n");
+				pr_err("Ignoring --write-journal %s...\n", optarg);
+				continue;
+			}
+			dv = xmalloc(sizeof(*dv));
+			dv->devname = optarg;
+			dv->disposition = 'j';  /* WriteJournal */
+			dv->used = 0;
+			dv->next = NULL;
+			*devlistend = dv;
+			devlistend = &dv->next;
+			devs_found++;
+
+			s.journaldisks = 1;
+			continue;
 		}
 		/* We have now processed all the valid options. Anything else is
 		 * an error
@@ -1162,6 +1224,11 @@ int main(int argc, char *argv[])
 			help_text = Help;
 		fputs(help_text,stdout);
 		exit(0);
+	}
+
+	if (s.journaldisks && (s.level < 4 || s.level > 6)) {
+		pr_err("--write-journal is only supported for RAID level 4/5/6.\n");
+		exit(2);
 	}
 
 	if (!mode && devs_found) {
@@ -1260,6 +1327,20 @@ int main(int argc, char *argv[])
 		c.require_homehost = 0;
 	}
 
+	rv = 0;
+
+	set_hooks(); /* set hooks from libs */
+
+	if (c.homecluster == NULL && (c.nodes > 0)) {
+		c.homecluster = conf_get_homecluster();
+		if (c.homecluster == NULL)
+			rv = get_cluster_name(&c.homecluster);
+		if (rv) {
+			pr_err("The md can't get cluster name\n");
+			exit(1);
+		}
+	}
+
 	if (c.backup_file && data_offset != INVALID_SECTORS) {
 		pr_err("--backup-file and --data-offset are incompatible\n");
 		exit(2);
@@ -1279,7 +1360,6 @@ int main(int argc, char *argv[])
 		/* --scan implied --brief unless -vv */
 		c.brief = 1;
 
-	rv = 0;
 	switch(mode) {
 	case MANAGE:
 		/* readonly, add/remove, readwrite, runstop */
@@ -1366,8 +1446,9 @@ int main(int argc, char *argv[])
 		}
 
 		if (s.bitmap_file) {
-			if (strcmp(s.bitmap_file, "internal")==0) {
-				pr_err("'internal' bitmaps not supported with --build\n");
+			if (strcmp(s.bitmap_file, "internal")==0 ||
+			    strcmp(s.bitmap_file, "clustered") == 0) {
+				pr_err("'internal' and 'clustered' bitmaps not supported with --build\n");
 				rv |= 1;
 				break;
 			}
@@ -1377,6 +1458,21 @@ int main(int argc, char *argv[])
 	case CREATE:
 		if (c.delay == 0)
 			c.delay = DEFAULT_BITMAP_DELAY;
+
+		if (c.nodes) {
+			if (!s.bitmap_file || strcmp(s.bitmap_file, "clustered") != 0) {
+				pr_err("--nodes argument only compatible with --bitmap=clustered\n");
+				rv = 1;
+				break;
+			}
+
+			if (s.level != 1) {
+				pr_err("--bitmap=clustered is currently supported with RAID mirror only\n");
+				rv = 1;
+				break;
+			}
+		}
+
 		if (s.write_behind && !s.bitmap_file) {
 			pr_err("write-behind mode requires a bitmap.\n");
 			rv = 1;
@@ -1442,8 +1538,6 @@ int main(int argc, char *argv[])
 			else
 				c.delay = 60;
 		}
-		if (c.delay == 0)
-			c.delay = 60;
 		rv= Monitor(devlist, mailaddr, program,
 			    &c, daemonise, oneshot,
 			    dosyslog, pidfile, increments,

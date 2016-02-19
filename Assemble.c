@@ -1,7 +1,7 @@
 /*
  * mdadm - manage Linux "md" devices aka RAID arrays.
  *
- * Copyright (C) 2001-2013 Neil Brown <neilb@suse.de>
+ * Copyright (C) 2001-2016 Neil Brown <neilb@suse.com>
  *
  *
  *    This program is free software; you can redistribute it and/or modify
@@ -637,6 +637,19 @@ static int load_devices(struct devs *devices, char *devmap,
 
 			if (strcmp(c->update, "byteorder") == 0)
 				err = 0;
+			else if (strcmp(c->update, "home-cluster") == 0) {
+				tst->cluster_name = c->homecluster;
+				err = tst->ss->write_bitmap(tst, dfd, NameUpdate);
+			} else if (strcmp(c->update, "nodes") == 0) {
+				tst->nodes = c->nodes;
+				err = tst->ss->write_bitmap(tst, dfd, NodeNumUpdate);
+			} else if (strcmp(c->update, "revert-reshape") == 0 &&
+				   c->invalid_backup)
+				err = tst->ss->update_super(tst, content,
+							    "revert-reshape-nobackup",
+							    devname, c->verbose,
+							    ident->uuid_set,
+							    c->homehost);
 			else
 				err = tst->ss->update_super(tst, content, c->update,
 							    devname, c->verbose,
@@ -729,7 +742,7 @@ static int load_devices(struct devs *devices, char *devmap,
 			i = devcnt;
 		else
 			i = devices[devcnt].i.disk.raid_disk;
-		if (i+1 == 0) {
+		if (i+1 == 0 || i == MD_DISK_ROLE_JOURNAL) {
 			if (nextspare < content->array.raid_disks*2)
 				nextspare = content->array.raid_disks*2;
 			i = nextspare++;
@@ -907,7 +920,6 @@ static int force_array(struct mdinfo *content,
 		avail[chosen_drive] = 1;
 		okcnt++;
 		tst->ss->free_super(tst);
-
 		/* If there are any other drives of the same vintage,
 		 * add them in as well.  We can't lose and we might gain
 		 */
@@ -938,6 +950,7 @@ static int start_array(int mdfd,
 		       unsigned int okcnt,
 		       unsigned int sparecnt,
 		       unsigned int rebuilding_cnt,
+		       unsigned int journalcnt,
 		       struct context *c,
 		       int clean, char *avail,
 		       int start_partial_ok,
@@ -948,6 +961,15 @@ static int start_array(int mdfd,
 	int rv;
 	int i;
 	unsigned int req_cnt;
+
+	if (content->journal_device_required && (content->journal_clean == 0)) {
+		if (!c->force) {
+			pr_err("Not safe to assemble with missing or stale journal device, consider --force.\n");
+			return 1;
+		}
+		pr_err("Journal is missing or stale, starting array read only.\n");
+		c->readonly = 1;
+	}
 
 	rv = set_array_info(mdfd, st, content);
 	if (rv && !err_ok) {
@@ -1026,7 +1048,8 @@ static int start_array(int mdfd,
 	if (content->array.level == LEVEL_CONTAINER) {
 		if (c->verbose >= 0) {
 			pr_err("Container %s has been assembled with %d drive%s",
-			       mddev, okcnt+sparecnt, okcnt+sparecnt==1?"":"s");
+			       mddev, okcnt+sparecnt+journalcnt,
+			       okcnt+sparecnt+journalcnt==1?"":"s");
 			if (okcnt < (unsigned)content->array.raid_disks)
 				fprintf(stderr, " (out of %d)",
 					content->array.raid_disks);
@@ -1112,6 +1135,8 @@ static int start_array(int mdfd,
 					fprintf(stderr, "%s %d rebuilding", sparecnt?",":" and", rebuilding_cnt);
 				if (sparecnt)
 					fprintf(stderr, " and %d spare%s", sparecnt, sparecnt==1?"":"s");
+				if (content->journal_clean)
+					fprintf(stderr, " and %d journal", journalcnt);
 				fprintf(stderr, ".\n");
 			}
 			if (content->reshape_active &&
@@ -1283,7 +1308,8 @@ int Assemble(struct supertype *st, char *mddev,
 	int *best = NULL; /* indexed by raid_disk */
 	int bestcnt = 0;
 	int devcnt;
-	unsigned int okcnt, sparecnt, rebuilding_cnt, replcnt;
+	unsigned int okcnt, sparecnt, rebuilding_cnt, replcnt, journalcnt;
+	int journal_clean = 0;
 	int i;
 	int was_forced = 0;
 	int most_recent = 0;
@@ -1524,6 +1550,7 @@ try_again:
 	okcnt = 0;
 	replcnt = 0;
 	sparecnt=0;
+	journalcnt=0;
 	rebuilding_cnt=0;
 	for (i=0; i< bestcnt; i++) {
 		int j = best[i];
@@ -1534,8 +1561,13 @@ try_again:
 		/* note: we ignore error flags in multipath arrays
 		 * as they don't make sense
 		 */
-		if (content->array.level != LEVEL_MULTIPATH)
-			if (!(devices[j].i.disk.state & (1<<MD_DISK_ACTIVE))) {
+		if (content->array.level != LEVEL_MULTIPATH) {
+			if (devices[j].i.disk.state & (1<<MD_DISK_JOURNAL)) {
+				if (content->journal_device_required)
+					journalcnt++;
+				else	/* unexpected journal, mark as faulty */
+					devices[j].i.disk.state |= (1<<MD_DISK_FAULTY);
+			} else if (!(devices[j].i.disk.state & (1<<MD_DISK_ACTIVE))) {
 				if (!(devices[j].i.disk.state
 				      & (1<<MD_DISK_FAULTY))) {
 					devices[j].uptodate = 1;
@@ -1543,6 +1575,7 @@ try_again:
 				}
 				continue;
 			}
+		}
 		/* If this device thinks that 'most_recent' has failed, then
 		 * we must reject this device.
 		 */
@@ -1566,6 +1599,8 @@ try_again:
 		    devices[most_recent].i.events
 			) {
 			devices[j].uptodate = 1;
+			if (devices[j].i.disk.state & (1<<MD_DISK_JOURNAL))
+				journal_clean = 1;
 			if (i < content->array.raid_disks * 2) {
 				if (devices[j].i.recovery_start == MaxSector ||
 				    (content->reshape_active &&
@@ -1577,7 +1612,7 @@ try_again:
 						replcnt++;
 				} else
 					rebuilding_cnt++;
-			} else
+			} else if (devices[j].i.disk.raid_disk != MD_DISK_ROLE_JOURNAL)
 				sparecnt++;
 		}
 	}
@@ -1637,11 +1672,15 @@ try_again:
 #ifndef MDASSEMBLE
 	sysfs_init(content, mdfd, NULL);
 #endif
+	/* after reload context, store journal_clean in context */
+	content->journal_clean = journal_clean;
 	for (i=0; i<bestcnt; i++) {
 		int j = best[i];
 		unsigned int desired_state;
 
-		if (i >= content->array.raid_disks * 2)
+		if (devices[j].i.disk.raid_disk == MD_DISK_ROLE_JOURNAL)
+			desired_state = (1<<MD_DISK_JOURNAL);
+		else if (i >= content->array.raid_disks * 2)
 			desired_state = 0;
 		else if (i & 1)
 			desired_state = (1<<MD_DISK_ACTIVE) | (1<<MD_DISK_REPLACEMENT);
@@ -1788,7 +1827,7 @@ try_again:
 	rv = start_array(mdfd, mddev, content,
 			 st, ident, best, bestcnt,
 			 chosen_drive, devices, okcnt, sparecnt,
-			 rebuilding_cnt,
+			 rebuilding_cnt, journalcnt,
 			 c,
 			 clean, avail, start_partial_ok,
 			 pre_exist != NULL,

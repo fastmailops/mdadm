@@ -74,6 +74,12 @@ int sysfs_open(char *devnm, char *devname, char *attr)
 	return fd;
 }
 
+void sysfs_init_dev(struct mdinfo *mdi, unsigned long devid)
+{
+	snprintf(mdi->sys_name,
+		 sizeof(mdi->sys_name), "dev-%s", devid2kname(devid));
+}
+
 void sysfs_init(struct mdinfo *mdi, int fd, char *devnm)
 {
 	mdi->sys_name[0] = 0;
@@ -223,6 +229,13 @@ struct mdinfo *sysfs_read(int fd, char *devnm, unsigned long options)
 		else
 			goto abort;
 	}
+
+	if (options & GET_ARRAY_STATE) {
+		strcpy(base, "array_state");
+		if (load_sys(fname, sra->sysfs_array_state))
+			goto abort;
+	} else
+		sra->sysfs_array_state[0] = 0;
 
 	if (! (options & GET_DEVS))
 		return sra;

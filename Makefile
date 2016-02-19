@@ -43,7 +43,7 @@ KLIBC_GCC = gcc -nostdinc -iwithprefix include -I$(KLIBC)/klibc/include -I$(KLIB
 
 CC = $(CROSS_COMPILE)gcc
 CXFLAGS ?= -ggdb
-CWFLAGS = -Wall -Wstrict-prototypes -Wextra -Wno-unused-parameter
+CWFLAGS = -Wall -Werror -Wstrict-prototypes -Wextra -Wno-unused-parameter
 ifdef WARN_UNUSED
 CWFLAGS += -Wp,-D_FORTIFY_SOURCE=2 -O3
 endif
@@ -62,8 +62,8 @@ CPPFLAGS += -DBINDIR=\"$(BINDIR)\"
 PKG_CONFIG ?= pkg-config
 
 SYSCONFDIR = /etc
-CONFFILE = $(SYSCONFDIR)/mdadm/mdadm.conf
-CONFFILE2 = $(SYSCONFDIR)/mdadm.conf
+CONFFILE = $(SYSCONFDIR)/mdadm.conf
+CONFFILE2 = $(SYSCONFDIR)/mdadm/mdadm.conf
 MAILCMD =/usr/sbin/sendmail -t
 CONFFILEFLAGS = -DCONFFILE=\"$(CONFFILE)\" -DCONFFILE2=\"$(CONFFILE2)\"
 # Both MAP_DIR and MDMON_DIR should be somewhere that persists across the
@@ -79,10 +79,14 @@ MDMON_DIR = $(RUN_DIR)
 # place for autoreplace cookies
 FAILED_SLOTS_DIR = $(RUN_DIR)/failed-slots
 SYSTEMD_DIR=/lib/systemd/system
+
+COROSYNC:=$(shell [ -d /usr/include/corosync ] || echo -DNO_COROSYNC)
+DLM:=$(shell [ -f /usr/include/libdlm.h ] || echo -DNO_DLM)
+
 DIRFLAGS = -DMAP_DIR=\"$(MAP_DIR)\" -DMAP_FILE=\"$(MAP_FILE)\"
 DIRFLAGS += -DMDMON_DIR=\"$(MDMON_DIR)\"
 DIRFLAGS += -DFAILED_SLOTS_DIR=\"$(FAILED_SLOTS_DIR)\"
-CFLAGS = $(CWFLAGS) $(CXFLAGS) -DSendmail=\""$(MAILCMD)"\" $(CONFFILEFLAGS) $(DIRFLAGS)
+CFLAGS = $(CWFLAGS) $(CXFLAGS) -DSendmail=\""$(MAILCMD)"\" $(CONFFILEFLAGS) $(DIRFLAGS) $(COROSYNC) $(DLM)
 
 VERSION = $(shell [ -d .git ] && git describe HEAD | sed 's/mdadm-//')
 VERS_DATE = $(shell [ -d .git ] && date --date="`git log -n1 --format=format:%cd --date=short`" '+%0dth %B %Y' | sed -e 's/1th/1st/' -e 's/2th/2nd/' -e 's/11st/11th/' -e 's/12nd/12th/')
@@ -101,6 +105,7 @@ endif
 # If you want a static binary, you might uncomment these
 # LDFLAGS = -static
 # STRIP = -s
+LDLIBS=-ldl
 
 INSTALL = /usr/bin/install
 DESTDIR =
@@ -115,6 +120,12 @@ ifndef UDEVDIR
  UDEVDIR = /lib/udev
 endif
 
+ifeq (,$(findstring s,$(MAKEFLAGS)))
+	ECHO=echo
+else
+	ECHO=:
+endif
+
 OBJS =  mdadm.o config.o policy.o mdstat.o  ReadMe.o util.o maps.o lib.o \
 	Manage.o Assemble.o Build.o \
 	Create.o Detail.o Examine.o Grow.o Monitor.o dlink.o Kill.o Query.o \
@@ -122,7 +133,7 @@ OBJS =  mdadm.o config.o policy.o mdstat.o  ReadMe.o util.o maps.o lib.o \
 	mdopen.o super0.o super1.o super-ddf.o super-intel.o bitmap.o \
 	super-mbr.o super-gpt.o \
 	restripe.o sysfs.o sha1.o mapfile.o crc32.o sg_io.o msg.o xmalloc.o \
-	platform-intel.o probe_roms.o
+	platform-intel.o probe_roms.o crc32c.o
 
 CHECK_OBJS = restripe.o sysfs.o maps.o lib.o xmalloc.o dlink.o
 
@@ -176,7 +187,7 @@ mdadm : $(OBJS) | check_rundir
 	$(CC) $(CFLAGS) $(LDFLAGS) -o mdadm $(OBJS) $(LDLIBS)
 
 mdadm.static : $(OBJS) $(STATICOBJS)
-	$(CC) $(CFLAGS) $(LDFLAGS) -static -o mdadm.static $(OBJS) $(STATICOBJS)
+	$(CC) $(CFLAGS) $(LDFLAGS) -static -o mdadm.static $(OBJS) $(STATICOBJS) $(LDLIBS)
 
 mdadm.tcc : $(SRCS) $(INCL)
 	$(TCC) -o mdadm.tcc $(SRCS)
@@ -186,13 +197,13 @@ mdadm.klibc : $(SRCS) $(INCL)
 	$(CC) -nostdinc -iwithprefix include -I$(KLIBC)/klibc/include -I$(KLIBC)/linux/include -I$(KLIBC)/klibc/arch/i386/include -I$(KLIBC)/klibc/include/bits32 $(CFLAGS) $(SRCS)
 
 mdadm.Os : $(SRCS) $(INCL)
-	$(CC) -o mdadm.Os $(CFLAGS) $(CPPFLAGS) $(LDFLAGS) -DHAVE_STDINT_H -Os $(SRCS)
+	$(CC) -o mdadm.Os $(CFLAGS) $(CPPFLAGS) $(LDFLAGS) -DHAVE_STDINT_H -Os $(SRCS) $(LDLIBS)
 
 mdadm.O2 : $(SRCS) $(INCL) mdmon.O2
-	$(CC) -o mdadm.O2 $(CFLAGS) $(CPPFLAGS) $(LDFLAGS) -DHAVE_STDINT_H -O2 -D_FORTIFY_SOURCE=2 $(SRCS)
+	$(CC) -o mdadm.O2 $(CFLAGS) $(CPPFLAGS) $(LDFLAGS) -DHAVE_STDINT_H -O2 -D_FORTIFY_SOURCE=2 $(SRCS) $(LDLIBS)
 
 mdmon.O2 : $(MON_SRCS) $(INCL) mdmon.h
-	$(CC) -o mdmon.O2 $(CFLAGS) $(CPPFLAGS) $(LDFLAGS) $(MON_LDFLAGS) -DHAVE_STDINT_H -O2 -D_FORTIFY_SOURCE=2 $(MON_SRCS)
+	$(CC) -o mdmon.O2 $(CFLAGS) $(CPPFLAGS) $(LDFLAGS) $(MON_LDFLAGS) -DHAVE_STDINT_H -O2 -D_FORTIFY_SOURCE=2 $(MON_SRCS) $(LDLIBS)
 
 # use '-z now' to guarantee no dynamic linker interactions with the monitor thread
 mdmon : $(MON_OBJS) | check_rundir
@@ -200,7 +211,7 @@ mdmon : $(MON_OBJS) | check_rundir
 msg.o: msg.c msg.h
 
 test_stripe : restripe.c xmalloc.o mdadm.h
-	$(CC) $(CXFLAGS) $(LDFLAGS) -o test_stripe xmalloc.o  -DMAIN restripe.c
+	$(CC) $(CFLAGS) $(CXFLAGS) $(LDFLAGS) -o test_stripe xmalloc.o  -DMAIN restripe.c
 
 raid6check : raid6check.o mdadm.h $(CHECK_OBJS)
 	$(CC) $(CXFLAGS) $(LDFLAGS) -o raid6check raid6check.o $(CHECK_OBJS)
@@ -283,7 +294,7 @@ install-man: mdadm.8 md.4 mdadm.conf.5 mdmon.8
 install-udev: udev-md-raid-arrays.rules udev-md-raid-assembly.rules
 	@for file in 63-md-raid-arrays.rules 64-md-raid-assembly.rules ; \
 	do sed -e 's,BINDIR,$(BINDIR),g' udev-$${file#??-} > .install.tmp.1 && \
-	   echo $(INSTALL) -D -m 644 udev-$${file#??-} $(DESTDIR)$(UDEVDIR)/rules.d/$$file ; \
+	   $(ECHO) $(INSTALL) -D -m 644 udev-$${file#??-} $(DESTDIR)$(UDEVDIR)/rules.d/$$file ; \
 	   $(INSTALL) -D -m 644 .install.tmp.1 $(DESTDIR)$(UDEVDIR)/rules.d/$$file ; \
 	   rm -f .install.tmp.1; \
 	done
@@ -292,13 +303,13 @@ install-systemd: systemd/mdmon@.service
 	@for file in mdmon@.service mdmonitor.service mdadm-last-resort@.timer \
 		mdadm-last-resort@.service mdadm-grow-continue@.service; \
 	do sed -e 's,BINDIR,$(BINDIR),g' systemd/$$file > .install.tmp.2 && \
-	   echo $(INSTALL) -D -m 644 systemd/$$file $(DESTDIR)$(SYSTEMD_DIR)/$$file ; \
+	   $(ECHO) $(INSTALL) -D -m 644 systemd/$$file $(DESTDIR)$(SYSTEMD_DIR)/$$file ; \
 	   $(INSTALL) -D -m 644 .install.tmp.2 $(DESTDIR)$(SYSTEMD_DIR)/$$file ; \
 	   rm -f .install.tmp.2; \
 	done
 	@for file in mdadm.shutdown ; \
 	do sed -e 's,BINDIR,$(BINDIR),g' systemd/$$file > .install.tmp.3 && \
-	   echo $(INSTALL) -D -m 755  systemd/$$file $(DESTDIR)$(SYSTEMD_DIR)-shutdown/$$file ; \
+	   $(ECHO) $(INSTALL) -D -m 755  systemd/$$file $(DESTDIR)$(SYSTEMD_DIR)-shutdown/$$file ; \
 	   $(INSTALL) -D -m 755  .install.tmp.3 $(DESTDIR)$(SYSTEMD_DIR)-shutdown/$$file ; \
 	   rm -f .install.tmp.3; \
 	done

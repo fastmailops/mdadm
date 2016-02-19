@@ -32,6 +32,8 @@ static inline void sb_le_to_cpu(bitmap_super_t *sb)
 	sb->daemon_sleep = __le32_to_cpu(sb->daemon_sleep);
 	sb->sync_size = __le64_to_cpu(sb->sync_size);
 	sb->write_behind = __le32_to_cpu(sb->write_behind);
+	sb->nodes = __le32_to_cpu(sb->nodes);
+	sb->sectors_reserved = __le32_to_cpu(sb->sectors_reserved);
 }
 
 static inline void sb_cpu_to_le(bitmap_super_t *sb)
@@ -219,8 +221,12 @@ int bitmap_file_open(char *filename, struct supertype **stp)
 			pr_err("No bitmap possible with %s metadata\n",
 				st->ss->name);
 			return -1;
-		} else
-			st->ss->locate_bitmap(st, fd);
+		} else {
+			if (st->ss->locate_bitmap(st, fd)) {
+				pr_err("%s doesn't have bitmap\n", filename);
+				fd = -1;
+			}
+		}
 
 		*stp = st;
 	} else {
@@ -258,7 +264,7 @@ int ExamineBitmap(char *filename, int brief, struct supertype *st)
 	int rv = 1;
 	char buf[64];
 	int swap;
-	int fd;
+	int fd, i;
 	__u32 uuid32[4];
 
 	fd = bitmap_file_open(filename, &st);
@@ -285,7 +291,7 @@ int ExamineBitmap(char *filename, int brief, struct supertype *st)
 	}
 	printf("         Version : %d\n", sb->version);
 	if (sb->version < BITMAP_MAJOR_LO ||
-	    sb->version > BITMAP_MAJOR_HI) {
+	    sb->version > BITMAP_MAJOR_CLUSTERED) {
 		pr_err("unknown bitmap version %d, either the bitmap file\n",
 		       sb->version);
 		pr_err("is corrupted or you need to upgrade your tools\n");
@@ -315,9 +321,13 @@ int ExamineBitmap(char *filename, int brief, struct supertype *st)
 		       uuid32[2],
 		       uuid32[3]);
 
-	printf("          Events : %llu\n", (unsigned long long)sb->events);
-	printf("  Events Cleared : %llu\n", (unsigned long long)sb->events_cleared);
-	printf("           State : %s\n", bitmap_state(sb->state));
+	if (sb->nodes == 0) {
+		printf("          Events : %llu\n", (unsigned long long)sb->events);
+		printf("  Events Cleared : %llu\n", (unsigned long long)sb->events_cleared);
+		printf("           State : %s\n", bitmap_state(sb->state));
+
+	}
+
 	printf("       Chunksize : %s\n", human_chunksize(sb->chunksize));
 	printf("          Daemon : %ds flush period\n", sb->daemon_sleep);
 	if (sb->write_behind)
@@ -327,11 +337,40 @@ int ExamineBitmap(char *filename, int brief, struct supertype *st)
 	printf("      Write Mode : %s\n", buf);
 	printf("       Sync Size : %llu%s\n", (unsigned long long)sb->sync_size/2,
 					human_size(sb->sync_size * 512));
-	if (brief)
-		goto free_info;
-	printf("          Bitmap : %llu bits (chunks), %llu dirty (%2.1f%%)\n",
-			info->total_bits, info->dirty_bits,
-			100.0 * info->dirty_bits / (info->total_bits?:1));
+
+	if (sb->nodes == 0) {
+		if (brief)
+			goto free_info;
+		printf("          Bitmap : %llu bits (chunks), %llu dirty (%2.1f%%)\n",
+		       info->total_bits, info->dirty_bits,
+		       100.0 * info->dirty_bits / (info->total_bits?:1));
+	} else {
+		printf("   Cluster nodes : %d\n", sb->nodes);
+		printf("    Cluster name : %-64s\n", sb->cluster_name);
+		for (i = 0; i < (int)sb->nodes; i++) {
+			if (i) {
+				free(info);
+				info = bitmap_fd_read(fd, brief);
+				sb = &info->sb;
+			}
+			if (sb->magic != BITMAP_MAGIC)
+				pr_err("invalid bitmap magic 0x%x, the bitmap file appears to be corrupted\n", sb->magic);
+
+			printf("       Node Slot : %d\n", i);
+			printf("          Events : %llu\n",
+			       (unsigned long long)sb->events);
+			printf("  Events Cleared : %llu\n",
+			       (unsigned long long)sb->events_cleared);
+			printf("           State : %s\n", bitmap_state(sb->state));
+			if (brief)
+				continue;
+			printf("          Bitmap : %llu bits (chunks), %llu dirty (%2.1f%%)\n",
+			       info->total_bits, info->dirty_bits,
+			       100.0 * info->dirty_bits / (info->total_bits?:1));
+
+		}
+	}
+
 free_info:
 	free(info);
 	return rv;

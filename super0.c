@@ -405,7 +405,8 @@ static void getinfo_super0(struct supertype *st, struct mdinfo *info, char *map)
 	info->array.utime = sb->utime;
 	info->array.chunk_size = sb->chunk_size;
 	info->array.state = sb->state;
-	info->component_size = sb->size*2;
+	info->component_size = sb->size;
+	info->component_size *= 2;
 
 	if (sb->state & (1<<MD_SB_BITMAP_PRESENT))
 		info->bitmap_offset = 8;
@@ -900,7 +901,7 @@ static int write_init_super0(struct supertype *st)
 		rv = store_super0(st, di->fd);
 
 		if (rv == 0 && (sb->state & (1<<MD_SB_BITMAP_PRESENT)))
-			rv = st->ss->write_bitmap(st, di->fd);
+			rv = st->ss->write_bitmap(st, di->fd, NoUpdate);
 
 		if (rv)
 			pr_err("failed to write superblock to %s\n",
@@ -1155,16 +1156,16 @@ static int add_internal_bitmap0(struct supertype *st, int *chunkp,
 	return 1;
 }
 
-static void locate_bitmap0(struct supertype *st, int fd)
+static int locate_bitmap0(struct supertype *st, int fd)
 {
 	unsigned long long dsize;
 	unsigned long long offset;
 
 	if (!get_dev_size(fd, NULL, &dsize))
-		return;
+		return -1;
 
 	if (dsize < MD_RESERVED_SECTORS*512)
-		return;
+		return -1;
 
 	offset = MD_NEW_SIZE_SECTORS(dsize>>9);
 
@@ -1173,9 +1174,10 @@ static void locate_bitmap0(struct supertype *st, int fd)
 	offset += MD_SB_BYTES;
 
 	lseek64(fd, offset, 0);
+	return 0;
 }
 
-static int write_bitmap0(struct supertype *st, int fd)
+static int write_bitmap0(struct supertype *st, int fd, enum bitmap_update update)
 {
 	unsigned long long dsize;
 	unsigned long long offset;

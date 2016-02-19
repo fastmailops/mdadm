@@ -669,6 +669,15 @@ int attempt_re_add(int fd, int tfd, struct mddev_dev *dv,
 		disc.number = mdi.disk.number;
 		disc.raid_disk = mdi.disk.raid_disk;
 		disc.state = mdi.disk.state;
+		if (array->state & (1 << MD_SB_CLUSTERED)) {
+			/* extra flags are needed when adding to a cluster as
+			 * there are two cases to distinguish
+			 */
+			if (dv->disposition == 'c')
+				disc.state |= (1 << MD_DISK_CANDIDATE);
+			else
+				disc.state |= (1 << MD_DISK_CLUSTER_ADD);
+		}
 		if (dv->writemostly == 1)
 			disc.state |= 1 << MD_DISK_WRITEMOSTLY;
 		if (dv->writemostly == 2)
@@ -724,7 +733,8 @@ skip_re_add:
 int Manage_add(int fd, int tfd, struct mddev_dev *dv,
 	       struct supertype *tst, mdu_array_info_t *array,
 	       int force, int verbose, char *devname,
-	       char *update, unsigned long rdev, unsigned long long array_size)
+	       char *update, unsigned long rdev, unsigned long long array_size,
+	       int raid_slot)
 {
 	unsigned long long ldsize;
 	struct supertype *dev_st = NULL;
@@ -815,7 +825,8 @@ int Manage_add(int fd, int tfd, struct mddev_dev *dv,
 		}
 
 		/* Make sure device is large enough */
-		if (tst->sb &&
+		if (dv->disposition != 'j' &&  /* skip size check for Journal */
+		    tst->sb &&
 		    tst->ss->avail_size(tst, ldsize/512, INVALID_SECTORS) <
 		    array_size) {
 			if (dv->disposition == 'M')
@@ -914,10 +925,36 @@ int Manage_add(int fd, int tfd, struct mddev_dev *dv,
 	}
 	disc.major = major(rdev);
 	disc.minor = minor(rdev);
-	disc.number =j;
+	if (raid_slot < 0)
+		disc.number = j;
+	else
+		disc.number = raid_slot;
 	disc.state = 0;
+
+	/* only add journal to array that supports journaling */
+	if (dv->disposition == 'j') {
+		struct mdinfo mdi;
+		struct mdinfo *mdp;
+
+		mdp = sysfs_read(fd, NULL, GET_ARRAY_STATE);
+
+		if (strncmp(mdp->sysfs_array_state, "readonly", 8) != 0) {
+			pr_err("%s is not readonly, cannot add journal.\n", devname);
+			return -1;
+		}
+
+		tst->ss->getinfo_super(tst, &mdi, NULL);
+		if (mdi.journal_device_required == 0) {
+			pr_err("%s does not support journal device.\n", devname);
+			return -1;
+		}
+		disc.raid_disk = 0;
+	}
+
 	if (array->not_persistent==0) {
 		int dfd;
+		if (dv->disposition == 'j')
+			disc.state |= (1 << MD_DISK_JOURNAL) | (1 << MD_DISK_SYNC);
 		if (dv->writemostly == 1)
 			disc.state |= 1 << MD_DISK_WRITEMOSTLY;
 		dfd = dev_open(dv->devname, O_RDWR | O_EXCL|O_DIRECT);
@@ -955,6 +992,14 @@ int Manage_add(int fd, int tfd, struct mddev_dev *dv,
 			}
 		free(used);
 	}
+
+	if (array->state & (1 << MD_SB_CLUSTERED)) {
+		if (dv->disposition == 'c')
+			disc.state |= (1 << MD_DISK_CANDIDATE);
+		else
+			disc.state |= (1 << MD_DISK_CLUSTER_ADD);
+	}
+
 	if (dv->writemostly == 1)
 		disc.state |= (1 << MD_DISK_WRITEMOSTLY);
 	if (tst->ss->external) {
@@ -1020,10 +1065,20 @@ int Manage_add(int fd, int tfd, struct mddev_dev *dv,
 	} else {
 		tst->ss->free_super(tst);
 		if (ioctl(fd, ADD_NEW_DISK, &disc)) {
-			pr_err("add new device failed for %s as %d: %s\n",
-			       dv->devname, j, strerror(errno));
+			if (dv->disposition == 'j')
+				pr_err("Failed to hot add %s as journal, "
+				       "please try restart %s.\n", dv->devname, devname);
+			else
+				pr_err("add new device failed for %s as %d: %s\n",
+				       dv->devname, j, strerror(errno));
 			return -1;
 		}
+		if (dv->disposition == 'j') {
+			pr_err("Journal added successfully, making %s read-write\n", devname);
+			if (Manage_ro(devname, fd, -1))
+				pr_err("Failed to make %s read-write\n", devname);
+		}
+
 	}
 	if (verbose >= 0)
 		pr_err("added %s\n", dv->devname);
@@ -1256,6 +1311,7 @@ int Manage_subdevs(char *devname, int fd,
 	 *	   try HOT_ADD_DISK
 	 *         If that fails EINVAL, try ADD_NEW_DISK
 	 *  'S' - add the device as a spare - don't try re-add
+	 *  'j' - add the device as a journal device
 	 *  'A' - re-add the device
 	 *  'r' - remove the device: HOT_REMOVE_DISK
 	 *        device can be 'faulty' or 'detached' in which case all
@@ -1274,6 +1330,7 @@ int Manage_subdevs(char *devname, int fd,
 	 *        variant on 'A'
 	 *  'F' - Another variant of 'A', where the device was faulty
 	 *        so must be removed from the array first.
+	 *  'c' - confirm the device as found (for clustered environments)
 	 *
 	 * For 'f' and 'r', the device can also be a kernel-internal
 	 * name such as 'sdb'.
@@ -1287,8 +1344,10 @@ int Manage_subdevs(char *devname, int fd,
 	int sysfd = -1;
 	int count = 0; /* number of actions taken */
 	struct mdinfo info;
+	struct mdinfo devinfo;
 	int frozen = 0;
 	int busy = 0;
+	int raid_slot = -1;
 
 	if (ioctl(fd, GET_ARRAY_INFO, &array)) {
 		pr_err("Cannot get array info for %s\n",
@@ -1317,6 +1376,17 @@ int Manage_subdevs(char *devname, int fd,
 		int rv;
 		int mj,mn;
 
+		raid_slot = -1;
+		if (dv->disposition == 'c') {
+			rv = parse_cluster_confirm_arg(dv->devname,
+						       &dv->devname,
+						       &raid_slot);
+			if (rv) {
+				pr_err("Could not get the devname of cluster\n");
+				goto abort;
+			}
+		}
+
 		if (strcmp(dv->devname, "failed") == 0 ||
 		    strcmp(dv->devname, "faulty") == 0) {
 			if (dv->disposition != 'A'
@@ -1342,6 +1412,11 @@ int Manage_subdevs(char *devname, int fd,
 		if (strcmp(dv->devname, "missing") == 0) {
 			struct mddev_dev *add_devlist = NULL;
 			struct mddev_dev **dp;
+			if (dv->disposition == 'c') {
+				rv = ioctl(fd, CLUSTERED_DISK_NACK, NULL);
+				break;
+			}
+
 			if (dv->disposition != 'A') {
 				pr_err("'missing' only meaningful with --re-add\n");
 				goto abort;
@@ -1469,14 +1544,28 @@ int Manage_subdevs(char *devname, int fd,
 			goto abort;
 		case 'a':
 		case 'S': /* --add-spare */
+		case 'j': /* --add-journal */
 		case 'A':
 		case 'M': /* --re-add missing */
 		case 'F': /* --re-add faulty  */
+		case 'c': /* --cluster-confirm */
 			/* add the device */
 			if (subarray) {
 				pr_err("Cannot add disks to a \'member\' array, perform this operation on the parent container\n");
 				goto abort;
 			}
+
+			/* Let's first try to write re-add to sysfs */
+			if (rdev != 0 &&
+			    (dv->disposition == 'A' || dv->disposition == 'F')) {
+				sysfs_init_dev(&devinfo, rdev);
+				if (sysfs_set_str(&info, &devinfo, "state", "re-add") == 0) {
+					pr_err("re-add %s to %s succeed\n",
+						dv->devname, info.sys_name);
+					break;
+				}
+			}
+
 			if (dv->disposition == 'F')
 				/* Need to remove first */
 				ioctl(fd, HOT_REMOVE_DISK, rdev);
@@ -1505,7 +1594,7 @@ int Manage_subdevs(char *devname, int fd,
 			}
 			rv = Manage_add(fd, tfd, dv, tst, &array,
 					force, verbose, devname, update,
-					rdev, array_size);
+					rdev, array_size, raid_slot);
 			close(tfd);
 			tfd = -1;
 			if (rv < 0)

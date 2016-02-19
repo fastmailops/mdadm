@@ -1,7 +1,7 @@
 /*
  * mdadm - manage Linux "md" devices aka RAID arrays.
  *
- * Copyright (C) 2001-2015 Neil Brown <neilb@suse.de>
+ * Copyright (C) 2001-2016 Neil Brown <neilb@suse.com>
  *
  *
  *    This program is free software; you can redistribute it and/or modify
@@ -25,10 +25,10 @@
 #include "mdadm.h"
 
 #ifndef VERSION
-#define VERSION "3.3.4"
+#define VERSION "3.4"
 #endif
 #ifndef VERS_DATE
-#define VERS_DATE "3rd August 2015"
+#define VERS_DATE "28th January 2016"
 #endif
 char Version[] = "mdadm - v" VERSION " - " VERS_DATE "\n";
 
@@ -140,6 +140,9 @@ struct option long_options[] = {
     {"homehost",  1, 0,  HomeHost},
     {"symlinks",  1, 0,  Symlinks},
     {"data-offset",1, 0, DataOffset},
+    {"nodes",1, 0, Nodes}, /* also for --assemble */
+    {"home-cluster",1, 0, ClusterName},
+    {"write-journal",1, 0, WriteJournal},
 
     /* For assemble */
     {"uuid",      1, 0, 'u'},
@@ -154,6 +157,7 @@ struct option long_options[] = {
     /* Management */
     {"add",       0, 0, Add},
     {"add-spare", 0, 0, AddSpare},
+    {"add-journal", 0, 0, AddJournal},
     {"remove",    0, 0, Remove},
     {"fail",      0, 0, Fail},
     {"set-faulty",0, 0, Fail},
@@ -167,6 +171,7 @@ struct option long_options[] = {
     {"wait",	  0, 0,  WaitOpt},
     {"wait-clean", 0, 0, Waitclean },
     {"action",    1, 0, Action },
+    {"cluster-confirm", 0, 0, ClusterConfirm},
 
     /* For Detail/Examine */
     {"brief",	  0, 0, Brief},
@@ -372,6 +377,7 @@ char Help_create[] =
 "  --name=       -N   : Textual name for array - max 32 characters\n"
 "  --bitmap-chunk=    : bitmap chunksize in Kilobytes.\n"
 "  --delay=      -d   : bitmap update delay in seconds.\n"
+"  --write-journal=   : Specify journal device for RAID-4/5/6 array\n"
 "\n"
 ;
 
@@ -593,7 +599,7 @@ char Help_incr[] =
 ;
 
 char Help_config[] =
-"The /etc/mdadm/mdadm.conf config file:\n\n"
+"The /etc/mdadm.conf config file:\n\n"
 " The config file contains, apart from blank lines and comment lines that\n"
 " start with a hash(#), array lines, device lines, and various\n"
 " configuration lines.\n"

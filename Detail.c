@@ -299,7 +299,8 @@ int Detail(char *dev, struct context *c)
 	for (d = 0; d < max_disks * 2; d++) {
 		disks[d].state = (1<<MD_DISK_REMOVED);
 		disks[d].major = disks[d].minor = 0;
-		disks[d].number = disks[d].raid_disk = d;
+		disks[d].number = -1;
+		disks[d].raid_disk = d/2;
 	}
 
 	next = array.raid_disks*2;
@@ -325,7 +326,8 @@ int Detail(char *dev, struct context *c)
 		    && disks[disk.raid_disk*2].state == (1<<MD_DISK_REMOVED))
 			disks[disk.raid_disk*2] = disk;
 		else if (disk.raid_disk >= 0 && disk.raid_disk < array.raid_disks
-			 && disks[disk.raid_disk*2+1].state == (1<<MD_DISK_REMOVED))
+			 && disks[disk.raid_disk*2+1].state == (1<<MD_DISK_REMOVED)
+			 && !(disk.state & (1<<MD_DISK_JOURNAL)))
 			disks[disk.raid_disk*2+1] = disk;
 		else if (next < max_disks*2)
 			disks[next++] = disk;
@@ -339,7 +341,8 @@ int Detail(char *dev, struct context *c)
 		    (disks[d*2+1].state & (1<<MD_DISK_SYNC))) {
 			avail_disks ++;
 			avail[d] = 1;
-		}
+		} else
+			rv |= !! c->test;
 	}
 
 	if (c->brief) {
@@ -422,8 +425,9 @@ int Detail(char *dev, struct context *c)
 				else
 					printf("  Used Dev Size : unknown\n");
 			} else
-				printf("  Used Dev Size : %d%s\n", array.size,
-				       human_size((long long)array.size<<10));
+				printf("  Used Dev Size : %lu%s\n",
+				       (unsigned long)array.size,
+				       human_size((unsigned long long)array.size<<10));
 		}
 		if (array.raid_disks)
 			printf("   Raid Devices : %d\n", array.raid_disks);
@@ -616,12 +620,15 @@ This is pretty boring
 			continue;
 		if (!c->brief) {
 			if (d == array.raid_disks*2) printf("\n");
-			if (disk.number < 0)
+			if (disk.number < 0 && disk.raid_disk < 0)
 				printf("       -   %5d    %5d        -     ",
 				       disk.major, disk.minor);
-			else if (disk.raid_disk < 0)
+			else if (disk.raid_disk < 0 || disk.state & (1<<MD_DISK_JOURNAL))
 				printf("   %5d   %5d    %5d        -     ",
 				       disk.number, disk.major, disk.minor);
+			else if (disk.number < 0)
+				printf("       -   %5d    %5d    %5d     ",
+				       disk.major, disk.minor, disk.raid_disk);
 			else
 				printf("   %5d   %5d    %5d    %5d     ",
 				       disk.number, disk.major, disk.minor, disk.raid_disk);
@@ -650,9 +657,10 @@ This is pretty boring
 			}
 			if (disk.state & (1<<MD_DISK_REMOVED)) printf(" removed");
 			if (disk.state & (1<<MD_DISK_WRITEMOSTLY)) printf(" writemostly");
+			if (disk.state & (1<<MD_DISK_JOURNAL)) printf(" journal");
 			if ((disk.state &
 			     ((1<<MD_DISK_ACTIVE)|(1<<MD_DISK_SYNC)
-			      |(1<<MD_DISK_REMOVED)|(1<<MD_DISK_FAULTY)))
+			      |(1<<MD_DISK_REMOVED)|(1<<MD_DISK_FAULTY)|(1<<MD_DISK_JOURNAL)))
 			    == 0) {
 				printf(" spare");
 				if (is_26) {
@@ -671,9 +679,6 @@ This is pretty boring
 			}
 		}
 		if (disk.state == 0) spares++;
-		if (c->test && d < array.raid_disks
-		    && !(disk.state & (1<<MD_DISK_SYNC)))
-			rv |= 1;
 		dv=map_dev_preferred(disk.major, disk.minor, 0, c->prefer);
 		if (dv != NULL) {
 			if (c->brief)

@@ -25,12 +25,9 @@ GOTO="md_inc_end"
 
 LABEL="md_inc"
 
-# Disable incremental assembly to fix Debian bug #784070
-GOTO="md_inc_end"
-
 # remember you can limit what gets auto/incrementally assembled by
 # mdadm.conf(5)'s 'AUTO' and selectively whitelist using 'ARRAY'
-ACTION=="add|change", IMPORT{program}="BINDIR/mdadm --incremental --export $tempnode --offroot ${DEVLINKS}"
+ACTION=="add|change", IMPORT{program}="BINDIR/mdadm --incremental --export $devnode --offroot ${DEVLINKS}"
 ACTION=="add|change", ENV{MD_STARTED}=="*unsafe*", ENV{MD_FOREIGN}=="no", ENV{SYSTEMD_WANTS}+="mdadm-last-resort@$env{MD_DEVICE}.timer"
 ACTION=="remove", ENV{ID_PATH}=="?*", RUN+="BINDIR/mdadm -If $name --path $env{ID_PATH}"
 ACTION=="remove", ENV{ID_PATH}!="?*", RUN+="BINDIR/mdadm -If $name"

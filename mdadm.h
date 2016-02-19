@@ -35,6 +35,7 @@ extern __off64_t lseek64 __P ((int __fd, __off64_t __offset, int __whence));
 
 #include	<sys/types.h>
 #include	<sys/stat.h>
+#include	<stdint.h>
 #include	<stdlib.h>
 #include	<time.h>
 #include	<sys/time.h>
@@ -49,6 +50,32 @@ extern __off64_t lseek64 __P ((int __fd, __off64_t __offset, int __whence));
 /* dietlibc has deprecated random and srandom!! */
 #define random rand
 #define srandom srand
+#endif
+
+#ifdef NO_COROSYNC
+#define CS_OK 1
+typedef uint64_t cmap_handle_t;
+#else
+#include	<corosync/cmap.h>
+#endif
+
+#ifndef NO_DLM
+#include	<libdlm.h>
+#include	<errno.h>
+#else
+#define LKF_NOQUEUE	0x00000001
+#define LKF_CONVERT	0x00000004
+#define LKM_PWMODE	4
+#define EUNLOCK		0x10002
+
+typedef void *dlm_lshandle_t;
+
+struct dlm_lksb {
+	int sb_status;
+	uint32_t sb_lkid;
+	char sb_flags;
+	char *sb_lvbptr;
+};
 #endif
 
 #include	<linux/kdev_t.h>
@@ -162,6 +189,31 @@ extern __off64_t lseek64 __P ((int __fd, __off64_t __offset, int __whence));
 #endif /* __KLIBC__ */
 
 /*
+  * Check at compile time that something is of a particular type.
+  * Always evaluates to 1 so you may use it easily in comparisons.
+*/
+
+#define typecheck(type,x) \
+({	   type __dummy; \
+	   typeof(x) __dummy2; \
+	   (void)(&__dummy == &__dummy2); \
+	   1; \
+})
+
+/*
+ *  These inlines deal with timer wrapping correctly.
+ *
+ * time_after(a,b) returns true if the time a is after time b.
+*/
+
+#define time_after(a,b)	\
+        (typecheck(unsigned int, a) && \
+         typecheck(unsigned int, b) && \
+         ((int)((b) - (a)) < 0))
+
+#define time_before(a,b)        time_after(b,a)
+
+/*
  * min()/max()/clamp() macros that also do
  * strict type-checking.. See the
  * "unnecessary" pointer comparison.
@@ -210,6 +262,9 @@ struct mdinfo {
 						   * for native metadata it is
 						   * reshape_active field mirror
 						   */
+	int journal_device_required;
+	int journal_clean;
+
 	/* During reshape we can sometimes change the data_offset to avoid
 	 * over-writing still-valid data.  We need to know if there is space.
 	 * So getinfo_super will fill in space_before and space_after in sectors.
@@ -251,6 +306,8 @@ struct mdinfo {
 	#define	DS_UNBLOCK	2048
 	int prev_state, curr_state, next_state;
 
+	/* info read from sysfs */
+	char		sysfs_array_state[20];
 };
 
 struct createinfo {
@@ -313,6 +370,7 @@ enum special_options {
 	ManageOpt,
 	Add,
 	AddSpare,
+	AddJournal,
 	Remove,
 	Fail,
 	Replace,
@@ -344,11 +402,21 @@ enum special_options {
 	Dump,
 	Restore,
 	Action,
+	Nodes,
+	ClusterName,
+	ClusterConfirm,
+	WriteJournal,
 };
 
 enum prefix_standard {
 	JEDEC,
 	IEC
+};
+
+enum bitmap_update {
+    NoUpdate,
+    NameUpdate,
+    NodeNumUpdate,
 };
 
 /* structures read from config file */
@@ -418,11 +486,14 @@ struct context {
 	char	*backup_file;
 	int	invalid_backup;
 	char	*action;
+	int	nodes;
+	char	*homecluster;
 };
 
 struct shape {
 	int	raiddisks;
 	int	sparedisks;
+	int	journaldisks;
 	int	level;
 	int	layout;
 	char	*layout_str;
@@ -521,6 +592,7 @@ enum sysfs_read_flags {
 	GET_SIZE	= (1 << 22),
 	GET_STATE	= (1 << 23),
 	GET_ERROR	= (1 << 24),
+	GET_ARRAY_STATE = (1 << 25),
 };
 
 /* If fd >= 0, get the array it is open on,
@@ -528,6 +600,7 @@ enum sysfs_read_flags {
  */
 extern int sysfs_open(char *devnm, char *devname, char *attr);
 extern void sysfs_init(struct mdinfo *mdi, int fd, char *devnm);
+extern void sysfs_init_dev(struct mdinfo *mdi, unsigned long devid);
 extern void sysfs_free(struct mdinfo *sra);
 extern struct mdinfo *sysfs_read(int fd, char *devnm, unsigned long options);
 extern int sysfs_attr_match(const char *attr, const char *str);
@@ -747,7 +820,8 @@ extern struct superswitch {
 	 *   readwrite - clear the WriteMostly1 bit in the superblock devflags
 	 *   no-bitmap - clear any record that a bitmap is present.
 	 *   bbl       - add a bad-block-log if possible
-	 *   no-bbl    - remove and bad-block-log is it is empty.
+	 *   no-bbl    - remove any bad-block-log is it is empty.
+	 *   force-no-bbl - remove any bad-block-log even if empty.
 	 *   revert-reshape - If a reshape is in progress, modify metadata so
 	 *                    it will resume going in the opposite direction.
 	 */
@@ -830,11 +904,11 @@ extern struct superswitch {
 	/* Seek 'fd' to start of write-intent-bitmap.  Must be an
 	 * md-native format bitmap
 	 */
-	void (*locate_bitmap)(struct supertype *st, int fd);
+	int (*locate_bitmap)(struct supertype *st, int fd);
 	/* if add_internal_bitmap succeeded for existing array, this
 	 * writes it out.
 	 */
-	int (*write_bitmap)(struct supertype *st, int fd);
+	int (*write_bitmap)(struct supertype *st, int fd, enum bitmap_update update);
 	/* Free the superblock and any other allocated data */
 	void (*free_super)(struct supertype *st);
 
@@ -1018,6 +1092,8 @@ struct supertype {
 			 */
 	int devcnt;
 	int retry_soon;
+	int nodes;
+	char *cluster_name;
 
 	struct mdinfo *devs;
 
@@ -1264,6 +1340,7 @@ extern int parse_uuid(char *str, int uuid[4]);
 extern int parse_layout_10(char *layout);
 extern int parse_layout_faulty(char *layout);
 extern long parse_num(char *num);
+extern int parse_cluster_confirm_arg(char *inp, char **devname, int *slot);
 extern int check_ext2(int fd, char *name);
 extern int check_reiser(int fd, char *name);
 extern int check_raid(int fd, char *name);
@@ -1294,6 +1371,7 @@ extern char *conf_get_mailaddr(void);
 extern char *conf_get_mailfrom(void);
 extern char *conf_get_program(void);
 extern char *conf_get_homehost(int *require_homehostp);
+extern char *conf_get_homecluster(void);
 extern char *conf_line(FILE *file);
 extern char *conf_word(FILE *file, int allow_key);
 extern void print_quoted(char *str);
@@ -1402,6 +1480,45 @@ extern char *stat2devnm(struct stat *st);
 extern char *fd2devnm(int fd);
 
 extern int in_initrd(void);
+
+struct cmap_hooks {
+	void *cmap_handle;      /* corosync lib related */
+
+	int (*initialize)(cmap_handle_t *handle);
+	int (*get_string)(cmap_handle_t handle,
+			  const char *string,
+			  char **name);
+	int (*finalize)(cmap_handle_t handle);
+};
+
+extern void set_cmap_hooks(void);
+extern void set_hooks(void);
+
+struct dlm_hooks {
+	void *dlm_handle;	/* dlm lib related */
+
+	dlm_lshandle_t (*create_lockspace)(const char *name,
+					   unsigned int mode);
+	int (*release_lockspace)(const char *name, dlm_lshandle_t ls,
+				 int force);
+	int (*ls_lock)(dlm_lshandle_t lockspace, uint32_t mode,
+		       struct dlm_lksb *lksb, uint32_t flags,
+		       const void *name, unsigned int namelen,
+		       uint32_t parent, void (*astaddr) (void *astarg),
+		       void *astarg, void (*bastaddr) (void *astarg),
+		       void *range);
+	int (*ls_unlock)(dlm_lshandle_t lockspace, uint32_t lkid,
+			 uint32_t flags, struct dlm_lksb *lksb,
+			 void *astarg);
+	int (*ls_get_fd)(dlm_lshandle_t ls);
+	int (*dispatch)(int fd);
+};
+
+extern int get_cluster_name(char **name);
+extern int dlm_funs_ready(void);
+extern int cluster_get_dlmlock(int *lockid);
+extern int cluster_release_dlmlock(int lockid);
+extern void set_dlm_hooks(void);
 
 #define _ROUND_UP(val, base)	(((val) + (base) - 1) & ~(base - 1))
 #define ROUND_UP(val, base)	_ROUND_UP(val, (typeof(val))(base))

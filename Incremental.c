@@ -104,6 +104,7 @@ int Incremental(struct mddev_dev *devlist, struct context *c,
 	struct map_ent target_array;
 	int have_target;
 	char *devname = devlist->devname;
+	int journal_device_missing = 0;
 
 	struct createinfo *ci = conf_get_create_info();
 
@@ -312,6 +313,12 @@ int Incremental(struct mddev_dev *devlist, struct context *c,
 
 	if (mdfd < 0) {
 
+		/* Skip the clustered ones. This should be started by
+		 * clustering resource agents
+		 */
+		if (info.array.state & (1 << MD_SB_CLUSTERED))
+			goto out;
+
 		/* Couldn't find an existing array, maybe make a new one */
 		mdfd = create_mddev(match ? match->devname : NULL,
 				    name_to_use, c->autof, trustworthy, chosen_name);
@@ -437,6 +444,10 @@ int Incremental(struct mddev_dev *devlist, struct context *c,
 		/* add disk needs to know about containers */
 		if (st->ss->external)
 			sra->array.level = LEVEL_CONTAINER;
+
+		if (info.array.state & (1 << MD_SB_CLUSTERED))
+			info.disk.state |= (1 << MD_DISK_CLUSTER_ADD);
+
 		err = add_disk(mdfd, st, sra, &info);
 		if (err < 0 && errno == EBUSY) {
 			/* could be another device present with the same
@@ -514,6 +525,9 @@ int Incremental(struct mddev_dev *devlist, struct context *c,
 	sra = sysfs_read(mdfd, NULL, (GET_DEVS | GET_STATE |
 				    GET_OFFSET | GET_SIZE));
 	active_disks = count_active(st, sra, mdfd, &avail, &info);
+
+	journal_device_missing = (info.journal_device_required) && (info.journal_clean == 0);
+
 	if (enough(info.array.level, info.array.raid_disks,
 		   info.array.layout, info.array.state & 1,
 		   avail) == 0) {
@@ -543,10 +557,12 @@ int Incremental(struct mddev_dev *devlist, struct context *c,
 	}
 
 	map_unlock(&map);
-	if (c->runstop > 0 || active_disks >= info.array.working_disks) {
+	if (c->runstop > 0 || (!journal_device_missing && active_disks >= info.array.working_disks)) {
 		struct mdinfo *dsk;
 		/* Let's try to start it */
 
+		if (journal_device_missing)
+			pr_err("Trying to run with missing journal device\n");
 		if (info.reshape_active && !(info.reshape_active & RESHAPE_NO_BACKUP)) {
 			pr_err("%s: This array is being reshaped and cannot be started\n",
 			       chosen_name);
@@ -613,6 +629,8 @@ int Incremental(struct mddev_dev *devlist, struct context *c,
 	} else {
 		if (c->export) {
 			printf("MD_STARTED=unsafe\n");
+		} else if (journal_device_missing) {
+			pr_err("Journal device is missing, not safe to start yet.\n");
 		} else if (c->verbose >= 0)
 			pr_err("%s attached to %s, not enough to start safely.\n",
 			       devname, chosen_name);
@@ -649,7 +667,7 @@ static void find_reject(int mdfd, struct supertype *st, struct mdinfo *sra,
 			 * without thinking more */
 
 	for (d = sra->devs; d ; d = d->next) {
-		char dn[10];
+		char dn[24]; // 2*11 bytes for ints (including sign) + colon + null byte
 		int dfd;
 		struct mdinfo info;
 		sprintf(dn, "%d:%d", d->disk.major, d->disk.minor);
@@ -713,8 +731,11 @@ static int count_active(struct supertype *st, struct mdinfo *sra,
 		close(dfd);
 		if (ok != 0)
 			continue;
+
 		info.array.raid_disks = raid_disks;
 		st->ss->getinfo_super(st, &info, devmap + raid_disks * devnum);
+		if (info.disk.raid_disk == MD_DISK_ROLE_JOURNAL)
+			bestinfo->journal_clean = 1;
 		if (!avail) {
 			raid_disks = info.array.raid_disks;
 			avail = xcalloc(raid_disks, 1);
@@ -764,6 +785,7 @@ static int count_active(struct supertype *st, struct mdinfo *sra,
 			replcnt++;
 		st->ss->free_super(st);
 	}
+
 	if (!avail)
 		return 0;
 	/* We need to reject any device that thinks the best device is
@@ -1012,12 +1034,12 @@ static int array_try_spare(char *devname, int *dfdp, struct dev_policy *pol,
 		int mdfd = open_dev(chosen->sys_name);
 		if (mdfd >= 0) {
 			struct mddev_dev devlist;
-			char devname[20];
+			char chosen_devname[24]; // 2*11 for int (including signs) + colon + null
 			devlist.next = NULL;
 			devlist.used = 0;
 			devlist.writemostly = 0;
-			devlist.devname = devname;
-			sprintf(devname, "%d:%d", major(stb.st_rdev),
+			devlist.devname = chosen_devname;
+			sprintf(chosen_devname, "%d:%d", major(stb.st_rdev),
 				minor(stb.st_rdev));
 			devlist.disposition = 'a';
 			close(dfd);

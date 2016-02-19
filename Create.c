@@ -87,7 +87,7 @@ int Create(struct supertype *st, char *mddev,
 	unsigned long long minsize=0, maxsize=0;
 	char *mindisc = NULL;
 	char *maxdisc = NULL;
-	int dnum;
+	int dnum, raid_disk_num;
 	struct mddev_dev *dv;
 	int fail=0, warn=0;
 	struct stat stb;
@@ -114,6 +114,8 @@ int Create(struct supertype *st, char *mddev,
 	unsigned long long newsize;
 
 	int major_num = BITMAP_MAJOR_HI;
+	if (s->bitmap_file && strcmp(s->bitmap_file, "clustered") == 0)
+		major_num = BITMAP_MAJOR_CLUSTERED;
 
 	memset(&info, 0, sizeof(info));
 	if (s->level == UnSet && st && st->ss->default_geometry)
@@ -180,11 +182,11 @@ int Create(struct supertype *st, char *mddev,
 		pr_err("This metadata type does not support spare disks at create time\n");
 		return 1;
 	}
-	if (subdevs > s->raiddisks+s->sparedisks) {
+	if (subdevs > s->raiddisks+s->sparedisks+s->journaldisks) {
 		pr_err("You have listed more devices (%d) than are in the array(%d)!\n", subdevs, s->raiddisks+s->sparedisks);
 		return 1;
 	}
-	if (!have_container && subdevs < s->raiddisks+s->sparedisks) {
+	if (!have_container && subdevs < s->raiddisks+s->sparedisks+s->journaldisks) {
 		pr_err("You haven't given enough devices (real or missing) to create this array\n");
 		return 1;
 	}
@@ -328,7 +330,7 @@ int Create(struct supertype *st, char *mddev,
 		}
 		close(dfd);
 		info.array.working_disks++;
-		if (dnum < s->raiddisks)
+		if (dnum < s->raiddisks && dv->disposition != 'j')
 			info.array.active_disks++;
 		if (st == NULL) {
 			struct createinfo *ci = conf_get_create_info();
@@ -397,6 +399,9 @@ int Create(struct supertype *st, char *mddev,
 			}
 		}
 
+		if (dv->disposition == 'j')
+			goto skip_size_check;  /* skip write journal for size check */
+
 		freesize /= 2; /* convert to K */
 		if (s->chunk && s->chunk != UnSet) {
 			/* round to chunk size */
@@ -429,6 +434,7 @@ int Create(struct supertype *st, char *mddev,
 			mindisc = dname;
 			minsize = freesize;
 		}
+	skip_size_check:
 		if (c->runstop != 1 || c->verbose >= 0) {
 			int fd = open(dname, O_RDONLY);
 			if (fd <0 ) {
@@ -531,6 +537,8 @@ int Create(struct supertype *st, char *mddev,
 				st->ss->name);
 		warn = 1;
 	}
+	st->nodes = c->nodes;
+	st->cluster_name = c->homecluster;
 
 	if (warn) {
 		if (c->runstop!= 1) {
@@ -750,7 +758,8 @@ int Create(struct supertype *st, char *mddev,
 #endif
 	}
 
-	if (s->bitmap_file && strcmp(s->bitmap_file, "internal")==0) {
+	if (s->bitmap_file && (strcmp(s->bitmap_file, "internal")==0 ||
+			       strcmp(s->bitmap_file, "clustered")==0)) {
 		if ((vers%100) < 2) {
 			pr_err("internal bitmaps not supported by this kernel.\n");
 			goto abort_locked;
@@ -834,7 +843,7 @@ int Create(struct supertype *st, char *mddev,
 	for (pass=1; pass <=2 ; pass++) {
 		struct mddev_dev *moved_disk = NULL; /* the disk that was moved out of the insert point */
 
-		for (dnum=0, dv = devlist ; dv ;
+		for (dnum=0, raid_disk_num=0, dv = devlist ; dv ;
 		     dv=(dv->next)?(dv->next):moved_disk, dnum++) {
 			int fd;
 			struct stat stb;
@@ -843,11 +852,14 @@ int Create(struct supertype *st, char *mddev,
 			if (dnum >= total_slots)
 				abort();
 			if (dnum == insert_point) {
+				raid_disk_num += 1;
 				moved_disk = dv;
 				continue;
 			}
-			if (strcasecmp(dv->devname, "missing")==0)
+			if (strcasecmp(dv->devname, "missing")==0) {
+				raid_disk_num += 1;
 				continue;
+			}
 			if (have_container)
 				moved_disk = NULL;
 			if (have_container && dnum < info.array.raid_disks - 1)
@@ -859,8 +871,13 @@ int Create(struct supertype *st, char *mddev,
 				*inf = info;
 
 				inf->disk.number = dnum;
-				inf->disk.raid_disk = dnum;
-				if (inf->disk.raid_disk < s->raiddisks)
+				inf->disk.raid_disk = raid_disk_num++;
+
+				if (dv->disposition == 'j') {
+					inf->disk.raid_disk = MD_DISK_ROLE_JOURNAL;
+					inf->disk.state = (1<<MD_DISK_JOURNAL);
+					raid_disk_num--;
+				} else if (inf->disk.raid_disk < s->raiddisks)
 					inf->disk.state = (1<<MD_DISK_ACTIVE) |
 						(1<<MD_DISK_SYNC);
 				else

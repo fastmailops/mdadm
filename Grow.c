@@ -297,6 +297,9 @@ int Grow_addbitmap(char *devname, int fd, struct context *c, struct shape *s)
 			"  between different architectures.  Consider upgrading the Linux kernel.\n");
 	}
 
+	if (s->bitmap_file && strcmp(s->bitmap_file, "clustered") == 0)
+		major = BITMAP_MAJOR_CLUSTERED;
+
 	if (ioctl(fd, GET_BITMAP_FILE, &bmf) != 0) {
 		if (errno == ENOMEM)
 			pr_err("Memory allocation failure.\n");
@@ -325,13 +328,15 @@ int Grow_addbitmap(char *devname, int fd, struct context *c, struct shape *s)
 		if (strcmp(s->bitmap_file, "none")==0) {
 			array.state &= ~(1<<MD_SB_BITMAP_PRESENT);
 			if (ioctl(fd, SET_ARRAY_INFO, &array)!= 0) {
-				pr_err("failed to remove internal bitmap.\n");
+				if (array.state & (1<<MD_SB_CLUSTERED))
+					pr_err("failed to remove clustered bitmap.\n");
+				else
+					pr_err("failed to remove internal bitmap.\n");
 				return 1;
 			}
 			return 0;
 		}
-		pr_err("Internal bitmap already present on %s\n",
-			devname);
+		pr_err("bitmap already present on %s\n", devname);
 		return 1;
 	}
 
@@ -375,7 +380,8 @@ int Grow_addbitmap(char *devname, int fd, struct context *c, struct shape *s)
 		free(st);
 		return 1;
 	}
-	if (strcmp(s->bitmap_file, "internal") == 0) {
+	if (strcmp(s->bitmap_file, "internal") == 0 ||
+	    strcmp(s->bitmap_file, "clustered") == 0) {
 		int rv;
 		int d;
 		int offset_setable = 0;
@@ -384,6 +390,8 @@ int Grow_addbitmap(char *devname, int fd, struct context *c, struct shape *s)
 			pr_err("Internal bitmaps not supported with %s metadata\n", st->ss->name);
 			return 1;
 		}
+		st->nodes = c->nodes;
+		st->cluster_name = c->homecluster;
 		mdi = sysfs_read(fd, NULL, GET_BITMAP_LOCATION);
 		if (mdi)
 			offset_setable = 1;
@@ -410,7 +418,7 @@ int Grow_addbitmap(char *devname, int fd, struct context *c, struct shape *s)
 						    bitmapsize, offset_setable,
 						    major)
 						)
-						st->ss->write_bitmap(st, fd2);
+						st->ss->write_bitmap(st, fd2, NoUpdate);
 					else {
 						pr_err("failed to create internal bitmap - chunksize problem.\n");
 						close(fd2);
@@ -426,6 +434,8 @@ int Grow_addbitmap(char *devname, int fd, struct context *c, struct shape *s)
 			rv = sysfs_set_num_signed(mdi, NULL, "bitmap/location",
 						  mdi->bitmap_offset);
 		} else {
+			if (strcmp(s->bitmap_file, "clustered") == 0)
+				array.state |= (1<<MD_SB_CLUSTERED);
 			array.state |= (1<<MD_SB_BITMAP_PRESENT);
 			rv = ioctl(fd, SET_ARRAY_INFO, &array);
 		}
@@ -1580,6 +1590,15 @@ int Grow_reshape(char *devname, int fd,
 		pr_err("Cannot increase raid-disks on this array beyond %d\n", st->max_devs);
 		return 1;
 	}
+	if (s->level == 0 &&
+	    (array.state & (1<<MD_SB_BITMAP_PRESENT)) &&
+	    !(array.state & (1<<MD_SB_CLUSTERED))) {
+                array.state &= ~(1<<MD_SB_BITMAP_PRESENT);
+                if (ioctl(fd, SET_ARRAY_INFO, &array)!= 0) {
+                        pr_err("failed to remove internal bitmap.\n");
+                        return 1;
+                }
+        }
 
 	/* in the external case we need to check that the requested reshape is
 	 * supported, and perform an initial check that the container holds the
@@ -4496,8 +4515,8 @@ int Grow_restart(struct supertype *st, struct mdinfo *info, int *fdlist, int cnt
 		 * sometimes they aren't... So allow considerable flexability in matching, and allow
 		 * this test to be overridden by an environment variable.
 		 */
-		if (info->array.utime > (int)__le64_to_cpu(bsb.mtime) + 2*60*60 ||
-		    info->array.utime < (int)__le64_to_cpu(bsb.mtime) - 10*60) {
+		if(time_after(info->array.utime, (unsigned int)__le64_to_cpu(bsb.mtime) + 2*60*60) ||
+		   time_before(info->array.utime, (unsigned int)__le64_to_cpu(bsb.mtime) - 10*60)) {
 			if (check_env("MDADM_GROW_ALLOW_OLD")) {
 				pr_err("accepting backup with timestamp %lu for array with timestamp %lu\n",
 					(unsigned long)__le64_to_cpu(bsb.mtime),
@@ -4865,6 +4884,9 @@ int Grow_continue_command(char *devname, int fd,
 		}
 
 		sysfs_init(content, fd2, mdstat->devnm);
+
+		close(fd2);
+		fd2 = -1;
 
 		/* start mdmon in case it is not running
 		 */
