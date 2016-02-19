@@ -1,6 +1,9 @@
 mdadm (3.4-1) unstable; urgency=medium
 
   * New upstream release.
+  * Drop use-tempnode-not-devnode.patch, not needed anymore.
+  * Drop use-external-blkid.diff. (Closes: #793631)
+  * Refresh patches.
 
  -- Dimitri John Ledkov <xnox@ubuntu.com>  Fri, 19 Feb 2016 16:18:36 +0000
 

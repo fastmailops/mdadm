@@ -22,7 +22,7 @@
 
 #include <stdio.h>
 
-#if defined HAVE_LIMITS_H || _LIBC
+#if 1 /* defined HAVE_LIMITS_H || _LIBC */
 # include <limits.h>
 #endif
 
@@ -33,9 +33,9 @@
    the resulting executable.  Locally running cross-compiled executables
    is usually not possible.  */
 
-#ifdef _LIBC
-# include <sys/types.h>
-typedef u_int32_t sha1_uint32;
+#if 1 /* def _LIBC */
+# include <stdint.h>
+typedef uint32_t sha1_uint32;
 typedef uintptr_t sha1_uintptr;
 #else
 #  define INT_MAX_32_BITS 2147483647
