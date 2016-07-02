@@ -1,0 +1,103 @@
+#!/usr/bin/make -f
+# Copyright © 2001-2005 Mario Jou/3en <joussen@debian.org>
+# Copyright © 2005-2008 Martin F. Krafft <madduck@debian.org>
+# Distributable under the terms of the GNU GPL version 2.
+#
+
+#export DH_VERBOSE=1
+
+export CROSS_COMPILE=$(shell dpkg-architecture -qDEB_HOST_GNU_TYPE)-
+LDFLAGS = $(shell dpkg-buildflags --get LDFLAGS)
+CXFLAGS = $(shell dpkg-buildflags --get CFLAGS) \
+	  $(shell dpkg-buildflags --get CPPFLAGS)
+BUILDFLAGS = CXFLAGS="$(CXFLAGS)" LDFLAGS="$(LDFLAGS)" DEBIAN=yes
+DESTDIR = $(CURDIR)/debian/mdadm
+DESTDIR_UDEB = $(DESTDIR)-udeb
+
+build-arch: build-stamp
+
+build-stamp:
+	dh_testdir
+	$(MAKE) all $(BUILDFLAGS) CONFFILE=/etc/mdadm/mdadm.conf CONFFILE2=/etc/mdadm.conf
+	touch $@
+
+# udeb rules should go, the only diff is the conffile location,
+# and d-i specifies path explicitly when needed
+
+udeb/dir-stamp:
+	rm -rf udeb
+	mkdir udeb
+	ln *.[ch] Makefile udeb/
+	touch $@
+
+build-arch: udeb/build-stamp
+
+udeb/build-stamp: udeb/dir-stamp
+	dh_testdir
+	$(MAKE) -C udeb mdadm mdmon $(BUILDFLAGS) CONFFILE=/tmp/mdadm.conf
+	touch $@
+
+clean:
+	dh_testdir
+	rm -f build-stamp
+	$(MAKE) clean
+	rm -rf udeb
+	dh_clean
+
+install-arch: build-arch
+	dh_testdir
+	dh_prep
+	dh_installdirs
+
+	$(MAKE) install install-systemd DESTDIR=$(DESTDIR)
+
+	mkdir -p $(DESTDIR)/etc/mdadm
+	install -Dm0755 debian/initramfs/hook \
+		$(DESTDIR)/usr/share/initramfs-tools/hooks/mdadm
+	install -Dm0755 debian/initramfs/script.local-block \
+		$(DESTDIR)/usr/share/initramfs-tools/scripts/local-block/mdadm
+	install -Dm0755 debian/initramfs/script.local-bottom \
+		$(DESTDIR)/usr/share/initramfs-tools/scripts/local-bottom/mdadm
+	install -Dm0644 debian/mdadm.modules \
+		$(DESTDIR)/etc/modprobe.d/mdadm.conf
+
+	install -Dm0755 debian/mkconf $(DESTDIR)/usr/share/mdadm/mkconf
+	install -Dm0755 debian/checkarray $(DESTDIR)/usr/share/mdadm/checkarray
+	install -Dm0755 debian/bugscript $(DESTDIR)/usr/share/bug/mdadm/script
+	install -Dm0644 debian/presubj $(DESTDIR)/usr/share/bug/mdadm/presubj
+
+	install -Dm0755 udeb/mdadm $(DESTDIR_UDEB)/sbin/mdadm
+	install -Dm0755 udeb/mdmon $(DESTDIR_UDEB)/sbin/mdmon
+	install -Dm0644 udev-md-raid-arrays.rules $(DESTDIR_UDEB)/lib/udev/rules.d/63-md-raid-arrays.rules
+
+binary-arch: install-arch
+	dh_testdir
+	dh_testroot
+	dh_installdebconf
+	dh_installdocs
+	dh_installexamples -pmdadm mdadm.conf-example misc/syslog-events
+	dh_installinit --init-script=mdadm-waitidle --no-start -- stop 98 0 6 .
+	dh_link -pmdadm /dev/null /lib/systemd/system/mdadm-waitidle.service
+	dh_installinit -- defaults 25
+	dh_link -pmdadm /dev/null /lib/systemd/system/mdadm.service
+	dh_installman
+	dh_installcron
+	dh_installchangelogs ChangeLog
+	dh_installlogcheck
+	dh_link
+	dh_strip
+	dh_compress
+	dh_fixperms
+	dh_installdeb
+	dh_shlibdeps
+	dh_gencontrol
+	dh_md5sums
+	dh_builddeb
+
+build: build-arch
+install: install-arch
+binary: binary-arch
+build-indep:
+install-indep:
+binary-indep:
+.PHONY: clean build build-indep build-arch binary binary-indep binary-arch install install-indep install-arch
