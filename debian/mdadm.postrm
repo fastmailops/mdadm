@@ -1,0 +1,25 @@
+#! /bin/sh
+# Copyright © 2001,2002 Mario Jou/3en <joussen@debian.org>
+# Copyright © 2006-2008 Martin F. Krafft <madduck@debian.org>
+# Distributable under the terms of the GNU GPL version 2.
+#
+set -e
+
+case "${1:-}" in
+    remove)
+	if command -v update-initramfs >/dev/null 2>&1; then
+	    echo "W: mdadm: I'll update the initramfs, but if you need MD to boot" >&2
+	    echo "W: mdadm: with initramfs, your system may be left unbootable!" >&2
+	    update-initramfs -u
+	fi
+    ;;
+
+  purge)
+    rm -f /etc/default/mdadm /etc/mdadm.conf /etc/mdadm/mdadm.conf
+    ;;
+
+esac
+
+[ -d /run/systemd/system ] && systemctl --system daemon-reload >/dev/null || :
+
+#DEBHELPER#

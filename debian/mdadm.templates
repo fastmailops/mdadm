@@ -1,0 +1,38 @@
+# These templates have been reviewed by the debian-l10n-english
+# team
+#
+# If modifications/additions/rewording are needed, please ask
+# debian-l10n-english@lists.debian.org for advice.
+#
+# Even minor modifications require translation updates and such
+# changes should be coordinated with translators and reviewers.
+
+Template: mdadm/autocheck
+Type: boolean
+Default: true
+_Description: Should mdadm run monthly redundancy checks of the MD arrays?
+ If the kernel supports it (versions greater than 2.6.14), mdadm can periodically check the
+ redundancy of MD arrays (RAIDs). This may be a resource-intensive process,
+ depending on the local setup, but it could help prevent rare cases of data loss.
+ Note that this is a read-only check unless errors are found; if errors are
+ found, mdadm will try to correct them, which may result in write access to
+ the media.
+ .
+ The default, if turned on, is to check on the first Sunday of every
+ month at 01:06.
+
+Template: mdadm/start_daemon
+Type: boolean
+Default: true
+_Description: Do you want to start the MD monitoring daemon?
+ The MD (RAID) monitor daemon sends email notifications in response to
+ important MD events (such as a disk failure).
+ .
+ Enabling this option is recommended.
+
+Template: mdadm/mail_to
+Type: string
+Default: root
+_Description: Recipient for email notifications:
+ Please enter the email address of the user who should get the email
+ notifications for important MD events.
