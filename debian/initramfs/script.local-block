@@ -1,0 +1,44 @@
+#!/bin/sh
+
+PREREQ="multipath"
+
+prereqs()
+{
+	echo "$PREREQ"
+}
+
+case $1 in
+# get pre-requisites
+prereqs)
+	prereqs
+	exit 0
+	;;
+esac
+
+# Poor man's mdadm-last-resort@.timer
+# That kicks in 2/3rds into the ROOTDELAY
+
+if [ ! -f /run/count.mdadm.initrd ]
+then
+    COUNT=0
+else
+    COUNT=$(cat /run/count.mdadm.initrd)
+fi
+COUNT=$((COUNT + 1))
+
+echo $COUNT > /run/count.mdadm.initrd
+
+MAX=30
+if [ ${ROOTDELAY:-0} -gt $MAX ]; then
+    MAX=$ROOTDELAY
+fi
+MAX=$((MAX*2/3))
+
+if [ "$COUNT" = "$MAX" ]
+then
+    # Poor man's mdadm-last-resort@.service
+    mdadm -q --run /dev/md?*
+    rm -f /run/count.mdadm.initrd
+fi
+
+exit 0

@@ -13,7 +13,7 @@ DEBIANCONFIG=/etc/default/mdadm
 CONFIG=/etc/mdadm/mdadm.conf
 
 # initialise config variables in case the environment leaks
-MAILADDR= DEVICE= CREATE= HOMEHOST= PROGRAM=
+MAILADDR= DEVICE= HOMEHOST= PROGRAM=
 
 test -r $DEBIANCONFIG && . $DEBIANCONFIG
 
@@ -28,7 +28,6 @@ fi
 # save existing values as defaults
 if [ -r "$CONFIG" ]; then
   DEVICE="$(sed -ne 's/^DEVICE //p' $CONFIG)"
-  CREATE="$(sed -ne 's/^CREATE //p' $CONFIG)"
   HOMEHOST="$(sed -ne 's/^HOMEHOST //p' $CONFIG)"
   PROGRAM="$(sed -ne 's/^PROGRAM //p' $CONFIG)"
 fi
@@ -58,9 +57,6 @@ cat <<_eof
 # containers for MD superblocks. alternatively, specify devices to scan, using
 # wildcards if desired.
 #DEVICE ${DEVICE:-partitions containers}
-
-# auto-create devices with Debian standard permissions
-CREATE ${CREATE:-owner=root group=disk mode=0660 auto=yes}
 
 # automatically tag new arrays as belonging to the local system
 HOMEHOST ${HOMEHOST:-<system>}
