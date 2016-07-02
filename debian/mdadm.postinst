@@ -51,8 +51,6 @@ case "${1:-}" in
     fi
     unset MDADM_MAILADDR__
 
-    db_get mdadm/initrdstart
-    INITRDSTART="${RET:-all}"
     db_get mdadm/autocheck
     AUTOCHECK="${RET:-true}"
     db_get mdadm/start_daemon
@@ -68,12 +66,6 @@ case "${1:-}" in
 # Do note that only the values are preserved; the rest of the file is
 # rewritten.
 #
-
-# INITRDSTART:
-#   list of arrays (or 'all') to start automatically when the initial ramdisk
-#   loads. This list *must* include the array holding your root filesystem. Use
-#   'none' to prevent any array from being started from the initial ramdisk.
-INITRDSTART='$INITRDSTART'
 
 # AUTOCHECK:
 #   should mdadm run periodic redundancy checks over your arrays? See
@@ -96,6 +88,9 @@ _eof
 
     db_stop
 
+    # Remove old init script
+    update-rc.d mdadm-raid remove
+    
     command -v update-initramfs >/dev/null 2>&1 && update-initramfs -u
 
     if dpkg --compare-versions "$2" le 3.3.2-3; then

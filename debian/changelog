@@ -1,3 +1,32 @@
+mdadm (3.4-2) unstable; urgency=low
+
+  * Reneable incremental assembly
+  * Rely on udev to assemble incremental arrays
+  * In environments with systemd rely on mdadm-last-resort@.timer|.service
+    units to activate degrated raids
+  * In environments initramfs-tools initrd (no systemd) add local-block
+    script to do the same after 2/3rds of root delay iteration
+  * Drop local-top initramfs script
+  * Drop dependency on initscripts package
+  * Drop INITRDSTART support
+  * Drop mdadm-raid init script
+  * Drop ancient preinst
+  * In mdadm.init remove dependency on mdadm-raid
+  * In mdadm.init check, and bail out running in a container
+  * In mdadm.config drop mdadm/autostart logic
+  * Drop CREATE stanzas from mkconf and don't include them in the
+    initramfs. The generated defaults, are the compiled-in defaults. And
+    the current one generates warnings when running mdadm in the
+    initramfs, as there is no passwd|group files to resolve root/disk
+    uid/gid. Closes: 717609
+  * Adapt changes and formatting of initramfs hook from Ubuntu
+  * Bump standards version to 3.9.7, no changes required
+  * Fix copyright-refers-to-symlink-license
+  * Closes: #781172, #796624, #769201, #813335, #632401, #804973, #714155,
+    #770002, #737132, #675452, #726390, #813637, #814036.
+
+ -- Dimitri John Ledkov <xnox@ubuntu.com>  Sat, 02 Jul 2016 19:16:01 +0100
+
 mdadm (3.4-1) unstable; urgency=medium
 
   * New upstream release.

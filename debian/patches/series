@@ -3,4 +3,3 @@ debian-no-Werror.diff
 sha1-includes.diff
 readlink-path.patch
 mdmonitor-service-simplify.diff
-disable-incremental-assembly.patch

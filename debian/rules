@@ -54,8 +54,10 @@ install-arch: build-arch
 	mkdir -p $(DESTDIR)/etc/mdadm
 	install -Dm0755 debian/initramfs/hook \
 		$(DESTDIR)/usr/share/initramfs-tools/hooks/mdadm
-	install -Dm0755 debian/initramfs/script.local-top \
-		$(DESTDIR)/usr/share/initramfs-tools/scripts/local-top/mdadm
+	install -Dm0755 debian/initramfs/script.local-block \
+		$(DESTDIR)/usr/share/initramfs-tools/scripts/local-block/mdadm
+	install -Dm0755 debian/initramfs/script.local-bottom \
+		$(DESTDIR)/usr/share/initramfs-tools/scripts/local-bottom/mdadm
 	install -Dm0644 debian/mdadm.modules \
 		$(DESTDIR)/etc/modprobe.d/mdadm.conf
 
@@ -74,7 +76,6 @@ binary-arch: install-arch
 	dh_installdebconf
 	dh_installdocs
 	dh_installexamples -pmdadm mdadm.conf-example misc/syslog-events
-	dh_installinit --init-script=mdadm-raid --no-restart-on-upgrade -- start 25 S . start 60 0 6 .
 	dh_installinit --init-script=mdadm-waitidle --no-start -- stop 98 0 6 .
 	dh_link -pmdadm /dev/null /lib/systemd/system/mdadm-waitidle.service
 	dh_installinit -- defaults 25
