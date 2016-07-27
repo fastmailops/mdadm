@@ -1,3 +1,19 @@
+mdadm (3.4-3) unstable; urgency=high
+
+  * Fix UUID= grep for configured RAIDs to be case incesetive, regression from 3.4-2.
+
+  * Re-trigger block devices at the start of local-block mdadm loop, to
+    re-incrementally assemble disks that appeared before RAID
+    personalities were registered with the kernel.
+
+  * Also, invoke non-incremental assembly of raid arrays in the
+    local-block loop to support running mdadm with user-exported variables
+    specified via param.conf.
+
+  * Closes: #830770, #830300.
+
+ -- Dimitri John Ledkov <xnox@ubuntu.com>  Tue, 26 Jul 2016 17:09:54 +0100
+
 mdadm (3.4-2) unstable; urgency=low
 
   * Reneable incremental assembly
