@@ -10,6 +10,8 @@ mdadm (3.4-3) unstable; urgency=high
     local-block loop to support running mdadm with user-exported variables
     specified via param.conf.
 
+  * Set Vcs- fields to dgit repositories.
+
   * Closes: #830770, #830300.
 
  -- Dimitri John Ledkov <xnox@ubuntu.com>  Tue, 26 Jul 2016 17:09:54 +0100

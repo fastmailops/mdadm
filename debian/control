@@ -5,8 +5,8 @@ Maintainer: Debian mdadm maintainers <pkg-mdadm-devel@lists.alioth.debian.org>
 Uploaders: Dimitri John Ledkov <xnox@debian.org>
 Build-Depends: debhelper (>= 6.0.7~), po-debconf, groff-base
 Standards-Version: 3.9.7
-Vcs-Git: git://anonscm.debian.org/pkg-mdadm/mdadm.git
-Vcs-Browser: https://anonscm.debian.org/cgit/pkg-mdadm/mdadm.git
+Vcs-Git: https://git.dgit.debian.org/mdadm
+Vcs-Browser: https://browse.dgit.debian.org/mdadm.git
 Homepage: http://neil.brown.name/blog/mdadm
 
 Package: mdadm
