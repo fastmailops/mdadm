@@ -1,3 +1,17 @@
+mdadm (3.4-4) unstable; urgency=high
+
+  * Bring in changes from Ubuntu, to make the two packages in sync:
+    - Drop README.Debian, quite out-of-date w.r.t. current packaging.
+    - debian/control - on ubuntu, downgrade default-mta from Recommends to
+    Suggests.
+    - update-grub in postinst, if available (note does not update grub1).
+    - drop stderr warnings in postrm.
+    - drop presubj, out of date, and all types of bugs are welcomed.
+    - on ubuntu, install apport package hook.
+    - on ubuntu, install incremental assembly udev rules into udeb.
+
+ -- Dimitri John Ledkov <xnox@ubuntu.com>  Thu, 28 Jul 2016 16:52:07 +0100
+
 mdadm (3.4-3) unstable; urgency=high
 
   * Fix UUID= grep for configured RAIDs to be case incesetive, regression from 3.4-2.

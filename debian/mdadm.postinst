@@ -93,6 +93,10 @@ _eof
     
     command -v update-initramfs >/dev/null 2>&1 && update-initramfs -u
 
+    if command -v update-grub2 >/dev/null 2>&1; then
+        update-grub || true
+    fi
+
     if dpkg --compare-versions "$2" le 3.3.2-3; then
       rm -f /var/lib/mdadm/CONF-UNCHECKED /var/lib/mdadm/mdadm.conf-generated
       if [ -d /var/lib/mdadm ]; then
