@@ -1,6 +1,6 @@
 mdadm (4.0-1) UNRELEASED; urgency=medium
 
-  * New upstream release.
+  * New upstream release. LP: #1668128
 
  -- Dimitri John Ledkov <xnox@ubuntu.com>  Fri, 12 May 2017 12:31:46 +0100
 
