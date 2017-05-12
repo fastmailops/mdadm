@@ -119,8 +119,7 @@ int Manage_ro(char *devname, int fd, int readonly)
 	}
 out:
 #ifndef MDASSEMBLE
-	if (mdi)
-		sysfs_free(mdi);
+	sysfs_free(mdi);
 #endif
 	return rv;
 }
@@ -493,14 +492,17 @@ done:
 		rv = 1;
 		goto out;
 	}
-	/* prior to 2.6.28, KOBJ_CHANGE was not sent when an md array
-	 * was stopped, so We'll do it here just to be sure.  Drop any
-	 * partitions as well...
-	 */
-	if (fd >= 0)
-		ioctl(fd, BLKRRPART, 0);
-	if (mdi)
-		sysfs_uevent(mdi, "change");
+
+	if (get_linux_version() < 2006028) {
+		/* prior to 2.6.28, KOBJ_CHANGE was not sent when an md array
+		 * was stopped, so We'll do it here just to be sure.  Drop any
+		 * partitions as well...
+		 */
+		if (fd >= 0)
+			ioctl(fd, BLKRRPART, 0);
+		if (mdi)
+			sysfs_uevent(mdi, "change");
+	}
 
 	if (devnm[0] && use_udev()) {
 		struct map_ent *mp = map_by_devnm(&map, devnm);
@@ -513,8 +515,7 @@ done:
 	map_remove(&map, devnm);
 	map_unlock(&map);
 out:
-	if (mdi)
-		sysfs_free(mdi);
+	sysfs_free(mdi);
 
 	return rv;
 }
@@ -678,12 +679,17 @@ int attempt_re_add(int fd, int tfd, struct mddev_dev *dv,
 			else
 				disc.state |= (1 << MD_DISK_CLUSTER_ADD);
 		}
-		if (dv->writemostly == 1)
+		if (dv->writemostly == FlagSet)
 			disc.state |= 1 << MD_DISK_WRITEMOSTLY;
-		if (dv->writemostly == 2)
+		if (dv->writemostly == FlagClear)
 			disc.state &= ~(1 << MD_DISK_WRITEMOSTLY);
+		if (dv->failfast == FlagSet)
+			disc.state |= 1 << MD_DISK_FAILFAST;
+		if (dv->failfast == FlagClear)
+			disc.state &= ~(1 << MD_DISK_FAILFAST);
 		remove_partitions(tfd);
-		if (update || dv->writemostly > 0) {
+		if (update || dv->writemostly != FlagDefault
+			|| dv->failfast != FlagDefault) {
 			int rv = -1;
 			tfd = dev_open(dv->devname, O_RDWR);
 			if (tfd < 0) {
@@ -691,13 +697,21 @@ int attempt_re_add(int fd, int tfd, struct mddev_dev *dv,
 				return -1;
 			}
 
-			if (dv->writemostly == 1)
+			if (dv->writemostly == FlagSet)
 				rv = dev_st->ss->update_super(
 					dev_st, NULL, "writemostly",
 					devname, verbose, 0, NULL);
-			if (dv->writemostly == 2)
+			if (dv->writemostly == FlagClear)
 				rv = dev_st->ss->update_super(
 					dev_st, NULL, "readwrite",
+					devname, verbose, 0, NULL);
+			if (dv->failfast == FlagSet)
+				rv = dev_st->ss->update_super(
+					dev_st, NULL, "failfast",
+					devname, verbose, 0, NULL);
+			if (dv->failfast == FlagClear)
+				rv = dev_st->ss->update_super(
+					dev_st, NULL, "nofailfast",
 					devname, verbose, 0, NULL);
 			if (update)
 				rv = dev_st->ss->update_super(
@@ -737,7 +751,7 @@ int Manage_add(int fd, int tfd, struct mddev_dev *dv,
 	       int raid_slot)
 {
 	unsigned long long ldsize;
-	struct supertype *dev_st = NULL;
+	struct supertype *dev_st;
 	int j;
 	mdu_disk_info_t disc;
 
@@ -842,20 +856,19 @@ int Manage_add(int fd, int tfd, struct mddev_dev *dv,
 		 * simply re-add it.
 		 */
 
-		if (array->not_persistent==0) {
+		if (array->not_persistent == 0) {
 			dev_st = dup_super(tst);
 			dev_st->ss->load_super(dev_st, tfd, NULL);
-		}
-		if (dev_st && dev_st->sb && dv->disposition != 'S') {
-			int rv = attempt_re_add(fd, tfd, dv,
-						dev_st, tst,
-						rdev,
-						update, devname,
-						verbose,
-						array);
-			dev_st->ss->free_super(dev_st);
-			if (rv)
-				return rv;
+			if (dev_st->sb && dv->disposition != 'S') {
+				int rv;
+
+				rv = attempt_re_add(fd, tfd, dv, dev_st, tst,
+						    rdev, update, devname,
+						    verbose, array);
+				dev_st->ss->free_super(dev_st);
+				if (rv)
+					return rv;
+			}
 		}
 		if (dv->disposition == 'M') {
 			if (verbose > 0)
@@ -879,10 +892,10 @@ int Manage_add(int fd, int tfd, struct mddev_dev *dv,
 					continue;
 				if (disc.major == 0 && disc.minor == 0)
 					continue;
-				found++;
 				if (!(disc.state & (1<<MD_DISK_SYNC)))
 					continue;
 				avail[disc.raid_disk] = 1;
+				found++;
 			}
 			array_failed = !enough(array->level, array->raid_disks,
 					       array->layout, 1, avail);
@@ -937,11 +950,18 @@ int Manage_add(int fd, int tfd, struct mddev_dev *dv,
 		struct mdinfo *mdp;
 
 		mdp = sysfs_read(fd, NULL, GET_ARRAY_STATE);
+		if (!mdp) {
+			pr_err("%s unable to read array state.\n", devname);
+			return -1;
+		}
 
 		if (strncmp(mdp->sysfs_array_state, "readonly", 8) != 0) {
+			sysfs_free(mdp);
 			pr_err("%s is not readonly, cannot add journal.\n", devname);
 			return -1;
 		}
+
+		sysfs_free(mdp);
 
 		tst->ss->getinfo_super(tst, &mdi, NULL);
 		if (mdi.journal_device_required == 0) {
@@ -955,8 +975,10 @@ int Manage_add(int fd, int tfd, struct mddev_dev *dv,
 		int dfd;
 		if (dv->disposition == 'j')
 			disc.state |= (1 << MD_DISK_JOURNAL) | (1 << MD_DISK_SYNC);
-		if (dv->writemostly == 1)
+		if (dv->writemostly == FlagSet)
 			disc.state |= 1 << MD_DISK_WRITEMOSTLY;
+		if (dv->failfast == FlagSet)
+			disc.state |= 1 << MD_DISK_FAILFAST;
 		dfd = dev_open(dv->devname, O_RDWR | O_EXCL|O_DIRECT);
 		if (tst->ss->add_to_super(tst, &disc, dfd,
 					  dv->devname, INVALID_SECTORS))
@@ -1000,8 +1022,10 @@ int Manage_add(int fd, int tfd, struct mddev_dev *dv,
 			disc.state |= (1 << MD_DISK_CLUSTER_ADD);
 	}
 
-	if (dv->writemostly == 1)
+	if (dv->writemostly == FlagSet)
 		disc.state |= (1 << MD_DISK_WRITEMOSTLY);
+	if (dv->failfast == FlagSet)
+		disc.state |= (1 << MD_DISK_FAILFAST);
 	if (tst->ss->external) {
 		/* add a disk
 		 * to an external metadata container */
@@ -1118,19 +1142,34 @@ int Manage_remove(struct supertype *tst, int fd, struct mddev_dev *dv,
 		 */
 		if (rdev == 0)
 			ret = -1;
-		else
-			ret = sysfs_unique_holder(devnm, rdev);
-		if (ret == 0) {
-			pr_err("%s is not a member, cannot remove.\n",
-			       dv->devname);
-			close(lfd);
-			return -1;
-		}
-		if (ret >= 2) {
-			pr_err("%s is still in use, cannot remove.\n",
-			       dv->devname);
-			close(lfd);
-			return -1;
+		else {
+			/*
+			 * The drive has already been set to 'faulty', however
+			 * monitor might not have had time to process it and the
+			 * drive might still have an entry in the 'holders'
+			 * directory. Try a few times to avoid a false error
+			 */
+			int count = 20;
+
+			do {
+				ret = sysfs_unique_holder(devnm, rdev);
+				if (ret < 2)
+					break;
+				usleep(100 * 1000);	/* 100ms */
+			} while (--count > 0);
+
+			if (ret == 0) {
+				pr_err("%s is not a member, cannot remove.\n",
+					dv->devname);
+				close(lfd);
+				return -1;
+			}
+			if (ret >= 2) {
+				pr_err("%s is still in use, cannot remove.\n",
+					dv->devname);
+				close(lfd);
+				return -1;
+			}
 		}
 	}
 	/* FIXME check that it is a current member */
@@ -1161,8 +1200,7 @@ int Manage_remove(struct supertype *tst, int fd, struct mddev_dev *dv,
 						    "state", "remove");
 			else
 				err = -1;
-			if (sra)
-				sysfs_free(sra);
+			sysfs_free(sra);
 		}
 	}
 	if (err) {
@@ -1410,7 +1448,7 @@ int Manage_subdevs(char *devname, int fd,
 		}
 
 		if (strcmp(dv->devname, "missing") == 0) {
-			struct mddev_dev *add_devlist = NULL;
+			struct mddev_dev *add_devlist;
 			struct mddev_dev **dp;
 			if (dv->disposition == 'c') {
 				rv = ioctl(fd, CLUSTERED_DISK_NACK, NULL);
@@ -1504,9 +1542,10 @@ int Manage_subdevs(char *devname, int fd,
 		} else {
 			struct stat stb;
 			tfd = dev_open(dv->devname, O_RDONLY);
-			if (tfd >= 0)
+			if (tfd >= 0) {
 				fstat(tfd, &stb);
-			else {
+				close(tfd);
+			} else {
 				int open_err = errno;
 				if (stat(dv->devname, &stb) != 0) {
 					pr_err("Cannot find %s: %s\n",
@@ -1762,7 +1801,8 @@ int move_spare(char *from_devname, char *to_devname, dev_t devid)
 
 	devlist.next = NULL;
 	devlist.used = 0;
-	devlist.writemostly = 0;
+	devlist.writemostly = FlagDefault;
+	devlist.failfast = FlagDefault;
 	devlist.devname = devname;
 	sprintf(devname, "%d:%d", major(devid), minor(devid));
 

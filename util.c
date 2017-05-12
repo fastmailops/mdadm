@@ -24,7 +24,6 @@
 
 #include	"mdadm.h"
 #include	"md_p.h"
-#include	<sys/poll.h>
 #include	<sys/socket.h>
 #include	<sys/utsname.h>
 #include	<sys/wait.h>
@@ -32,6 +31,7 @@
 #include	<sys/resource.h>
 #include	<sys/vfs.h>
 #include	<linux/magic.h>
+#include	<poll.h>
 #include	<ctype.h>
 #include	<dirent.h>
 #include	<signal.h>
@@ -147,13 +147,7 @@ int cluster_get_dlmlock(int *lockid)
 		return -ENOMEM;
 	}
 
-	/* Conversions need the lockid in the LKSB */
-	if (flags & LKF_CONVERT)
-		dlm_lock_res->lksb.sb_lkid = *lockid;
-
 	snprintf(str, 64, "bitmap%s", cluster_name);
-	/* if flags with LKF_CONVERT causes below return ENOENT which means
-	 * "No such file or directory" */
 	ret = dlm_hooks->ls_lock(dlm_lock_res->ls, LKM_PWMODE, &dlm_lock_res->lksb,
 			  flags, str, strlen(str), 0, dlm_ast,
 			  dlm_lock_res, NULL, NULL);
@@ -177,8 +171,6 @@ int cluster_release_dlmlock(int lockid)
 	if (!cluster_name)
 		return -1;
 
-	/* if flags with LKF_CONVERT causes below return EINVAL which means
-	 * "Invalid argument" */
 	ret = dlm_hooks->ls_unlock(dlm_lock_res->ls, lockid, 0,
 				     &dlm_lock_res->lksb, dlm_lock_res);
 	if (ret) {
@@ -718,17 +710,22 @@ int check_raid(int fd, char *name)
 
 	if (!st)
 		return 0;
-	st->ss->load_super(st, fd, name);
-	/* Looks like a raid array .. */
-	pr_err("%s appears to be part of a raid array:\n",
-		name);
-	st->ss->getinfo_super(st, &info, NULL);
-	st->ss->free_super(st);
-	crtime = info.array.ctime;
-	level = map_num(pers, info.array.level);
-	if (!level) level = "-unknown-";
-	cont_err("level=%s devices=%d ctime=%s",
-		 level, info.array.raid_disks, ctime(&crtime));
+	if (st->ss->add_to_super != NULL) {
+		st->ss->load_super(st, fd, name);
+		/* Looks like a raid array .. */
+		pr_err("%s appears to be part of a raid array:\n", name);
+		st->ss->getinfo_super(st, &info, NULL);
+		st->ss->free_super(st);
+		crtime = info.array.ctime;
+		level = map_num(pers, info.array.level);
+		if (!level)
+			level = "-unknown-";
+		cont_err("level=%s devices=%d ctime=%s",
+			level, info.array.raid_disks, ctime(&crtime));
+	} else {
+		/* Looks like GPT or MBR */
+		pr_err("partition table exists on %s\n", name);
+	}
 	return 1;
 }
 
@@ -936,7 +933,7 @@ int get_data_disks(int level, int layout, int raid_disks)
 	return data_disks;
 }
 
-int devnm2devid(char *devnm)
+dev_t devnm2devid(char *devnm)
 {
 	/* First look in /sys/block/$DEVNM/dev for %d:%d
 	 * If that fails, try parsing out a number
@@ -1047,7 +1044,8 @@ int dev_open(char *dev, int flags)
 	int major;
 	int minor;
 
-	if (!dev) return -1;
+	if (!dev)
+		return -1;
 	flags |= O_DIRECT;
 
 	if (get_maj_min(dev, &major, &minor)) {
@@ -1073,7 +1071,7 @@ int dev_open(char *dev, int flags)
 
 int open_dev_flags(char *devnm, int flags)
 {
-	int devid;
+	dev_t devid;
 	char buf[20];
 
 	devid = devnm2devid(devnm);
@@ -1091,7 +1089,7 @@ int open_dev_excl(char *devnm)
 	char buf[20];
 	int i;
 	int flags = O_RDWR;
-	int devid = devnm2devid(devnm);
+	dev_t devid = devnm2devid(devnm);
 	long delay = 1000;
 
 	sprintf(buf, "%d:%d", major(devid), minor(devid));
@@ -1199,8 +1197,7 @@ struct supertype *super_by_fd(int fd, char **subarrayp)
 			subarray = xstrdup(subarray);
 		}
 		strcpy(container, dev);
-		if (sra)
-			sysfs_free(sra);
+		sysfs_free(sra);
 		sra = sysfs_read(-1, container, GET_VERSION);
 		if (sra && sra->text_version[0])
 			verstr = sra->text_version;
@@ -1211,8 +1208,7 @@ struct supertype *super_by_fd(int fd, char **subarrayp)
 	for (i = 0; st == NULL && superlist[i] ; i++)
 		st = superlist[i]->match_metadata_desc(verstr);
 
-	if (sra)
-		sysfs_free(sra);
+	sysfs_free(sra);
 	if (st) {
 		st->sb = NULL;
 		if (subarrayp)
@@ -1267,7 +1263,7 @@ struct supertype *guess_super_type(int fd, enum guess_types guess_type)
 	 */
 	struct superswitch  *ss;
 	struct supertype *st;
-	time_t besttime = 0;
+	unsigned int besttime = 0;
 	int bestsuper = -1;
 	int i;
 
@@ -1328,12 +1324,28 @@ int get_dev_size(int fd, char *dname, unsigned long long *sizep)
 			ldsize <<= 9;
 		} else {
 			if (dname)
-				pr_err("Cannot get size of %s: %s\b",
+				pr_err("Cannot get size of %s: %s\n",
 					dname, strerror(errno));
 			return 0;
 		}
 	}
 	*sizep = ldsize;
+	return 1;
+}
+
+/* Return sector size of device in bytes */
+int get_dev_sector_size(int fd, char *dname, unsigned int *sectsizep)
+{
+	unsigned int sectsize;
+
+	if (ioctl(fd, BLKSSZGET, &sectsize) != 0) {
+		if (dname)
+			pr_err("Cannot get sector size of %s: %s\n",
+				dname, strerror(errno));
+		return 0;
+	}
+
+	*sectsizep = sectsize;
 	return 1;
 }
 
@@ -1366,12 +1378,15 @@ static int get_gpt_last_partition_end(int fd, unsigned long long *endofpart)
 	unsigned long long curr_part_end;
 	unsigned all_partitions, entry_size;
 	unsigned part_nr;
+	unsigned int sector_size = 0;
 
 	*endofpart = 0;
 
 	BUILD_BUG_ON(sizeof(gpt) != 512);
 	/* skip protective MBR */
-	lseek(fd, 512, SEEK_SET);
+	if (!get_dev_sector_size(fd, NULL, &sector_size))
+		return 0;
+	lseek(fd, sector_size, SEEK_SET);
 	/* read GPT header */
 	if (read(fd, &gpt, 512) != 512)
 		return 0;
@@ -1391,6 +1406,8 @@ static int get_gpt_last_partition_end(int fd, unsigned long long *endofpart)
 
 	part = (struct GPT_part_entry *)buf;
 
+	/* set offset to third block (GPT entries) */
+	lseek(fd, sector_size*2, SEEK_SET);
 	for (part_nr = 0; part_nr < all_partitions; part_nr++) {
 		/* read partition entry */
 		if (read(fd, buf, entry_size) != (ssize_t)entry_size)
@@ -1416,9 +1433,9 @@ static int get_gpt_last_partition_end(int fd, unsigned long long *endofpart)
 static int get_last_partition_end(int fd, unsigned long long *endofpart)
 {
 	struct MBR boot_sect;
-	struct MBR_part_record *part;
 	unsigned long long curr_part_end;
 	unsigned part_nr;
+	unsigned int sector_size;
 	int retval = 0;
 
 	*endofpart = 0;
@@ -1433,26 +1450,34 @@ static int get_last_partition_end(int fd, unsigned long long *endofpart)
 	if (boot_sect.magic == MBR_SIGNATURE_MAGIC) {
 		retval = 1;
 		/* found the correct signature */
-		part = boot_sect.parts;
 
 		for (part_nr = 0; part_nr < MBR_PARTITIONS; part_nr++) {
+			/*
+			 * Have to make every access through boot_sect rather
+			 * than using a pointer to the partition table (or an
+			 * entry), since the entries are not properly aligned.
+			 */
+
 			/* check for GPT type */
-			if (part->part_type == MBR_GPT_PARTITION_TYPE) {
+			if (boot_sect.parts[part_nr].part_type ==
+			    MBR_GPT_PARTITION_TYPE) {
 				retval = get_gpt_last_partition_end(fd, endofpart);
 				break;
 			}
 			/* check the last used lba for the current partition  */
-			curr_part_end = __le32_to_cpu(part->first_sect_lba) +
-				__le32_to_cpu(part->blocks_num);
+			curr_part_end =
+				__le32_to_cpu(boot_sect.parts[part_nr].first_sect_lba) +
+				__le32_to_cpu(boot_sect.parts[part_nr].blocks_num);
 			if (curr_part_end > *endofpart)
 				*endofpart = curr_part_end;
-
-			part++;
 		}
 	} else {
 		/* Unknown partition table */
 		retval = -1;
 	}
+	/* calculate number of 512-byte blocks */
+	if (get_dev_sector_size(fd, NULL, &sector_size))
+		*endofpart *= (sector_size / 512);
  abort:
 	return retval;
 }
@@ -1464,9 +1489,8 @@ int check_partitions(int fd, char *dname, unsigned long long freesize,
 	 * Check where the last partition ends
 	 */
 	unsigned long long endofpart;
-	int ret;
 
-	if ((ret = get_last_partition_end(fd, &endofpart)) > 0) {
+	if (get_last_partition_end(fd, &endofpart) > 0) {
 		/* There appears to be a partition table here */
 		if (freesize == 0) {
 			/* partitions will not be visible in new device */
@@ -1943,6 +1967,27 @@ __u32 random32(void)
 	if (rfd >= 0)
 		close(rfd);
 	return rv;
+}
+
+void random_uuid(__u8 *buf)
+{
+	int fd, i, len;
+	__u32 r[4];
+
+	fd = open("/dev/urandom", O_RDONLY);
+	if (fd < 0)
+		goto use_random;
+	len = read(fd, buf, 16);
+	close(fd);
+	if (len != 16)
+		goto use_random;
+
+	return;
+
+use_random:
+	for (i = 0; i < 4; i++)
+		r[i] = random();
+	memcpy(buf, r, 16);
 }
 
 #ifndef MDASSEMBLE

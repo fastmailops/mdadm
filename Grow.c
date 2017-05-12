@@ -297,7 +297,14 @@ int Grow_addbitmap(char *devname, int fd, struct context *c, struct shape *s)
 			"  between different architectures.  Consider upgrading the Linux kernel.\n");
 	}
 
-	if (s->bitmap_file && strcmp(s->bitmap_file, "clustered") == 0)
+	/*
+	 * We only ever get called if s->bitmap_file is != NULL, so this check
+	 * is just here to quiet down static code checkers.
+	 */
+	if (!s->bitmap_file)
+		return 1;
+
+	if (strcmp(s->bitmap_file, "clustered") == 0)
 		major = BITMAP_MAJOR_CLUSTERED;
 
 	if (ioctl(fd, GET_BITMAP_FILE, &bmf) != 0) {
@@ -308,8 +315,8 @@ int Grow_addbitmap(char *devname, int fd, struct context *c, struct shape *s)
 		return 1;
 	}
 	if (bmf.pathname[0]) {
-		if (strcmp(s->bitmap_file,"none")==0) {
-			if (ioctl(fd, SET_BITMAP_FILE, -1)!= 0) {
+		if (strcmp(s->bitmap_file,"none") == 0) {
+			if (ioctl(fd, SET_BITMAP_FILE, -1) != 0) {
 				pr_err("failed to remove bitmap %s\n",
 					bmf.pathname);
 				return 1;
@@ -324,11 +331,11 @@ int Grow_addbitmap(char *devname, int fd, struct context *c, struct shape *s)
 		pr_err("cannot get array status for %s\n", devname);
 		return 1;
 	}
-	if (array.state & (1<<MD_SB_BITMAP_PRESENT)) {
+	if (array.state & (1 << MD_SB_BITMAP_PRESENT)) {
 		if (strcmp(s->bitmap_file, "none")==0) {
-			array.state &= ~(1<<MD_SB_BITMAP_PRESENT);
-			if (ioctl(fd, SET_ARRAY_INFO, &array)!= 0) {
-				if (array.state & (1<<MD_SB_CLUSTERED))
+			array.state &= ~(1 << MD_SB_BITMAP_PRESENT);
+			if (ioctl(fd, SET_ARRAY_INFO, &array) != 0) {
+				if (array.state & (1 << MD_SB_CLUSTERED))
 					pr_err("failed to remove clustered bitmap.\n");
 				else
 					pr_err("failed to remove internal bitmap.\n");
@@ -352,7 +359,7 @@ int Grow_addbitmap(char *devname, int fd, struct context *c, struct shape *s)
 	bitmapsize = array.size;
 	bitmapsize <<= 1;
 	if (get_dev_size(fd, NULL, &array_size) &&
-	    array_size > (0x7fffffffULL<<9)) {
+	    array_size > (0x7fffffffULL << 9)) {
 		/* Array is big enough that we cannot trust array.size
 		 * try other approaches
 		 */
@@ -364,7 +371,9 @@ int Grow_addbitmap(char *devname, int fd, struct context *c, struct shape *s)
 	}
 
 	if (array.level == 10) {
-		int ncopies = (array.layout&255)*((array.layout>>8)&255);
+		int ncopies;
+
+		ncopies = (array.layout & 255) * ((array.layout >> 8) & 255);
 		bitmapsize = bitmapsize * array.raid_disks / ncopies;
 	}
 
@@ -395,38 +404,42 @@ int Grow_addbitmap(char *devname, int fd, struct context *c, struct shape *s)
 		mdi = sysfs_read(fd, NULL, GET_BITMAP_LOCATION);
 		if (mdi)
 			offset_setable = 1;
-		for (d=0; d< st->max_devs; d++) {
+		for (d = 0; d < st->max_devs; d++) {
 			mdu_disk_info_t disk;
 			char *dv;
+			int fd2;
+
 			disk.number = d;
 			if (ioctl(fd, GET_DISK_INFO, &disk) < 0)
 				continue;
-			if (disk.major == 0 &&
-			    disk.minor == 0)
+			if (disk.major == 0 && disk.minor == 0)
 				continue;
-			if ((disk.state & (1<<MD_DISK_SYNC))==0)
+			if ((disk.state & (1 << MD_DISK_SYNC)) == 0)
 				continue;
 			dv = map_dev(disk.major, disk.minor, 1);
-			if (dv) {
-				int fd2 = dev_open(dv, O_RDWR);
-				if (fd2 < 0)
-					continue;
-				if (st->ss->load_super(st, fd2, NULL)==0) {
-					if (st->ss->add_internal_bitmap(
-						    st,
-						    &s->bitmap_chunk, c->delay, s->write_behind,
-						    bitmapsize, offset_setable,
-						    major)
-						)
-						st->ss->write_bitmap(st, fd2, NoUpdate);
-					else {
-						pr_err("failed to create internal bitmap - chunksize problem.\n");
-						close(fd2);
-						return 1;
-					}
+			if (!dv)
+				continue;
+			fd2 = dev_open(dv, O_RDWR);
+			if (fd2 < 0)
+				continue;
+			rv = st->ss->load_super(st, fd2, NULL);
+			if (!rv) {
+				rv = st->ss->add_internal_bitmap(
+					st, &s->bitmap_chunk, c->delay,
+					s->write_behind, bitmapsize,
+					offset_setable, major);
+				if (!rv) {
+					st->ss->write_bitmap(st, fd2,
+							     NodeNumUpdate);
+				} else {
+					pr_err("failed to create internal bitmap - chunksize problem.\n");
 				}
-				close(fd2);
+			} else {
+				pr_err("failed to load super-block.\n");
 			}
+			close(fd2);
+			if (rv)
+				return 1;
 		}
 		if (offset_setable) {
 			st->ss->getinfo_super(st, mdi, NULL);
@@ -435,8 +448,8 @@ int Grow_addbitmap(char *devname, int fd, struct context *c, struct shape *s)
 						  mdi->bitmap_offset);
 		} else {
 			if (strcmp(s->bitmap_file, "clustered") == 0)
-				array.state |= (1<<MD_SB_CLUSTERED);
-			array.state |= (1<<MD_SB_BITMAP_PRESENT);
+				array.state |= (1 << MD_SB_CLUSTERED);
+			array.state |= (1 << MD_SB_BITMAP_PRESENT);
 			rv = ioctl(fd, SET_ARRAY_INFO, &array);
 		}
 		if (rv < 0) {
@@ -459,8 +472,8 @@ int Grow_addbitmap(char *devname, int fd, struct context *c, struct shape *s)
 			disk.number = d;
 			if (ioctl(fd, GET_DISK_INFO, &disk) < 0)
 				continue;
-			if ((disk.major==0 && disk.minor==0) ||
-			    (disk.state & (1<<MD_DISK_REMOVED)))
+			if ((disk.major==0 && disk.minor == 0) ||
+			    (disk.state & (1 << MD_DISK_REMOVED)))
 				continue;
 			dv = map_dev(disk.major, disk.minor, 1);
 			if (!dv)
@@ -479,14 +492,14 @@ int Grow_addbitmap(char *devname, int fd, struct context *c, struct shape *s)
 			pr_err("cannot find UUID for array!\n");
 			return 1;
 		}
-		if (CreateBitmap(s->bitmap_file, c->force, (char*)uuid, s->bitmap_chunk,
-				 c->delay, s->write_behind, bitmapsize, major)) {
+		if (CreateBitmap(s->bitmap_file, c->force, (char*)uuid,
+				 s->bitmap_chunk, c->delay, s->write_behind,
+				 bitmapsize, major)) {
 			return 1;
 		}
 		bitmap_fd = open(s->bitmap_file, O_RDWR);
 		if (bitmap_fd < 0) {
-			pr_err("weird: %s cannot be opened\n",
-				s->bitmap_file);
+			pr_err("weird: %s cannot be opened\n", s->bitmap_file);
 			return 1;
 		}
 		if (ioctl(fd, SET_BITMAP_FILE, bitmap_fd) < 0) {
@@ -740,6 +753,14 @@ int start_reshape(struct mdinfo *sra, int already_running,
 void abort_reshape(struct mdinfo *sra)
 {
 	sysfs_set_str(sra, NULL, "sync_action", "idle");
+	/*
+	 * Prior to kernel commit: 23ddff3792f6 ("md: allow suspend_lo and
+	 * suspend_hi to decrease as well as increase.")
+	 * you could only increase suspend_{lo,hi} unless the region they
+	 * covered was empty.  So to reset to 0, you need to push suspend_lo
+	 * up past suspend_hi first.  So to maximize the chance of mdadm
+	 * working on all kernels, we want to keep doing that.
+	 */
 	sysfs_set_num(sra, NULL, "suspend_lo", 0x7FFFFFFFFFFFFFFFULL);
 	sysfs_set_num(sra, NULL, "suspend_hi", 0);
 	sysfs_set_num(sra, NULL, "suspend_lo", 0);
@@ -755,6 +776,26 @@ int remove_disks_for_takeover(struct supertype *st,
 	int nr_of_copies;
 	struct mdinfo *remaining;
 	int slot;
+
+	if (st->ss->external) {
+		int rv = 0;
+		struct mdinfo *arrays = st->ss->container_content(st, NULL);
+		/*
+		 * containter_content returns list of arrays in container
+		 * If arrays->next is not NULL it means that there are
+		 * 2 arrays in container and operation should be blocked
+		 */
+		if (arrays) {
+			if (arrays->next)
+				rv = 1;
+			sysfs_free(arrays);
+			if (rv) {
+				pr_err("Error. Cannot perform operation on /dev/%s\n", st->devnm);
+				pr_err("For this operation it MUST be single array in container\n");
+				return rv;
+			}
+		}
+	}
 
 	if (sra->array.level == 10)
 		nr_of_copies = layout & 0xff;
@@ -1062,6 +1103,9 @@ char *analyse_change(char *devname, struct mdinfo *info, struct reshape *re)
 			re->level = 1;
 			return NULL;
 		}
+		if (info->array.raid_disks != 2 &&
+		    info->new_level == 5)
+			return "Can only convert a 2-device array to RAID5";
 		if (info->array.raid_disks == 2 &&
 		    info->new_level == 5) {
 
@@ -2055,6 +2099,10 @@ size_change_error:
 		 * number of devices (On-Line Capacity Expansion) must be
 		 * performed at the level of the container
 		 */
+		if (fd > 0) {
+			close(fd);
+			fd = -1;
+		}
 		rv = reshape_container(container, devname, -1, st, &info,
 				       c->force, c->backup_file, c->verbose, 0, 0, 0);
 		frozen = 0;
@@ -2987,9 +3035,11 @@ static int reshape_array(char *container, int fd, char *devname,
 	 * array.  Now that the array has been changed to the right
 	 * level and frozen, we can safely add them.
 	 */
-	if (devlist)
-		Manage_subdevs(devname, fd, devlist, verbose,
-			       0,NULL, 0);
+	if (devlist) {
+		if (Manage_subdevs(devname, fd, devlist, verbose,
+				   0, NULL, 0))
+			goto release;
+	}
 
 	if (reshape.backup_blocks == 0 && data_offset != INVALID_SECTORS)
 		reshape.backup_blocks = reshape.before.data_disks * info->array.chunk_size/512;
@@ -3503,7 +3553,7 @@ int reshape_container(char *container, char *devname,
 		int fd;
 		struct mdstat_ent *mdstat;
 		char *adev;
-		int devid;
+		dev_t devid;
 
 		sysfs_free(cc);
 
@@ -3998,8 +4048,10 @@ static int grow_backup(struct mdinfo *sra,
 			if (sd->disk.state & (1<<MD_DISK_FAULTY))
 				continue;
 			if (sd->disk.state & (1<<MD_DISK_SYNC)) {
-				char sbuf[20];
-				if (sysfs_get_str(sra, sd, "state", sbuf, 20) < 0 ||
+				char sbuf[100];
+
+				if (sysfs_get_str(sra, sd, "state",
+						  sbuf, sizeof(sbuf)) < 0 ||
 				    strstr(sbuf, "faulty") ||
 				    strstr(sbuf, "in_sync") == NULL) {
 					/* this device is dead */
@@ -4744,7 +4796,7 @@ int Grow_continue_command(char *devname, int fd,
 	struct mdinfo *cc = NULL;
 	struct mdstat_ent *mdstat = NULL;
 	int cfd = -1;
-	int fd2 = -1;
+	int fd2;
 
 	dprintf("Grow continue from command line called for %s\n",
 		devname);
@@ -4758,6 +4810,7 @@ int Grow_continue_command(char *devname, int fd,
 	dprintf("Grow continue is run for ");
 	if (st->ss->external == 0) {
 		int d;
+		int cnt = 5;
 		dprintf_cont("native array (%s)\n", devname);
 		if (ioctl(fd, GET_ARRAY_INFO, &array.array) < 0) {
 			pr_err("%s is not an active md array - aborting\n", devname);
@@ -4769,38 +4822,42 @@ int Grow_continue_command(char *devname, int fd,
 		 * FIXME we should really get what we need from
 		 * sysfs
 		 */
-		for (d = 0; d < MAX_DISKS; d++) {
-			mdu_disk_info_t disk;
-			char *dv;
-			int err;
-			disk.number = d;
-			if (ioctl(fd, GET_DISK_INFO, &disk) < 0)
-				continue;
-			if (disk.major == 0 && disk.minor == 0)
-				continue;
-			if ((disk.state & (1 << MD_DISK_ACTIVE)) == 0)
-				continue;
-			dv = map_dev(disk.major, disk.minor, 1);
-			if (!dv)
-				continue;
-			fd2 = dev_open(dv, O_RDONLY);
-			if (fd2 < 0)
-				continue;
-			err = st->ss->load_super(st, fd2, NULL);
-			close(fd2);
-			/* invalidate fd2 to avoid possible double close() */
-			fd2 = -1;
-			if (err)
-				continue;
-			break;
-		}
-		if (d == MAX_DISKS) {
-			pr_err("Unable to load metadata for %s\n",
-			       devname);
-			ret_val = 1;
-			goto Grow_continue_command_exit;
-		}
-		st->ss->getinfo_super(st, content, NULL);
+		do {
+			for (d = 0; d < MAX_DISKS; d++) {
+				mdu_disk_info_t disk;
+				char *dv;
+				int err;
+				disk.number = d;
+				if (ioctl(fd, GET_DISK_INFO, &disk) < 0)
+					continue;
+				if (disk.major == 0 && disk.minor == 0)
+					continue;
+				if ((disk.state & (1 << MD_DISK_ACTIVE)) == 0)
+					continue;
+				dv = map_dev(disk.major, disk.minor, 1);
+				if (!dv)
+					continue;
+				fd2 = dev_open(dv, O_RDONLY);
+				if (fd2 < 0)
+					continue;
+				err = st->ss->load_super(st, fd2, NULL);
+				close(fd2);
+				if (err)
+					continue;
+				break;
+			}
+			if (d == MAX_DISKS) {
+				pr_err("Unable to load metadata for %s\n",
+				       devname);
+				ret_val = 1;
+				goto Grow_continue_command_exit;
+			}
+			st->ss->getinfo_super(st, content, NULL);
+			if (!content->reshape_active)
+				sleep(3);
+			else
+				break;
+		} while (cnt-- > 0);
 	} else {
 		char *container;
 
@@ -4886,7 +4943,6 @@ int Grow_continue_command(char *devname, int fd,
 		sysfs_init(content, fd2, mdstat->devnm);
 
 		close(fd2);
-		fd2 = -1;
 
 		/* start mdmon in case it is not running
 		 */
@@ -4916,8 +4972,6 @@ int Grow_continue_command(char *devname, int fd,
 	ret_val = Grow_continue(fd, st, content, backup_file, 1, 0);
 
 Grow_continue_command_exit:
-	if (fd2 > -1)
-		close(fd2);
 	if (cfd > -1)
 		close(cfd);
 	st->ss->free_super(st);

@@ -114,8 +114,13 @@ int Create(struct supertype *st, char *mddev,
 	unsigned long long newsize;
 
 	int major_num = BITMAP_MAJOR_HI;
-	if (s->bitmap_file && strcmp(s->bitmap_file, "clustered") == 0)
+	if (s->bitmap_file && strcmp(s->bitmap_file, "clustered") == 0) {
 		major_num = BITMAP_MAJOR_CLUSTERED;
+		if (c->nodes <= 1) {
+			pr_err("At least 2 nodes are needed for cluster-md\n");
+			return 1;
+		}
+	}
 
 	memset(&info, 0, sizeof(info));
 	if (s->level == UnSet && st && st->ss->default_geometry)
@@ -769,9 +774,9 @@ int Create(struct supertype *st, char *mddev,
 				st->ss->name);
 			goto abort_locked;
 		}
-		if (!st->ss->add_internal_bitmap(st, &s->bitmap_chunk,
-						 c->delay, s->write_behind,
-						 bitmapsize, 1, major_num)) {
+		if (st->ss->add_internal_bitmap(st, &s->bitmap_chunk,
+						c->delay, s->write_behind,
+						bitmapsize, 1, major_num)) {
 			pr_err("Given bitmap chunk size not supported.\n");
 			goto abort_locked;
 		}
@@ -883,8 +888,10 @@ int Create(struct supertype *st, char *mddev,
 				else
 					inf->disk.state = 0;
 
-				if (dv->writemostly == 1)
+				if (dv->writemostly == FlagSet)
 					inf->disk.state |= (1<<MD_DISK_WRITEMOSTLY);
+				if (dv->failfast == FlagSet)
+					inf->disk.state |= (1<<MD_DISK_FAILFAST);
 
 				if (have_container)
 					fd = -1;

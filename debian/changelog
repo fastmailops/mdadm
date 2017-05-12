@@ -1,3 +1,9 @@
+mdadm (4.0-1) UNRELEASED; urgency=medium
+
+  * New upstream release.
+
+ -- Dimitri John Ledkov <xnox@ubuntu.com>  Fri, 12 May 2017 12:31:46 +0100
+
 mdadm (3.4-4) unstable; urgency=high
 
   * Bring in changes from Ubuntu, to make the two packages in sync:

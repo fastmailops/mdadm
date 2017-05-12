@@ -599,18 +599,9 @@ static int load_devices(struct devs *devices, char *devmap,
 			int err;
 			fstat(mdfd, &stb2);
 
-			if (strcmp(c->update, "uuid")==0 &&
-			    !ident->uuid_set) {
-				int rfd;
-				if ((rfd = open("/dev/urandom", O_RDONLY)) < 0 ||
-				    read(rfd, ident->uuid, 16) != 16) {
-					*(__u32*)(ident->uuid) = random();
-					*(__u32*)(ident->uuid+1) = random();
-					*(__u32*)(ident->uuid+2) = random();
-					*(__u32*)(ident->uuid+3) = random();
-				}
-				if (rfd >= 0) close(rfd);
-			}
+			if (strcmp(c->update, "uuid") == 0 && !ident->uuid_set)
+				random_uuid((__u8 *)ident->uuid);
+
 			dfd = dev_open(devname,
 				       tmpdev->disposition == 'I'
 				       ? O_RDWR : (O_RDWR|O_EXCL));
@@ -1880,10 +1871,9 @@ int assemble_container_content(struct supertype *st, int mdfd,
 	struct mdinfo *dev, *sra, *dev2;
 	int working = 0, preexist = 0;
 	int expansion = 0;
-	struct map_ent *map = NULL;
 	int old_raid_disks;
 	int start_reshape;
-	char *avail = NULL;
+	char *avail;
 	int err;
 
 	sysfs_init(content, mdfd, NULL);
@@ -1896,8 +1886,7 @@ int assemble_container_content(struct supertype *st, int mdfd,
 		    content->text_version[0] == '/')
 			content->text_version[0] = '-';
 		if (sysfs_set_array(content, md_get_version(mdfd)) != 0) {
-			if (sra)
-				sysfs_free(sra);
+			sysfs_free(sra);
 			return 1;
 		}
 	}
@@ -1950,10 +1939,8 @@ int assemble_container_content(struct supertype *st, int mdfd,
 		free(avail);
 		return 1;/* Nothing new, don't try to start */
 	}
-	map_update(&map, fd2devnm(mdfd),
-		   content->text_version,
+	map_update(NULL, fd2devnm(mdfd), content->text_version,
 		   content->uuid, chosen_name);
-
 
 	if (enough(content->array.level, content->array.raid_disks,
 		   content->array.layout, content->array.state & 1, avail) == 0) {

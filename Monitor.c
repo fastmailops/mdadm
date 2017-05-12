@@ -33,7 +33,7 @@
 struct state {
 	char *devname;
 	char devnm[32];	/* to sync with mdstat info */
-	long utime;
+	unsigned int utime;
 	int err;
 	char *spare_group;
 	int active, working, failed, spare, raid;
@@ -213,6 +213,8 @@ int Monitor(struct mddev_dev *devlist,
 		if (mdstat)
 			free_mdstat(mdstat);
 		mdstat = mdstat_read(oneshot?0:1, 0);
+		if (!mdstat)
+			mdstat_close();
 
 		for (st=statelist; st; st=st->next)
 			if (check_array(st, mdstat, c->test, &info,
@@ -597,7 +599,7 @@ static int check_array(struct state *st, struct mdstat_ent *mdstat,
 		} else
 			alert("RebuildFinished", dev, NULL, ainfo);
 		if (sra)
-			free(sra);
+			sysfs_free(sra);
 	}
 	st->percent = mse->percent;
 

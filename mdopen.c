@@ -144,7 +144,7 @@ int create_mddev(char *dev, char *name, int autof, int trustworthy,
 	struct createinfo *ci = conf_get_create_info();
 	int parts;
 	char *cname;
-	char devname[20];
+	char devname[37];
 	char devnm[32];
 	char cbuf[400];
 	if (chosen == NULL)
@@ -318,7 +318,7 @@ int create_mddev(char *dev, char *name, int autof, int trustworthy,
 	else if (num < 0) {
 		/* need to choose a free number. */
 		char *_devnm = find_free_devnm(use_mdp);
-		if (devnm == NULL) {
+		if (_devnm == NULL) {
 			pr_err("No avail md devices - aborting\n");
 			return -1;
 		}
@@ -348,7 +348,7 @@ int create_mddev(char *dev, char *name, int autof, int trustworthy,
 		if (lstat(devname, &stb) == 0) {
 			/* Must be the correct device, else error */
 			if ((stb.st_mode&S_IFMT) != S_IFBLK ||
-			    stb.st_rdev != (dev_t)devnm2devid(devnm)) {
+			    stb.st_rdev != devnm2devid(devnm)) {
 				pr_err("%s exists but looks wrong, please fix\n",
 					devname);
 				return -1;
@@ -416,9 +416,7 @@ int create_mddev(char *dev, char *name, int autof, int trustworthy,
  */
 int open_mddev(char *dev, int report_errors)
 {
-	int mdfd = open(dev, O_RDWR);
-	if (mdfd < 0 && errno == EACCES)
-		mdfd = open(dev, O_RDONLY);
+	int mdfd = open(dev, O_RDONLY);
 	if (mdfd < 0) {
 		if (report_errors)
 			pr_err("error opening %s: %s\n",
@@ -439,7 +437,7 @@ char *find_free_devnm(int use_partitions)
 	static char devnm[32];
 	int devnum;
 	for (devnum = 127; devnum != 128;
-	     devnum = devnum ? devnum-1 : (1<<20)-1) {
+	     devnum = devnum ? devnum-1 : (1<<9)-1) {
 
 		if (use_partitions)
 			sprintf(devnm, "md_d%d", devnum);
@@ -452,7 +450,7 @@ char *find_free_devnm(int use_partitions)
 		if (!use_udev()) {
 			/* make sure it is new to /dev too, at least as a
 			 * non-standard */
-			int devid = devnm2devid(devnm);
+			dev_t devid = devnm2devid(devnm);
 			if (devid) {
 				char *dn = map_dev(major(devid),
 						   minor(devid), 0);

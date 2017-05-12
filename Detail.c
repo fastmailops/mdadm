@@ -130,7 +130,7 @@ int Detail(char *dev, struct context *c)
 		/* This is a subarray of some container.
 		 * We want the name of the container, and the member
 		 */
-		int devid = devnm2devid(st->container_devnm);
+		dev_t devid = devnm2devid(st->container_devnm);
 		int cfd, err;
 
 		member = subarray;
@@ -323,7 +323,8 @@ int Detail(char *dev, struct context *c)
 		if (disk.major == 0 && disk.minor == 0)
 			continue;
 		if (disk.raid_disk >= 0 && disk.raid_disk < array.raid_disks
-		    && disks[disk.raid_disk*2].state == (1<<MD_DISK_REMOVED))
+		    && disks[disk.raid_disk*2].state == (1<<MD_DISK_REMOVED)
+		    && ((disk.state & (1<<MD_DISK_JOURNAL)) == 0))
 			disks[disk.raid_disk*2] = disk;
 		else if (disk.raid_disk >= 0 && disk.raid_disk < array.raid_disks
 			 && disks[disk.raid_disk*2+1].state == (1<<MD_DISK_REMOVED)
@@ -577,12 +578,12 @@ This is pretty boring
 				char path[200];
 				char vbuf[1024];
 				int nlen = strlen(sra->sys_name);
-				int devid;
+				dev_t devid;
 				if (de->d_name[0] == '.')
 					continue;
 				sprintf(path, "/sys/block/%s/md/metadata_version",
 					de->d_name);
-				if (load_sys(path, vbuf) < 0)
+				if (load_sys(path, vbuf, sizeof(vbuf)) < 0)
 					continue;
 				if (strncmp(vbuf, "external:", 9) != 0 ||
 				    !is_subarray(vbuf+9) ||
@@ -657,6 +658,7 @@ This is pretty boring
 			}
 			if (disk.state & (1<<MD_DISK_REMOVED)) printf(" removed");
 			if (disk.state & (1<<MD_DISK_WRITEMOSTLY)) printf(" writemostly");
+			if (disk.state & (1<<MD_DISK_FAILFAST)) printf(" failfast");
 			if (disk.state & (1<<MD_DISK_JOURNAL)) printf(" journal");
 			if ((disk.state &
 			     ((1<<MD_DISK_ACTIVE)|(1<<MD_DISK_SYNC)

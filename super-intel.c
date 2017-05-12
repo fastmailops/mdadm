@@ -81,7 +81,8 @@
 					MPB_ATTRIB_RAID1           | \
 					MPB_ATTRIB_RAID10          | \
 					MPB_ATTRIB_RAID5           | \
-					MPB_ATTRIB_EXP_STRIPE_SIZE)
+					MPB_ATTRIB_EXP_STRIPE_SIZE | \
+					MPB_ATTRIB_BBM)
 
 /* Define attributes that are unused but not harmful */
 #define MPB_ATTRIB_IGNORED		(MPB_ATTRIB_NEVER_USE)
@@ -90,6 +91,7 @@
 #define IMSM_RESERVED_SECTORS 4096
 #define NUM_BLOCKS_DIRTY_STRIPE_REGION 2056
 #define SECT_PER_MB_SHIFT 11
+#define MAX_SECTOR_SIZE 4096
 
 /* Disk configuration info. */
 #define IMSM_MAX_DEVICES 255
@@ -217,22 +219,24 @@ struct imsm_super {
 } __attribute__ ((packed));
 
 #define BBM_LOG_MAX_ENTRIES 254
+#define BBM_LOG_MAX_LBA_ENTRY_VAL 256		/* Represents 256 LBAs */
+#define BBM_LOG_SIGNATURE 0xabadb10c
+
+struct bbm_log_block_addr {
+	__u16 w1;
+	__u32 dw1;
+} __attribute__ ((__packed__));
 
 struct bbm_log_entry {
-	__u64 defective_block_start;
-#define UNREADABLE 0xFFFFFFFF
-	__u32 spare_block_offset;
-	__u16 remapped_marked_count;
-	__u16 disk_ordinal;
+	__u8 marked_count;		/* Number of blocks marked - 1 */
+	__u8 disk_ordinal;		/* Disk entry within the imsm_super */
+	struct bbm_log_block_addr defective_block_start;
 } __attribute__ ((__packed__));
 
 struct bbm_log {
 	__u32 signature; /* 0xABADB10C */
 	__u32 entry_count;
-	__u32 reserved_spare_block_count; /* 0 */
-	__u32 reserved; /* 0xFFFF */
-	__u64 first_spare_lba;
-	struct bbm_log_entry mapped_block_entries[BBM_LOG_MAX_ENTRIES];
+	struct bbm_log_entry marked_block_entries[BBM_LOG_MAX_ENTRIES];
 } __attribute__ ((__packed__));
 
 #ifndef MDASSEMBLE
@@ -243,9 +247,9 @@ static char *map_state_str[] = { "normal", "uninitialized", "degraded", "failed"
 
 #define GEN_MIGR_AREA_SIZE 2048 /* General Migration Copy Area size in blocks */
 
-#define MIGR_REC_BUF_SIZE 512 /* size of migr_record i/o buffer */
-#define MIGR_REC_POSITION 512 /* migr_record position offset on disk,
-			       * MIGR_REC_BUF_SIZE <= MIGR_REC_POSITION
+#define MIGR_REC_BUF_SECTORS 1 /* size of migr_record i/o buffer in sectors */
+#define MIGR_REC_SECTOR_POSITION 1 /* migr_record position offset on disk,
+			       * MIGR_REC_BUF_SECTORS <= MIGR_REC_SECTOR_POS
 			       */
 
 #define UNIT_SRC_NORMAL     0   /* Source data for curr_migr_unit must
@@ -318,14 +322,15 @@ static void set_migr_type(struct imsm_dev *dev, __u8 migr_type)
 	}
 }
 
-static unsigned int sector_count(__u32 bytes)
+static unsigned int sector_count(__u32 bytes, unsigned int sector_size)
 {
-	return ROUND_UP(bytes, 512) / 512;
+	return ROUND_UP(bytes, sector_size) / sector_size;
 }
 
-static unsigned int mpb_sectors(struct imsm_super *mpb)
+static unsigned int mpb_sectors(struct imsm_super *mpb,
+					unsigned int sector_size)
 {
-	return sector_count(__le32_to_cpu(mpb->mpb_size));
+	return sector_count(__le32_to_cpu(mpb->mpb_size), sector_size);
 }
 
 struct intel_dev {
@@ -359,6 +364,7 @@ struct intel_super {
 		array, it indicates that mdmon is allowed to clean migration
 		record */
 	size_t len; /* size of the 'buf' allocation */
+	size_t extra_space; /* extra space in 'buf' that is not used yet */
 	void *next_buf; /* for realloc'ing buf from the manager */
 	size_t next_len;
 	int updates_pending; /* count of pending updates for mdmon */
@@ -366,6 +372,7 @@ struct intel_super {
 	unsigned long long create_offset; /* common start for 'current_vol' */
 	__u32 random; /* random data for seeding new family numbers */
 	struct intel_dev *devlist;
+	unsigned int sector_size; /* sector size of used member drives */
 	struct dl {
 		struct dl *next;
 		int index;
@@ -386,6 +393,7 @@ struct intel_super {
 	struct intel_hba *hba; /* device path of the raid controller for this metadata */
 	const struct imsm_orom *orom; /* platform firmware support */
 	struct intel_super *next; /* (temp) list for disambiguating family_num */
+	struct md_bb bb;	/* memory for get_bad_blocks call */
 };
 
 struct intel_disk {
@@ -418,6 +426,7 @@ enum imsm_update_type {
 	update_takeover,
 	update_general_migration_checkpoint,
 	update_size_change,
+	update_prealloc_badblocks_mem,
 };
 
 struct imsm_update_activate_spare {
@@ -506,6 +515,10 @@ struct imsm_update_add_remove_disk {
 	enum imsm_update_type type;
 };
 
+struct imsm_update_prealloc_bb_mem {
+	enum imsm_update_type type;
+};
+
 static const char *_sys_dev_type[] = {
 	[SYS_DEV_UNKNOWN] = "Unknown",
 	[SYS_DEV_SAS] = "SAS",
@@ -537,7 +550,8 @@ static struct intel_hba * alloc_intel_hba(struct sys_dev *device)
 
 static struct intel_hba * find_intel_hba(struct intel_hba *hba, struct sys_dev *device)
 {
-	struct intel_hba *result=NULL;
+	struct intel_hba *result;
+
 	for (result = hba; result; result = result->next) {
 		if (result->type == device->type && strcmp(result->path, device->path) == 0)
 			break;
@@ -564,10 +578,6 @@ static int attach_hba_to_super(struct intel_super *super, struct sys_dev *device
 	 * Do not support HBA types mixing
 	 */
 	if (device->type != hba->type)
-		return 2;
-
-	/* Always forbid spanning between VMD domains (seen as different controllers by mdadm) */
-	if (device->type == SYS_DEV_VMD && !path_attached_to_hba(device->path, hba->path))
 		return 2;
 
 	/* Multiple same type HBAs can be used if they share the same OROM */
@@ -788,6 +798,244 @@ static struct imsm_dev *get_imsm_dev(struct intel_super *super, __u8 index)
 	return NULL;
 }
 
+static inline unsigned long long __le48_to_cpu(const struct bbm_log_block_addr
+					       *addr)
+{
+	return ((((__u64)__le32_to_cpu(addr->dw1)) << 16) |
+		__le16_to_cpu(addr->w1));
+}
+
+static inline struct bbm_log_block_addr __cpu_to_le48(unsigned long long sec)
+{
+	struct bbm_log_block_addr addr;
+
+	addr.w1 =  __cpu_to_le16((__u16)(sec & 0xffff));
+	addr.dw1 = __cpu_to_le32((__u32)(sec >> 16) & 0xffffffff);
+	return addr;
+}
+
+#ifndef MDASSEMBLE
+/* get size of the bbm log */
+static __u32 get_imsm_bbm_log_size(struct bbm_log *log)
+{
+	if (!log || log->entry_count == 0)
+		return 0;
+
+	return sizeof(log->signature) +
+		sizeof(log->entry_count) +
+		log->entry_count * sizeof(struct bbm_log_entry);
+}
+
+/* check if bad block is not partially stored in bbm log */
+static int is_stored_in_bbm(struct bbm_log *log, const __u8 idx, const unsigned
+			    long long sector, const int length, __u32 *pos)
+{
+	__u32 i;
+
+	for (i = *pos; i < log->entry_count; i++) {
+		struct bbm_log_entry *entry = &log->marked_block_entries[i];
+		unsigned long long bb_start;
+		unsigned long long bb_end;
+
+		bb_start = __le48_to_cpu(&entry->defective_block_start);
+		bb_end = bb_start + (entry->marked_count + 1);
+
+		if ((entry->disk_ordinal == idx) && (bb_start >= sector) &&
+		    (bb_end <= sector + length)) {
+			*pos = i;
+			return 1;
+		}
+	}
+	return 0;
+}
+
+/* record new bad block in bbm log */
+static int record_new_badblock(struct bbm_log *log, const __u8 idx, unsigned
+			       long long sector, int length)
+{
+	int new_bb = 0;
+	__u32 pos = 0;
+	struct bbm_log_entry *entry = NULL;
+
+	while (is_stored_in_bbm(log, idx, sector, length, &pos)) {
+		struct bbm_log_entry *e = &log->marked_block_entries[pos];
+
+		if ((e->marked_count + 1 == BBM_LOG_MAX_LBA_ENTRY_VAL) &&
+		    (__le48_to_cpu(&e->defective_block_start) == sector)) {
+			sector += BBM_LOG_MAX_LBA_ENTRY_VAL;
+			length -= BBM_LOG_MAX_LBA_ENTRY_VAL;
+			pos = pos + 1;
+			continue;
+		}
+		entry = e;
+		break;
+	}
+
+	if (entry) {
+		int cnt = (length <= BBM_LOG_MAX_LBA_ENTRY_VAL) ? length :
+			BBM_LOG_MAX_LBA_ENTRY_VAL;
+		entry->defective_block_start = __cpu_to_le48(sector);
+		entry->marked_count = cnt - 1;
+		if (cnt == length)
+			return 1;
+		sector += cnt;
+		length -= cnt;
+	}
+
+	new_bb = ROUND_UP(length, BBM_LOG_MAX_LBA_ENTRY_VAL) /
+		BBM_LOG_MAX_LBA_ENTRY_VAL;
+	if (log->entry_count + new_bb > BBM_LOG_MAX_ENTRIES)
+		return 0;
+
+	while (length > 0) {
+		int cnt = (length <= BBM_LOG_MAX_LBA_ENTRY_VAL) ? length :
+			BBM_LOG_MAX_LBA_ENTRY_VAL;
+		struct bbm_log_entry *entry =
+			&log->marked_block_entries[log->entry_count];
+
+		entry->defective_block_start = __cpu_to_le48(sector);
+		entry->marked_count = cnt - 1;
+		entry->disk_ordinal = idx;
+
+		sector += cnt;
+		length -= cnt;
+
+		log->entry_count++;
+	}
+
+	return new_bb;
+}
+
+/* clear all bad blocks for given disk */
+static void clear_disk_badblocks(struct bbm_log *log, const __u8 idx)
+{
+	__u32 i = 0;
+
+	while (i < log->entry_count) {
+		struct bbm_log_entry *entries = log->marked_block_entries;
+
+		if (entries[i].disk_ordinal == idx) {
+			if (i < log->entry_count - 1)
+				entries[i] = entries[log->entry_count - 1];
+			log->entry_count--;
+		} else {
+			i++;
+		}
+	}
+}
+
+/* clear given bad block */
+static int clear_badblock(struct bbm_log *log, const __u8 idx, const unsigned
+			  long long sector, const int length) {
+	__u32 i = 0;
+
+	while (i < log->entry_count) {
+		struct bbm_log_entry *entries = log->marked_block_entries;
+
+		if ((entries[i].disk_ordinal == idx) &&
+		    (__le48_to_cpu(&entries[i].defective_block_start) ==
+		     sector) && (entries[i].marked_count + 1 == length)) {
+			if (i < log->entry_count - 1)
+				entries[i] = entries[log->entry_count - 1];
+			log->entry_count--;
+			break;
+		}
+		i++;
+	}
+
+	return 1;
+}
+#endif /* MDASSEMBLE */
+
+/* allocate and load BBM log from metadata */
+static int load_bbm_log(struct intel_super *super)
+{
+	struct imsm_super *mpb = super->anchor;
+	__u32 bbm_log_size =  __le32_to_cpu(mpb->bbm_log_size);
+
+	super->bbm_log = xcalloc(1, sizeof(struct bbm_log));
+	if (!super->bbm_log)
+		return 1;
+
+	if (bbm_log_size) {
+		struct bbm_log *log = (void *)mpb +
+			__le32_to_cpu(mpb->mpb_size) - bbm_log_size;
+
+		__u32 entry_count;
+
+		if (bbm_log_size < sizeof(log->signature) +
+		    sizeof(log->entry_count))
+			return 2;
+
+		entry_count = __le32_to_cpu(log->entry_count);
+		if ((__le32_to_cpu(log->signature) != BBM_LOG_SIGNATURE) ||
+		    (entry_count > BBM_LOG_MAX_ENTRIES))
+			return 3;
+
+		if (bbm_log_size !=
+		    sizeof(log->signature) + sizeof(log->entry_count) +
+		    entry_count * sizeof(struct bbm_log_entry))
+			return 4;
+
+		memcpy(super->bbm_log, log, bbm_log_size);
+	} else {
+		super->bbm_log->signature = __cpu_to_le32(BBM_LOG_SIGNATURE);
+		super->bbm_log->entry_count = 0;
+	}
+
+	return 0;
+}
+
+/* checks if bad block is within volume boundaries */
+static int is_bad_block_in_volume(const struct bbm_log_entry *entry,
+			const unsigned long long start_sector,
+			const unsigned long long size)
+{
+	unsigned long long bb_start;
+	unsigned long long bb_end;
+
+	bb_start = __le48_to_cpu(&entry->defective_block_start);
+	bb_end = bb_start + (entry->marked_count + 1);
+
+	if (((bb_start >= start_sector) && (bb_start < start_sector + size)) ||
+	    ((bb_end >= start_sector) && (bb_end <= start_sector + size)))
+		return 1;
+
+	return 0;
+}
+
+/* get list of bad blocks on a drive for a volume */
+static void get_volume_badblocks(const struct bbm_log *log, const __u8 idx,
+			const unsigned long long start_sector,
+			const unsigned long long size,
+			struct md_bb *bbs)
+{
+	__u32 count = 0;
+	__u32 i;
+
+	for (i = 0; i < log->entry_count; i++) {
+		const struct bbm_log_entry *ent =
+			&log->marked_block_entries[i];
+		struct md_bb_entry *bb;
+
+		if ((ent->disk_ordinal == idx) &&
+		    is_bad_block_in_volume(ent, start_sector, size)) {
+
+			if (!bbs->entries) {
+				bbs->entries = xmalloc(BBM_LOG_MAX_ENTRIES *
+						     sizeof(*bb));
+				if (!bbs->entries)
+					break;
+			}
+
+			bb = &bbs->entries[count++];
+			bb->sector = __le48_to_cpu(&ent->defective_block_start);
+			bb->length = ent->marked_count + 1;
+		}
+	}
+	bbs->count = count;
+}
+
 /*
  * for second_map:
  *  == MAP_0 get first map
@@ -910,7 +1158,6 @@ static unsigned long long blocks_per_member(struct imsm_map *map)
 	return join_u32(map->blocks_per_member_lo, map->blocks_per_member_hi);
 }
 
-#ifndef MDASSEMBLE
 static unsigned long long num_data_stripes(struct imsm_map *map)
 {
 	if (map == NULL)
@@ -922,7 +1169,6 @@ static void set_total_blocks(struct imsm_disk *disk, unsigned long long n)
 {
 	split_ull(n, &disk->total_blocks_lo, &disk->total_blocks_hi);
 }
-#endif
 
 static void set_pba_of_lba0(struct imsm_map *map, unsigned long long n)
 {
@@ -1124,6 +1370,8 @@ static unsigned long long min_acceptable_spare_size_imsm(struct supertype *st)
 
 static int is_gen_migration(struct imsm_dev *dev);
 
+#define IMSM_4K_DIV 8
+
 #ifndef MDASSEMBLE
 static __u64 blocks_per_migr_unit(struct intel_super *super,
 				  struct imsm_dev *dev);
@@ -1222,7 +1470,7 @@ static void print_imsm_dev(struct intel_super *super,
 		printf(" <-- %s", map_state_str[map->map_state]);
 		printf("\n     Checkpoint : %u ",
 			   __le32_to_cpu(dev->vol.curr_migr_unit));
-		if ((is_gen_migration(dev)) && ((slot > 1) || (slot < 0)))
+		if (is_gen_migration(dev) && (slot > 1 || slot < 0))
 			printf("(N/A)");
 		else
 			printf("(%llu)", (unsigned long long)
@@ -1232,8 +1480,10 @@ static void print_imsm_dev(struct intel_super *super,
 	printf("    Dirty State : %s\n", dev->vol.dirty ? "dirty" : "clean");
 }
 
-static void print_imsm_disk(struct imsm_disk *disk, int index, __u32 reserved)
-{
+static void print_imsm_disk(struct imsm_disk *disk,
+			    int index,
+			    __u32 reserved,
+			    unsigned int sector_size) {
 	char str[MAX_RAID_SERIAL_LEN + 1];
 	__u64 sz;
 
@@ -1251,8 +1501,83 @@ static void print_imsm_disk(struct imsm_disk *disk, int index, __u32 reserved)
 					    is_failed(disk) ? " failed" : "");
 	printf("             Id : %08x\n", __le32_to_cpu(disk->scsi_id));
 	sz = total_blocks(disk) - reserved;
-	printf("    Usable Size : %llu%s\n", (unsigned long long)sz,
+	printf("    Usable Size : %llu%s\n",
+	       (unsigned long long)sz * 512 / sector_size,
 	       human_size(sz * 512));
+}
+
+void convert_to_4k_imsm_migr_rec(struct intel_super *super)
+{
+	struct migr_record *migr_rec = super->migr_rec;
+
+	migr_rec->blocks_per_unit /= IMSM_4K_DIV;
+	migr_rec->ckpt_area_pba /= IMSM_4K_DIV;
+	migr_rec->dest_1st_member_lba /= IMSM_4K_DIV;
+	migr_rec->dest_depth_per_unit /= IMSM_4K_DIV;
+	split_ull((join_u32(migr_rec->post_migr_vol_cap,
+		 migr_rec->post_migr_vol_cap_hi) / IMSM_4K_DIV),
+		 &migr_rec->post_migr_vol_cap, &migr_rec->post_migr_vol_cap_hi);
+}
+
+void convert_to_4k_imsm_disk(struct imsm_disk *disk)
+{
+	set_total_blocks(disk, (total_blocks(disk)/IMSM_4K_DIV));
+}
+
+void convert_to_4k(struct intel_super *super)
+{
+	struct imsm_super *mpb = super->anchor;
+	struct imsm_disk *disk;
+	int i;
+	__u32 bbm_log_size = __le32_to_cpu(mpb->bbm_log_size);
+
+	for (i = 0; i < mpb->num_disks ; i++) {
+		disk = __get_imsm_disk(mpb, i);
+		/* disk */
+		convert_to_4k_imsm_disk(disk);
+	}
+	for (i = 0; i < mpb->num_raid_devs; i++) {
+		struct imsm_dev *dev = __get_imsm_dev(mpb, i);
+		struct imsm_map *map = get_imsm_map(dev, MAP_0);
+		/* dev */
+		split_ull((join_u32(dev->size_low, dev->size_high)/IMSM_4K_DIV),
+				 &dev->size_low, &dev->size_high);
+		dev->vol.curr_migr_unit /= IMSM_4K_DIV;
+
+		/* map0 */
+		set_blocks_per_member(map, blocks_per_member(map)/IMSM_4K_DIV);
+		map->blocks_per_strip /= IMSM_4K_DIV;
+		set_pba_of_lba0(map, pba_of_lba0(map)/IMSM_4K_DIV);
+
+		if (dev->vol.migr_state) {
+			/* map1 */
+			map = get_imsm_map(dev, MAP_1);
+			set_blocks_per_member(map,
+			    blocks_per_member(map)/IMSM_4K_DIV);
+			map->blocks_per_strip /= IMSM_4K_DIV;
+			set_pba_of_lba0(map, pba_of_lba0(map)/IMSM_4K_DIV);
+		}
+	}
+	if (bbm_log_size) {
+		struct bbm_log *log = (void *)mpb +
+			__le32_to_cpu(mpb->mpb_size) - bbm_log_size;
+		__u32 i;
+
+		for (i = 0; i < log->entry_count; i++) {
+			struct bbm_log_entry *entry =
+				&log->marked_block_entries[i];
+
+			__u8 count = entry->marked_count + 1;
+			unsigned long long sector =
+				__le48_to_cpu(&entry->defective_block_start);
+
+			entry->defective_block_start =
+				__cpu_to_le48(sector/IMSM_4K_DIV);
+			entry->marked_count = max(count/IMSM_4K_DIV, 1) - 1;
+		}
+	}
+
+	mpb->check_sum = __gen_imsm_checksum(mpb);
 }
 
 void examine_migr_rec_imsm(struct intel_super *super)
@@ -1275,7 +1600,7 @@ void examine_migr_rec_imsm(struct intel_super *super)
 		map = get_imsm_map(dev, MAP_0);
 		if (map)
 			slot = get_imsm_disk_slot(map, super->disks->index);
-		if ((map == NULL) || (slot > 1) || (slot < 0)) {
+		if (map == NULL || slot > 1 || slot < 0) {
 			printf(" Empty\n                              ");
 			printf("Examine one of first two disks in array\n");
 			break;
@@ -1312,6 +1637,78 @@ void examine_migr_rec_imsm(struct intel_super *super)
 	}
 }
 #endif /* MDASSEMBLE */
+
+void convert_from_4k_imsm_migr_rec(struct intel_super *super)
+{
+	struct migr_record *migr_rec = super->migr_rec;
+
+	migr_rec->blocks_per_unit *= IMSM_4K_DIV;
+	migr_rec->ckpt_area_pba *= IMSM_4K_DIV;
+	migr_rec->dest_1st_member_lba *= IMSM_4K_DIV;
+	migr_rec->dest_depth_per_unit *= IMSM_4K_DIV;
+	split_ull((join_u32(migr_rec->post_migr_vol_cap,
+		 migr_rec->post_migr_vol_cap_hi) * IMSM_4K_DIV),
+		 &migr_rec->post_migr_vol_cap,
+		 &migr_rec->post_migr_vol_cap_hi);
+}
+
+void convert_from_4k(struct intel_super *super)
+{
+	struct imsm_super *mpb = super->anchor;
+	struct imsm_disk *disk;
+	int i;
+	__u32 bbm_log_size = __le32_to_cpu(mpb->bbm_log_size);
+
+	for (i = 0; i < mpb->num_disks ; i++) {
+		disk = __get_imsm_disk(mpb, i);
+		/* disk */
+		set_total_blocks(disk, (total_blocks(disk)*IMSM_4K_DIV));
+	}
+
+	for (i = 0; i < mpb->num_raid_devs; i++) {
+		struct imsm_dev *dev = __get_imsm_dev(mpb, i);
+		struct imsm_map *map = get_imsm_map(dev, MAP_0);
+		/* dev */
+		split_ull((join_u32(dev->size_low, dev->size_high)*IMSM_4K_DIV),
+				 &dev->size_low, &dev->size_high);
+		dev->vol.curr_migr_unit *= IMSM_4K_DIV;
+
+		/* map0 */
+		set_blocks_per_member(map, blocks_per_member(map)*IMSM_4K_DIV);
+		map->blocks_per_strip *= IMSM_4K_DIV;
+		set_pba_of_lba0(map, pba_of_lba0(map)*IMSM_4K_DIV);
+
+		if (dev->vol.migr_state) {
+			/* map1 */
+			map = get_imsm_map(dev, MAP_1);
+			set_blocks_per_member(map,
+			    blocks_per_member(map)*IMSM_4K_DIV);
+			map->blocks_per_strip *= IMSM_4K_DIV;
+			set_pba_of_lba0(map, pba_of_lba0(map)*IMSM_4K_DIV);
+		}
+	}
+	if (bbm_log_size) {
+		struct bbm_log *log = (void *)mpb +
+			__le32_to_cpu(mpb->mpb_size) - bbm_log_size;
+		__u32 i;
+
+		for (i = 0; i < log->entry_count; i++) {
+			struct bbm_log_entry *entry =
+				&log->marked_block_entries[i];
+
+			__u8 count = entry->marked_count + 1;
+			unsigned long long sector =
+				__le48_to_cpu(&entry->defective_block_start);
+
+			entry->defective_block_start =
+				__cpu_to_le48(sector*IMSM_4K_DIV);
+			entry->marked_count = count*IMSM_4K_DIV - 1;
+		}
+	}
+
+	mpb->check_sum = __gen_imsm_checksum(mpb);
+}
+
 /*******************************************************************************
  * function: imsm_check_attributes
  * Description: Function checks if features represented by attributes flags
@@ -1432,11 +1829,12 @@ static void examine_super_imsm(struct supertype *st, char *homehost)
 	sum = __le32_to_cpu(mpb->check_sum);
 	printf("       Checksum : %08x %s\n", sum,
 		__gen_imsm_checksum(mpb) == sum ? "correct" : "incorrect");
-	printf("    MPB Sectors : %d\n", mpb_sectors(mpb));
+	printf("    MPB Sectors : %d\n", mpb_sectors(mpb, super->sector_size));
 	printf("          Disks : %d\n", mpb->num_disks);
 	printf("   RAID Devices : %d\n", mpb->num_raid_devs);
-	print_imsm_disk(__get_imsm_disk(mpb, super->disks->index), super->disks->index, reserved);
-	if (super->bbm_log) {
+	print_imsm_disk(__get_imsm_disk(mpb, super->disks->index),
+			super->disks->index, reserved, super->sector_size);
+	if (get_imsm_bbm_log_size(super->bbm_log)) {
 		struct bbm_log *log = super->bbm_log;
 
 		printf("\n");
@@ -1444,9 +1842,6 @@ static void examine_super_imsm(struct supertype *st, char *homehost)
 		printf("       Log Size : %d\n", __le32_to_cpu(mpb->bbm_log_size));
 		printf("      Signature : %x\n", __le32_to_cpu(log->signature));
 		printf("    Entry Count : %d\n", __le32_to_cpu(log->entry_count));
-		printf("   Spare Blocks : %d\n",  __le32_to_cpu(log->reserved_spare_block_count));
-		printf("    First Spare : %llx\n",
-		       (unsigned long long) __le64_to_cpu(log->first_spare_lba));
 	}
 	for (i = 0; i < mpb->num_raid_devs; i++) {
 		struct mdinfo info;
@@ -1460,12 +1855,14 @@ static void examine_super_imsm(struct supertype *st, char *homehost)
 	for (i = 0; i < mpb->num_disks; i++) {
 		if (i == super->disks->index)
 			continue;
-		print_imsm_disk(__get_imsm_disk(mpb, i), i, reserved);
+		print_imsm_disk(__get_imsm_disk(mpb, i), i, reserved,
+				super->sector_size);
 	}
 
 	for (dl = super->disks; dl; dl = dl->next)
 		if (dl->index == -1)
-			print_imsm_disk(&dl->disk, -1, reserved);
+			print_imsm_disk(&dl->disk, -1, reserved,
+					super->sector_size);
 
 	examine_migr_rec_imsm(super);
 }
@@ -1529,7 +1926,7 @@ static void export_examine_super_imsm(struct supertype *st)
 
 static int copy_metadata_imsm(struct supertype *st, int from, int to)
 {
-	/* The second last 512byte sector of the device contains
+	/* The second last sector of the device contains
 	 * the "struct imsm_super" metadata.
 	 * This contains mpb_size which is the size in bytes of the
 	 * extended metadata.  This is located immediately before
@@ -1542,29 +1939,31 @@ static int copy_metadata_imsm(struct supertype *st, int from, int to)
 	unsigned long long dsize, offset;
 	int sectors;
 	struct imsm_super *sb;
-	int written = 0;
+	struct intel_super *super = st->sb;
+	unsigned int sector_size = super->sector_size;
+	unsigned int written = 0;
 
-	if (posix_memalign(&buf, 4096, 4096) != 0)
+	if (posix_memalign(&buf, MAX_SECTOR_SIZE, MAX_SECTOR_SIZE) != 0)
 		return 1;
 
 	if (!get_dev_size(from, NULL, &dsize))
 		goto err;
 
-	if (lseek64(from, dsize-1024, 0) < 0)
+	if (lseek64(from, dsize-(2*sector_size), 0) < 0)
 		goto err;
-	if (read(from, buf, 512) != 512)
+	if ((unsigned int)read(from, buf, sector_size) != sector_size)
 		goto err;
 	sb = buf;
 	if (strncmp((char*)sb->sig, MPB_SIGNATURE, MPB_SIG_LEN) != 0)
 		goto err;
 
-	sectors = mpb_sectors(sb) + 2;
-	offset = dsize - sectors * 512;
+	sectors = mpb_sectors(sb, sector_size) + 2;
+	offset = dsize - sectors * sector_size;
 	if (lseek64(from, offset, 0) < 0 ||
 	    lseek64(to, offset, 0) < 0)
 		goto err;
-	while (written < sectors * 512) {
-		int n = sectors*512 - written;
+	while (written < sectors * sector_size) {
+		int n = sectors*sector_size - written;
 		if (n > 4096)
 			n = 4096;
 		if (read(from, buf, n) != n)
@@ -1624,7 +2023,10 @@ static int ahci_enumerate_ports(const char *hba_path, int port_count, int host_b
 	 * this hba
 	 */
 	dir = opendir("/sys/dev/block");
-	for (ent = dir ? readdir(dir) : NULL; ent; ent = readdir(dir)) {
+	if (!dir)
+		return 1;
+
+	for (ent = readdir(dir); ent; ent = readdir(dir)) {
 		int fd;
 		char model[64];
 		char vendor[64];
@@ -1654,7 +2056,7 @@ static int ahci_enumerate_ports(const char *hba_path, int port_count, int host_b
 			break;
 		}
 		sprintf(device, "/sys/dev/block/%d:%d/device/type", major, minor);
-		if (load_sys(device, buf) != 0) {
+		if (load_sys(device, buf, sizeof(buf)) != 0) {
 			if (verbose > 0)
 				pr_err("failed to read device type for %s\n",
 					path);
@@ -1669,7 +2071,7 @@ static int ahci_enumerate_ports(const char *hba_path, int port_count, int host_b
 			vendor[0] = '\0';
 			model[0] = '\0';
 			sprintf(device, "/sys/dev/block/%d:%d/device/vendor", major, minor);
-			if (load_sys(device, buf) == 0) {
+			if (load_sys(device, buf, sizeof(buf)) == 0) {
 				strncpy(vendor, buf, sizeof(vendor));
 				vendor[sizeof(vendor) - 1] = '\0';
 				c = (char *) &vendor[sizeof(vendor) - 1];
@@ -1678,7 +2080,7 @@ static int ahci_enumerate_ports(const char *hba_path, int port_count, int host_b
 
 			}
 			sprintf(device, "/sys/dev/block/%d:%d/device/model", major, minor);
-			if (load_sys(device, buf) == 0) {
+			if (load_sys(device, buf, sizeof(buf)) == 0) {
 				strncpy(model, buf, sizeof(model));
 				model[sizeof(model) - 1] = '\0';
 				c = (char *) &model[sizeof(model) - 1];
@@ -1781,7 +2183,10 @@ static int print_vmd_attached_devs(struct sys_dev *hba)
 	 * this hba
 	 */
 	dir = opendir("/sys/bus/pci/drivers/nvme");
-	for (ent = dir ? readdir(dir) : NULL; ent; ent = readdir(dir)) {
+	if (!dir)
+		return 1;
+
+	for (ent = readdir(dir); ent; ent = readdir(dir)) {
 		int n;
 
 		/* is 'ent' a device? check that the 'subsystem' link exists and
@@ -1800,9 +2205,6 @@ static int print_vmd_attached_devs(struct sys_dev *hba)
 			continue;
 
 		sprintf(path, "/sys/bus/pci/drivers/nvme/%s", ent->d_name);
-		/* if not a intel NVMe - skip it*/
-		if (devpath_to_vendor(path) != 0x8086)
-			continue;
 
 		rp = realpath(path, NULL);
 		if (!rp)
@@ -1814,6 +2216,7 @@ static int print_vmd_attached_devs(struct sys_dev *hba)
 		free(rp);
 	}
 
+	closedir(dir);
 	return 0;
 }
 
@@ -2015,16 +2418,22 @@ static int detail_platform_imsm(int verbose, int enumerate_only, char *controlle
 
 	for (entry = orom_entries; entry; entry = entry->next) {
 		if (entry->type == SYS_DEV_VMD) {
+			print_imsm_capability(&entry->orom);
+			printf(" 3rd party NVMe :%s supported\n",
+			    imsm_orom_has_tpv_support(&entry->orom)?"":" not");
 			for (hba = list; hba; hba = hba->next) {
 				if (hba->type == SYS_DEV_VMD) {
 					char buf[PATH_MAX];
-					print_imsm_capability(&entry->orom);
 					printf(" I/O Controller : %s (%s)\n",
 						vmd_domain_to_controller(hba, buf), get_sys_dev_type(hba->type));
-					print_vmd_attached_devs(hba);
-					printf("\n");
+					if (print_vmd_attached_devs(hba)) {
+						if (verbose > 0)
+							pr_err("failed to get devices attached to VMD domain.\n");
+						result |= 2;
+					}
 				}
 			}
+			printf("\n");
 			continue;
 		}
 
@@ -2403,21 +2812,26 @@ static int imsm_level_to_layout(int level)
 static int read_imsm_migr_rec(int fd, struct intel_super *super)
 {
 	int ret_val = -1;
+	unsigned int sector_size = super->sector_size;
 	unsigned long long dsize;
 
 	get_dev_size(fd, NULL, &dsize);
-	if (lseek64(fd, dsize - MIGR_REC_POSITION, SEEK_SET) < 0) {
+	if (lseek64(fd, dsize - (sector_size*MIGR_REC_SECTOR_POSITION),
+		   SEEK_SET) < 0) {
 		pr_err("Cannot seek to anchor block: %s\n",
 		       strerror(errno));
 		goto out;
 	}
-	if (read(fd, super->migr_rec_buf, MIGR_REC_BUF_SIZE) !=
-							    MIGR_REC_BUF_SIZE) {
+	if ((unsigned int)read(fd, super->migr_rec_buf,
+	    MIGR_REC_BUF_SECTORS*sector_size) !=
+	    MIGR_REC_BUF_SECTORS*sector_size) {
 		pr_err("Cannot read migr record block: %s\n",
 		       strerror(errno));
 		goto out;
 	}
 	ret_val = 0;
+	if (sector_size == 4096)
+		convert_from_4k_imsm_migr_rec(super);
 
 out:
 	return ret_val;
@@ -2451,12 +2865,12 @@ static struct imsm_dev *imsm_get_device_during_migration(
 static int load_imsm_migr_rec(struct intel_super *super, struct mdinfo *info)
 {
 	struct mdinfo *sd;
-	struct dl *dl = NULL;
+	struct dl *dl;
 	char nm[30];
 	int retval = -1;
 	int fd = -1;
 	struct imsm_dev *dev;
-	struct imsm_map *map = NULL;
+	struct imsm_map *map;
 	int slot = -1;
 
 	/* find map under migration */
@@ -2465,19 +2879,12 @@ static int load_imsm_migr_rec(struct intel_super *super, struct mdinfo *info)
 	*/
 	if (dev == NULL)
 		return -2;
-	map = get_imsm_map(dev, MAP_0);
 
 	if (info) {
 		for (sd = info->devs ; sd ; sd = sd->next) {
-			/* skip spare and failed disks
-			 */
-			if (sd->disk.raid_disk < 0)
-				continue;
 			/* read only from one of the first two slots */
-			if (map)
-				slot = get_imsm_disk_slot(map,
-							  sd->disk.raid_disk);
-			if ((map == NULL) || (slot > 1) || (slot < 0))
+			if ((sd->disk.raid_disk < 0) ||
+			    (sd->disk.raid_disk > 1))
 				continue;
 
 			sprintf(nm, "%d:%d", sd->disk.major, sd->disk.minor);
@@ -2487,6 +2894,7 @@ static int load_imsm_migr_rec(struct intel_super *super, struct mdinfo *info)
 		}
 	}
 	if (fd < 0) {
+		map = get_imsm_map(dev, MAP_0);
 		for (dl = super->disks; dl; dl = dl->next) {
 			/* skip spare and failed disks
 			*/
@@ -2495,7 +2903,7 @@ static int load_imsm_migr_rec(struct intel_super *super, struct mdinfo *info)
 			/* read only from one of the first two slots */
 			if (map)
 				slot = get_imsm_disk_slot(map, dl->index);
-			if ((map == NULL) || (slot > 1) || (slot < 0))
+			if (map == NULL || slot > 1 || slot < 0)
 				continue;
 			sprintf(nm, "%d:%d", dl->major, dl->minor);
 			fd = dev_open(nm, O_RDONLY);
@@ -2569,6 +2977,7 @@ static void imsm_update_metadata_locally(struct supertype *st,
 static int write_imsm_migr_rec(struct supertype *st)
 {
 	struct intel_super *super = st->sb;
+	unsigned int sector_size = super->sector_size;
 	unsigned long long dsize;
 	char nm[30];
 	int fd = -1;
@@ -2577,7 +2986,7 @@ static int write_imsm_migr_rec(struct supertype *st)
 	int len;
 	struct imsm_update_general_migration_checkpoint *u;
 	struct imsm_dev *dev;
-	struct imsm_map *map = NULL;
+	struct imsm_map *map;
 
 	/* find map under migration */
 	dev = imsm_get_device_during_migration(super);
@@ -2590,6 +2999,8 @@ static int write_imsm_migr_rec(struct supertype *st)
 
 	map = get_imsm_map(dev, MAP_0);
 
+	if (sector_size == 4096)
+		convert_to_4k_imsm_migr_rec(super);
 	for (sd = super->disks ; sd ; sd = sd->next) {
 		int slot = -1;
 
@@ -2599,7 +3010,7 @@ static int write_imsm_migr_rec(struct supertype *st)
 		/* write to 2 first slots only */
 		if (map)
 			slot = get_imsm_disk_slot(map, sd->index);
-		if ((map == NULL) || (slot > 1) || (slot < 0))
+		if (map == NULL || slot > 1 || slot < 0)
 			continue;
 
 		sprintf(nm, "%d:%d", sd->major, sd->minor);
@@ -2607,13 +3018,15 @@ static int write_imsm_migr_rec(struct supertype *st)
 		if (fd < 0)
 			continue;
 		get_dev_size(fd, NULL, &dsize);
-		if (lseek64(fd, dsize - MIGR_REC_POSITION, SEEK_SET) < 0) {
+		if (lseek64(fd, dsize - (MIGR_REC_SECTOR_POSITION*sector_size),
+		    SEEK_SET) < 0) {
 			pr_err("Cannot seek to anchor block: %s\n",
 			       strerror(errno));
 			goto out;
 		}
-		if (write(fd, super->migr_rec_buf, MIGR_REC_BUF_SIZE) !=
-							    MIGR_REC_BUF_SIZE) {
+		if ((unsigned int)write(fd, super->migr_rec_buf,
+		    MIGR_REC_BUF_SECTORS*sector_size) !=
+		    MIGR_REC_BUF_SECTORS*sector_size) {
 			pr_err("Cannot write migr record block: %s\n",
 			       strerror(errno));
 			goto out;
@@ -2621,9 +3034,10 @@ static int write_imsm_migr_rec(struct supertype *st)
 		close(fd);
 		fd = -1;
 	}
+	if (sector_size == 4096)
+		convert_from_4k_imsm_migr_rec(super);
 	/* update checkpoint information in metadata */
 	len = imsm_create_metadata_checkpoint_update(super, &u);
-
 	if (len <= 0) {
 		dprintf("imsm: Cannot prepare update\n");
 		goto out;
@@ -2675,13 +3089,14 @@ int imsm_reshape_blocks_arrays_changes(struct intel_super *super)
 }
 static unsigned long long imsm_component_size_aligment_check(int level,
 					      int chunk_size,
+					      unsigned int sector_size,
 					      unsigned long long component_size)
 {
 	unsigned int component_size_alligment;
 
 	/* check component size aligment
 	*/
-	component_size_alligment = component_size % (chunk_size/512);
+	component_size_alligment = component_size % (chunk_size/sector_size);
 
 	dprintf("(Level: %i, chunk_size = %i, component_size = %llu), component_size_alligment = %u\n",
 		level, chunk_size, component_size,
@@ -2787,12 +3202,20 @@ static void getinfo_super_imsm_volume(struct supertype *st, struct mdinfo *info,
 	}
 
 	info->data_offset	  = pba_of_lba0(map_to_analyse);
-	info->component_size	  = blocks_per_member(map_to_analyse);
+
+	if (info->array.level == 5) {
+		info->component_size = num_data_stripes(map_to_analyse) *
+				       map_to_analyse->blocks_per_strip;
+	} else {
+		info->component_size = blocks_per_member(map_to_analyse);
+	}
 
 	info->component_size = imsm_component_size_aligment_check(
 							info->array.level,
 							info->array.chunk_size,
+							super->sector_size,
 							info->component_size);
+	info->bb.supported = 1;
 
 	memset(info->uuid, 0, sizeof(info->uuid));
 	info->recovery_start = MaxSector;
@@ -2959,9 +3382,11 @@ static void getinfo_super_imsm(struct supertype *st, struct mdinfo *info, char *
 	info->name[0] = 0;
 	info->recovery_start = MaxSector;
 	info->recovery_blocked = imsm_reshape_blocks_arrays_changes(st->sb);
+	info->bb.supported = 1;
 
 	/* do we have the all the insync disks that we expect? */
 	mpb = super->anchor;
+	info->events = __le32_to_cpu(mpb->generation_num);
 
 	for (i = 0; i < mpb->num_raid_devs; i++) {
 		struct imsm_dev *dev = get_imsm_dev(super, i);
@@ -3049,7 +3474,7 @@ static void getinfo_super_imsm(struct supertype *st, struct mdinfo *info, char *
  * for each disk in array */
 struct mdinfo *getinfo_super_disks_imsm(struct supertype *st)
 {
-	struct mdinfo *mddev = NULL;
+	struct mdinfo *mddev;
 	struct intel_super *super = st->sb;
 	struct imsm_disk *disk;
 	int count = 0;
@@ -3163,6 +3588,8 @@ static size_t disks_to_mpb_size(int disks)
 	size += (4 - 2) * sizeof(struct imsm_map);
 	/* 4 possible disk_ord_tbl's */
 	size += 4 * (disks - 1) * sizeof(__u32);
+	/* maximum bbm log */
+	size += sizeof(struct bbm_log);
 
 	return size;
 }
@@ -3319,23 +3746,40 @@ static void fd2devname(int fd, char *name)
 	}
 }
 
+static int nvme_get_serial(int fd, void *buf, size_t buf_len)
+{
+	char path[60];
+	char *name = fd2kname(fd);
+
+	if (!name)
+		return 1;
+
+	if (strncmp(name, "nvme", 4) != 0)
+		return 1;
+
+	snprintf(path, sizeof(path) - 1, "/sys/block/%s/device/serial", name);
+
+	return load_sys(path, buf, buf_len);
+}
+
 extern int scsi_get_serial(int fd, void *buf, size_t buf_len);
 
 static int imsm_read_serial(int fd, char *devname,
 			    __u8 serial[MAX_RAID_SERIAL_LEN])
 {
-	unsigned char scsi_serial[255];
+	char buf[50];
 	int rv;
-	int rsp_len;
 	int len;
 	char *dest;
 	char *src;
-	char *rsp_buf;
-	int i;
+	unsigned int i;
 
-	memset(scsi_serial, 0, sizeof(scsi_serial));
+	memset(buf, 0, sizeof(buf));
 
-	rv = scsi_get_serial(fd, scsi_serial, sizeof(scsi_serial));
+	rv = nvme_get_serial(fd, buf, sizeof(buf));
+
+	if (rv)
+		rv = scsi_get_serial(fd, buf, sizeof(buf));
 
 	if (rv && check_env("IMSM_DEVNAME_AS_SERIAL")) {
 		memset(serial, 0, MAX_RAID_SERIAL_LEN);
@@ -3350,20 +3794,11 @@ static int imsm_read_serial(int fd, char *devname,
 		return rv;
 	}
 
-	rsp_len = scsi_serial[3];
-	if (!rsp_len) {
-		if (devname)
-			pr_err("Failed to retrieve serial for %s\n",
-			       devname);
-		return 2;
-	}
-	rsp_buf = (char *) &scsi_serial[4];
-
 	/* trim all whitespace and non-printable characters and convert
 	 * ':' to ';'
 	 */
-	for (i = 0, dest = rsp_buf; i < rsp_len; i++) {
-		src = &rsp_buf[i];
+	for (i = 0, dest = buf; i < sizeof(buf) && buf[i]; i++) {
+		src = &buf[i];
 		if (*src > 0x20) {
 			/* ':' is reserved for use in placeholder serial
 			 * numbers for missing disks
@@ -3374,8 +3809,8 @@ static int imsm_read_serial(int fd, char *devname,
 				*dest++ = *src;
 		}
 	}
-	len = dest - rsp_buf;
-	dest = rsp_buf;
+	len = dest - buf;
+	dest = buf;
 
 	/* truncate leading characters */
 	if (len > MAX_RAID_SERIAL_LEN) {
@@ -3507,8 +3942,7 @@ static void migrate(struct imsm_dev *dev, struct intel_super *super,
 
 	/* duplicate and then set the target end state in map[0] */
 	memcpy(dest, src, sizeof_imsm_map(src));
-	if ((migr_type == MIGR_REBUILD) ||
-	    (migr_type ==  MIGR_GEN_MIGR)) {
+	if (migr_type == MIGR_REBUILD || migr_type ==  MIGR_GEN_MIGR) {
 		__u32 ord;
 		int i;
 
@@ -3538,8 +3972,8 @@ static void end_migration(struct imsm_dev *dev, struct intel_super *super,
 	 *
 	 * FIXME add support for raid-level-migration
 	 */
-	if ((map_state != map->map_state) && (is_gen_migration(dev) == 0) &&
-		(prev->map_state != IMSM_T_STATE_UNINITIALIZED)) {
+	if (map_state != map->map_state && (is_gen_migration(dev) == 0) &&
+	    prev->map_state != IMSM_T_STATE_UNINITIALIZED) {
 		/* when final map state is other than expected
 		 * merge maps (not for migration)
 		 */
@@ -3605,8 +4039,9 @@ static int parse_raid_devices(struct intel_super *super)
 	if (__le32_to_cpu(mpb->mpb_size) + space_needed > super->len) {
 		void *buf;
 
-		len = ROUND_UP(__le32_to_cpu(mpb->mpb_size) + space_needed, 512);
-		if (posix_memalign(&buf, 512, len) != 0)
+		len = ROUND_UP(__le32_to_cpu(mpb->mpb_size) + space_needed,
+			      super->sector_size);
+		if (posix_memalign(&buf, MAX_SECTOR_SIZE, len) != 0)
 			return 1;
 
 		memcpy(buf, super->buf, super->len);
@@ -3616,20 +4051,9 @@ static int parse_raid_devices(struct intel_super *super)
 		super->len = len;
 	}
 
+	super->extra_space += space_needed;
+
 	return 0;
-}
-
-/* retrieve a pointer to the bbm log which starts after all raid devices */
-struct bbm_log *__get_imsm_bbm_log(struct imsm_super *mpb)
-{
-	void *ptr = NULL;
-
-	if (__le32_to_cpu(mpb->bbm_log_size)) {
-		ptr = mpb;
-		ptr += mpb->mpb_size - __le32_to_cpu(mpb->bbm_log_size);
-	}
-
-	return ptr;
 }
 
 /*******************************************************************************
@@ -3679,31 +4103,32 @@ static int load_imsm_mpb(int fd, struct intel_super *super, char *devname)
 {
 	unsigned long long dsize;
 	unsigned long long sectors;
+	unsigned int sector_size = super->sector_size;
 	struct stat;
 	struct imsm_super *anchor;
 	__u32 check_sum;
 
 	get_dev_size(fd, NULL, &dsize);
-	if (dsize < 1024) {
+	if (dsize < 2*sector_size) {
 		if (devname)
 			pr_err("%s: device to small for imsm\n",
 			       devname);
 		return 1;
 	}
 
-	if (lseek64(fd, dsize - (512 * 2), SEEK_SET) < 0) {
+	if (lseek64(fd, dsize - (sector_size * 2), SEEK_SET) < 0) {
 		if (devname)
 			pr_err("Cannot seek to anchor block on %s: %s\n",
 			       devname, strerror(errno));
 		return 1;
 	}
 
-	if (posix_memalign((void**)&anchor, 512, 512) != 0) {
+	if (posix_memalign((void **)&anchor, sector_size, sector_size) != 0) {
 		if (devname)
 			pr_err("Failed to allocate imsm anchor buffer on %s\n", devname);
 		return 1;
 	}
-	if (read(fd, anchor, 512) != 512) {
+	if ((unsigned int)read(fd, anchor, sector_size) != sector_size) {
 		if (devname)
 			pr_err("Cannot read anchor block on %s: %s\n",
 			       devname, strerror(errno));
@@ -3723,20 +4148,21 @@ static int load_imsm_mpb(int fd, struct intel_super *super, char *devname)
 
 	/* capability and hba must be updated with new super allocation */
 	find_intel_hba_capability(fd, super, devname);
-	super->len = ROUND_UP(anchor->mpb_size, 512);
-	if (posix_memalign(&super->buf, 512, super->len) != 0) {
+	super->len = ROUND_UP(anchor->mpb_size, sector_size);
+	if (posix_memalign(&super->buf, MAX_SECTOR_SIZE, super->len) != 0) {
 		if (devname)
 			pr_err("unable to allocate %zu byte mpb buffer\n",
 			       super->len);
 		free(anchor);
 		return 2;
 	}
-	memcpy(super->buf, anchor, 512);
+	memcpy(super->buf, anchor, sector_size);
 
-	sectors = mpb_sectors(anchor) - 1;
+	sectors = mpb_sectors(anchor, sector_size) - 1;
 	free(anchor);
 
-	if (posix_memalign(&super->migr_rec_buf, 512, MIGR_REC_BUF_SIZE) != 0) {
+	if (posix_memalign(&super->migr_rec_buf, sector_size,
+	    MIGR_REC_BUF_SECTORS*sector_size) != 0) {
 		pr_err("could not allocate migr_rec buffer\n");
 		free(super->buf);
 		return 2;
@@ -3758,14 +4184,15 @@ static int load_imsm_mpb(int fd, struct intel_super *super, char *devname)
 	}
 
 	/* read the extended mpb */
-	if (lseek64(fd, dsize - (512 * (2 + sectors)), SEEK_SET) < 0) {
+	if (lseek64(fd, dsize - (sector_size * (2 + sectors)), SEEK_SET) < 0) {
 		if (devname)
 			pr_err("Cannot seek to extended mpb on %s: %s\n",
 			       devname, strerror(errno));
 		return 1;
 	}
 
-	if ((unsigned)read(fd, super->buf + 512, super->len - 512) != super->len - 512) {
+	if ((unsigned int)read(fd, super->buf + sector_size,
+		    super->len - sector_size) != super->len - sector_size) {
 		if (devname)
 			pr_err("Cannot read extended mpb on %s: %s\n",
 			       devname, strerror(errno));
@@ -3780,12 +4207,6 @@ static int load_imsm_mpb(int fd, struct intel_super *super, char *devname)
 			       devname);
 		return 3;
 	}
-
-	/* FIXME the BBM log is disk specific so we cannot use this global
-	 * buffer for all disks.  Ok for now since we only look at the global
-	 * bbm_log_size parameter to gate assembly
-	 */
-	super->bbm_log = __get_imsm_bbm_log(super->anchor);
 
 	return 0;
 }
@@ -3826,10 +4247,15 @@ load_and_parse_mpb(int fd, struct intel_super *super, char *devname, int keep_fd
 	err = load_imsm_mpb(fd, super, devname);
 	if (err)
 		return err;
+	if (super->sector_size == 4096)
+		convert_from_4k(super);
 	err = load_imsm_disk(fd, super, devname, keep_fd);
 	if (err)
 		return err;
 	err = parse_raid_devices(super);
+	if (err)
+		return err;
+	err = load_bbm_log(super);
 	clear_hi(super);
 	return err;
 }
@@ -3894,12 +4320,15 @@ static void __free_imsm(struct intel_super *super, int free_disks)
 		free(elem);
 		elem = next;
 	}
+	if (super->bbm_log)
+		free(super->bbm_log);
 	super->hba = NULL;
 }
 
 static void free_imsm(struct intel_super *super)
 {
 	__free_imsm(super, 1);
+	free(super->bb.entries);
 	free(super);
 }
 
@@ -3920,6 +4349,14 @@ static struct intel_super *alloc_super(void)
 
 	super->current_vol = -1;
 	super->create_offset = ~((unsigned long long) 0);
+
+	super->bb.entries = xmalloc(BBM_LOG_MAX_ENTRIES *
+				   sizeof(struct md_bb_entry));
+	if (!super->bb.entries) {
+		free(super);
+		return NULL;
+	}
+
 	return super;
 }
 
@@ -3931,7 +4368,7 @@ static int find_intel_hba_capability(int fd, struct intel_super *super, char *de
 	struct sys_dev *hba_name;
 	int rv = 0;
 
-	if ((fd < 0) || check_env("IMSM_NO_PLATFORM")) {
+	if (fd < 0 || check_env("IMSM_NO_PLATFORM")) {
 		super->orom = NULL;
 		super->hba = NULL;
 		return 0;
@@ -4374,7 +4811,7 @@ static int load_super_imsm_all(struct supertype *st, int fd, void **sbp,
 	}
 
 	/* Check migration compatibility */
-	if ((err == 0) && (check_mpb_migr_compatibility(super) != 0)) {
+	if (err == 0 && check_mpb_migr_compatibility(super) != 0) {
 		pr_err("Unsupported migration detected");
 		if (devname)
 			fprintf(stderr, " on %s\n", devname);
@@ -4463,7 +4900,7 @@ get_devlist_super_block(struct md_list *devlist, struct intel_super **super_list
 static int get_super_block(struct intel_super **super_list, char *devnm, char *devname,
 			   int major, int minor, int keep_fd)
 {
-	struct intel_super*s = NULL;
+	struct intel_super *s;
 	char nm[32];
 	int dfd = -1;
 	int err = 0;
@@ -4482,6 +4919,7 @@ static int get_super_block(struct intel_super **super_list, char *devnm, char *d
 		goto error;
 	}
 
+	get_dev_sector_size(dfd, NULL, &s->sector_size);
 	find_intel_hba_capability(dfd, s, devname);
 	err = load_and_parse_mpb(dfd, s, NULL, keep_fd);
 
@@ -4499,11 +4937,11 @@ static int get_super_block(struct intel_super **super_list, char *devnm, char *d
 		*super_list = s;
 	} else {
 		if (s)
-			free(s);
+			free_imsm(s);
 		if (dfd >= 0)
 			close(dfd);
 	}
-	if ((dfd >= 0) && (!keep_fd))
+	if (dfd >= 0 && !keep_fd)
 		close(dfd);
 	return err;
 
@@ -4561,13 +4999,16 @@ static int load_super_imsm(struct supertype *st, int fd, char *devname)
 	free_super_imsm(st);
 
 	super = alloc_super();
+	get_dev_sector_size(fd, NULL, &super->sector_size);
+	if (!super)
+		return 1;
 	/* Load hba and capabilities if they exist.
 	 * But do not preclude loading metadata in case capabilities or hba are
 	 * non-compliant and ignore_hw_compat is set.
 	 */
 	rv = find_intel_hba_capability(fd, super, devname);
 	/* no orom/efi or non-intel hba of the disk */
-	if ((rv != 0) && (st->ignore_hw_compat == 0)) {
+	if (rv != 0 && st->ignore_hw_compat == 0) {
 		if (devname)
 			pr_err("No OROM/EFI properties for %s\n", devname);
 		free_imsm(super);
@@ -4577,7 +5018,11 @@ static int load_super_imsm(struct supertype *st, int fd, char *devname)
 
 	/* retry the load if we might have raced against mdmon */
 	if (rv == 3) {
-		struct mdstat_ent *mdstat = mdstat_by_component(fd2devnm(fd));
+		struct mdstat_ent *mdstat = NULL;
+		char *name = fd2kname(fd);
+
+		if (name)
+			mdstat = mdstat_by_component(name);
 
 		if (mdstat && mdmon_running(mdstat->devnm) && getpid() != mdmon_pid(mdstat->devnm)) {
 			for (retry = 0; retry < 3; retry++) {
@@ -4717,6 +5162,7 @@ static int init_super_imsm_volume(struct supertype *st, mdu_array_info_t *info,
 	 * so st->sb is already set.
 	 */
 	struct intel_super *super = st->sb;
+	unsigned int sector_size = super->sector_size;
 	struct imsm_super *mpb = super->anchor;
 	struct intel_dev *dv;
 	struct imsm_dev *dev;
@@ -4738,14 +5184,14 @@ static int init_super_imsm_volume(struct supertype *st, mdu_array_info_t *info,
 	size_new = disks_to_mpb_size(info->nr_disks);
 	if (size_new > size_old) {
 		void *mpb_new;
-		size_t size_round = ROUND_UP(size_new, 512);
+		size_t size_round = ROUND_UP(size_new, sector_size);
 
-		if (posix_memalign(&mpb_new, 512, size_round) != 0) {
+		if (posix_memalign(&mpb_new, sector_size, size_round) != 0) {
 			pr_err("could not allocate new mpb\n");
 			return 0;
 		}
-		if (posix_memalign(&super->migr_rec_buf, 512,
-				   MIGR_REC_BUF_SIZE) != 0) {
+		if (posix_memalign(&super->migr_rec_buf, sector_size,
+				   MIGR_REC_BUF_SECTORS*sector_size) != 0) {
 			pr_err("could not allocate migr_rec buffer\n");
 			free(super->buf);
 			free(super);
@@ -4758,6 +5204,7 @@ static int init_super_imsm_volume(struct supertype *st, mdu_array_info_t *info,
 		super->anchor = mpb_new;
 		mpb->mpb_size = __cpu_to_le32(size_new);
 		memset(mpb_new + size_old, 0, size_round - size_old);
+		super->len = size_round;
 	}
 	super->current_vol = idx;
 
@@ -4895,21 +5342,23 @@ static int init_super_imsm(struct supertype *st, mdu_array_info_t *info,
 	if (info)
 		mpb_size = disks_to_mpb_size(info->nr_disks);
 	else
-		mpb_size = 512;
+		mpb_size = MAX_SECTOR_SIZE;
 
 	super = alloc_super();
-	if (super && posix_memalign(&super->buf, 512, mpb_size) != 0) {
-		free(super);
+	if (super &&
+	    posix_memalign(&super->buf, MAX_SECTOR_SIZE, mpb_size) != 0) {
+		free_imsm(super);
 		super = NULL;
 	}
 	if (!super) {
 		pr_err("could not allocate superblock\n");
 		return 0;
 	}
-	if (posix_memalign(&super->migr_rec_buf, 512, MIGR_REC_BUF_SIZE) != 0) {
+	if (posix_memalign(&super->migr_rec_buf, MAX_SECTOR_SIZE,
+	    MIGR_REC_BUF_SECTORS*MAX_SECTOR_SIZE) != 0) {
 		pr_err("could not allocate migr_rec buffer\n");
 		free(super->buf);
-		free(super);
+		free_imsm(super);
 		return 0;
 	}
 	memset(super->buf, 0, mpb_size);
@@ -5013,8 +5462,7 @@ static int add_to_super_imsm_volume(struct supertype *st, mdu_disk_info_t *dk,
 				struct imsm_map *map2 = get_imsm_map(dev,
 								     MAP_1);
 				int slot2 = get_imsm_disk_slot(map2, df->index);
-				if ((slot2 < map2->num_members) &&
-				    (slot2 >= 0)) {
+				if (slot2 < map2->num_members && slot2 >= 0) {
 					__u32 ord2 = get_imsm_ord_tbl_ent(dev,
 									 slot2,
 									 MAP_1);
@@ -5090,6 +5538,7 @@ static int add_to_super_imsm(struct supertype *st, mdu_disk_info_t *dk,
 	struct intel_super *super = st->sb;
 	struct dl *dd;
 	unsigned long long size;
+	unsigned int member_sector_size;
 	__u32 id;
 	int rv;
 	struct stat stb;
@@ -5121,16 +5570,82 @@ static int add_to_super_imsm(struct supertype *st, mdu_disk_info_t *dk,
 	rv = imsm_read_serial(fd, devname, dd->serial);
 	if (rv) {
 		pr_err("failed to retrieve scsi serial, aborting\n");
+		if (dd->devname)
+			free(dd->devname);
 		free(dd);
 		abort();
 	}
+	if (super->hba && ((super->hba->type == SYS_DEV_NVME) ||
+	   (super->hba->type == SYS_DEV_VMD))) {
+		int i;
+		char *devpath = diskfd_to_devpath(fd);
+		char controller_path[PATH_MAX];
+
+		if (!devpath) {
+			pr_err("failed to get devpath, aborting\n");
+			if (dd->devname)
+				free(dd->devname);
+			free(dd);
+			return 1;
+		}
+
+		snprintf(controller_path, PATH_MAX-1, "%s/device", devpath);
+		free(devpath);
+
+		if (devpath_to_vendor(controller_path) == 0x8086) {
+			/*
+			 * If Intel's NVMe drive has serial ended with
+			 * "-A","-B","-1" or "-2" it means that this is "x8"
+			 * device (double drive on single PCIe card).
+			 * User should be warned about potential data loss.
+			 */
+			for (i = MAX_RAID_SERIAL_LEN-1; i > 0; i--) {
+				/* Skip empty character at the end */
+				if (dd->serial[i] == 0)
+					continue;
+
+				if (((dd->serial[i] == 'A') ||
+				   (dd->serial[i] == 'B') ||
+				   (dd->serial[i] == '1') ||
+				   (dd->serial[i] == '2')) &&
+				   (dd->serial[i-1] == '-'))
+					pr_err("\tThe action you are about to take may put your data at risk.\n"
+						"\tPlease note that x8 devices may consist of two separate x4 devices "
+						"located on a single PCIe port.\n"
+						"\tRAID 0 is the only supported configuration for this type of x8 device.\n");
+				break;
+			}
+		} else if (super->hba->type == SYS_DEV_VMD && super->orom &&
+		    !imsm_orom_has_tpv_support(super->orom)) {
+			pr_err("\tPlatform configuration does not support non-Intel NVMe drives.\n"
+			       "\tPlease refer to Intel(R) RSTe user guide.\n");
+			free(dd->devname);
+			free(dd);
+			return 1;
+		}
+	}
 
 	get_dev_size(fd, NULL, &size);
+	get_dev_sector_size(fd, NULL, &member_sector_size);
+
+	if (super->sector_size == 0) {
+		/* this a first device, so sector_size is not set yet */
+		super->sector_size = member_sector_size;
+	} else if (member_sector_size != super->sector_size) {
+		pr_err("Mixing between different sector size is forbidden, aborting...\n");
+		if (dd->devname)
+			free(dd->devname);
+		free(dd);
+		return 1;
+	}
+
 	/* clear migr_rec when adding disk to container */
-	memset(super->migr_rec_buf, 0, MIGR_REC_BUF_SIZE);
-	if (lseek64(fd, size - MIGR_REC_POSITION, SEEK_SET) >= 0) {
-		if (write(fd, super->migr_rec_buf,
-			MIGR_REC_BUF_SIZE) != MIGR_REC_BUF_SIZE)
+	memset(super->migr_rec_buf, 0, MIGR_REC_BUF_SECTORS*super->sector_size);
+	if (lseek64(fd, size - MIGR_REC_SECTOR_POSITION*super->sector_size,
+	    SEEK_SET) >= 0) {
+		if ((unsigned int)write(fd, super->migr_rec_buf,
+		    MIGR_REC_BUF_SECTORS*super->sector_size) !=
+		    MIGR_REC_BUF_SECTORS*super->sector_size)
 			perror("Write migr_rec failed");
 	}
 
@@ -5188,9 +5703,9 @@ static int remove_from_super_imsm(struct supertype *st, mdu_disk_info_t *dk)
 static int store_imsm_mpb(int fd, struct imsm_super *mpb);
 
 static union {
-	char buf[512];
+	char buf[MAX_SECTOR_SIZE];
 	struct imsm_super anchor;
-} spare_record __attribute__ ((aligned(512)));
+} spare_record __attribute__ ((aligned(MAX_SECTOR_SIZE)));
 
 /* spare records have their own family number and do not have any defined raid
  * devices
@@ -5221,6 +5736,9 @@ static int write_super_imsm_spares(struct intel_super *super, int doclose)
 		if (__le32_to_cpu(d->disk.total_blocks_hi) > 0)
 			spare->attributes |= MPB_ATTRIB_2TB_DISK;
 
+		if (super->sector_size == 4096)
+			convert_to_4k_imsm_disk(&spare->disk[0]);
+
 		sum = __gen_imsm_checksum(spare);
 		spare->family_num = __cpu_to_le32(sum);
 		spare->orig_family_num = 0;
@@ -5244,6 +5762,7 @@ static int write_super_imsm_spares(struct intel_super *super, int doclose)
 static int write_super_imsm(struct supertype *st, int doclose)
 {
 	struct intel_super *super = st->sb;
+	unsigned int sector_size = super->sector_size;
 	struct imsm_super *mpb = super->anchor;
 	struct dl *d;
 	__u32 generation;
@@ -5253,6 +5772,7 @@ static int write_super_imsm(struct supertype *st, int doclose)
 	__u32 mpb_size = sizeof(struct imsm_super) - sizeof(struct imsm_disk);
 	int num_disks = 0;
 	int clear_migration_record = 1;
+	__u32 bbm_log_size;
 
 	/* 'generation' is incremented everytime the metadata is written */
 	generation = __le32_to_cpu(mpb->generation_num);
@@ -5290,8 +5810,22 @@ static int write_super_imsm(struct supertype *st, int doclose)
 		if (is_gen_migration(dev2))
 			clear_migration_record = 0;
 	}
-	mpb_size += __le32_to_cpu(mpb->bbm_log_size);
+
+	bbm_log_size = get_imsm_bbm_log_size(super->bbm_log);
+
+	if (bbm_log_size) {
+		memcpy((void *)mpb + mpb_size, super->bbm_log, bbm_log_size);
+		mpb->attributes |= MPB_ATTRIB_BBM;
+	} else
+		mpb->attributes &= ~MPB_ATTRIB_BBM;
+
+	super->anchor->bbm_log_size = __cpu_to_le32(bbm_log_size);
+	mpb_size += bbm_log_size;
 	mpb->mpb_size = __cpu_to_le32(mpb_size);
+
+#ifdef DEBUG
+	assert(super->len == 0 || mpb_size <= super->len);
+#endif
 
 	/* recalculate checksum */
 	sum = __gen_imsm_checksum(mpb);
@@ -5302,7 +5836,11 @@ static int write_super_imsm(struct supertype *st, int doclose)
 		super->clean_migration_record_by_mdmon = 0;
 	}
 	if (clear_migration_record)
-		memset(super->migr_rec_buf, 0, MIGR_REC_BUF_SIZE);
+		memset(super->migr_rec_buf, 0,
+		    MIGR_REC_BUF_SECTORS*sector_size);
+
+	if (sector_size == 4096)
+		convert_to_4k(super);
 
 	/* write the mpb for disks that compose raid devices */
 	for (d = super->disks; d ; d = d->next) {
@@ -5313,9 +5851,12 @@ static int write_super_imsm(struct supertype *st, int doclose)
 			unsigned long long dsize;
 
 			get_dev_size(d->fd, NULL, &dsize);
-			if (lseek64(d->fd, dsize - 512, SEEK_SET) >= 0) {
-				if (write(d->fd, super->migr_rec_buf,
-					MIGR_REC_BUF_SIZE) != MIGR_REC_BUF_SIZE)
+			if (lseek64(d->fd, dsize - sector_size,
+			    SEEK_SET) >= 0) {
+				if ((unsigned int)write(d->fd,
+				    super->migr_rec_buf,
+				    MIGR_REC_BUF_SECTORS*sector_size) !=
+				    MIGR_REC_BUF_SECTORS*sector_size)
 					perror("Write migr_rec failed");
 			}
 		}
@@ -5427,15 +5968,12 @@ static int store_super_imsm(struct supertype *st, int fd)
 		return 1;
 
 #ifndef MDASSEMBLE
+	if (super->sector_size == 4096)
+		convert_to_4k(super);
 	return store_imsm_mpb(fd, mpb);
 #else
 	return 1;
 #endif
-}
-
-static int imsm_bbm_log_size(struct imsm_super *mpb)
-{
-	return __le32_to_cpu(mpb->bbm_log_size);
 }
 
 #ifndef MDASSEMBLE
@@ -5449,7 +5987,7 @@ static int validate_geometry_imsm_container(struct supertype *st, int level,
 {
 	int fd;
 	unsigned long long ldsize;
-	struct intel_super *super=NULL;
+	struct intel_super *super;
 	int rv = 0;
 
 	if (level != LEVEL_CONTAINER)
@@ -5473,6 +6011,16 @@ static int validate_geometry_imsm_container(struct supertype *st, int level,
 	 * note that there is no fd for the disks in array.
 	 */
 	super = alloc_super();
+	if (!super) {
+		close(fd);
+		return 0;
+	}
+	if (!get_dev_sector_size(fd, NULL, &super->sector_size)) {
+		close(fd);
+		free_imsm(super);
+		return 0;
+	}
+
 	rv = find_intel_hba_capability(fd, super, verbose > 0 ? dev : NULL);
 	if (rv != 0) {
 #if DEBUG
@@ -5642,10 +6190,10 @@ active_arrays_by_format(char *name, char* hba, struct md_list **devlist,
 			int dpa, int verbose)
 {
 	struct mdstat_ent *mdstat = mdstat_read(0, 0);
-	struct mdstat_ent *memb = NULL;
+	struct mdstat_ent *memb;
 	int count = 0;
 	int num = 0;
-	struct md_list *dv = NULL;
+	struct md_list *dv;
 	int found;
 
 	for (memb = mdstat ; memb ; memb = memb->next) {
@@ -5661,18 +6209,18 @@ active_arrays_by_format(char *name, char* hba, struct md_list **devlist,
 				num = sprintf(path, "%s%s", "/dev/", dev->name);
 				if (num > 0)
 					fd = open(path, O_RDONLY, 0);
-				if ((num <= 0) || (fd < 0)) {
-					pr_vrb(": Cannot open %s: %s\n",
+				if (num <= 0 || fd < 0) {
+					pr_vrb("Cannot open %s: %s\n",
 					       dev->name, strerror(errno));
 				}
 				free(path);
 				dev = dev->next;
 			}
 			found = 0;
-			if ((fd >= 0) && disk_attached_to_hba(fd, hba)) {
+			if (fd >= 0 && disk_attached_to_hba(fd, hba)) {
 				struct mdstat_ent *vol;
 				for (vol = mdstat ; vol ; vol = vol->next) {
-					if ((vol->active > 0) &&
+					if (vol->active > 0 &&
 					    vol->metadata_version &&
 					    is_container_member(vol, memb->devnm)) {
 						found++;
@@ -5703,7 +6251,7 @@ get_loop_devices(void)
 {
 	int i;
 	struct md_list *devlist = NULL;
-	struct md_list *dv = NULL;
+	struct md_list *dv;
 
 	for(i = 0; i < 12; i++) {
 		dv = xcalloc(1, sizeof(*dv));
@@ -5720,7 +6268,7 @@ static struct md_list*
 get_devices(const char *hba_path)
 {
 	struct md_list *devlist = NULL;
-	struct md_list *dv = NULL;
+	struct md_list *dv;
 	struct dirent *ent;
 	DIR *dir;
 	int err = 0;
@@ -5783,7 +6331,7 @@ count_volumes_list(struct md_list *devlist, char *homehost,
 {
 	struct md_list *tmpdev;
 	int count = 0;
-	struct supertype *st = NULL;
+	struct supertype *st;
 
 	/* first walk the list of devices to find a consistent set
 	 * that match the criterea, if that is possible.
@@ -5792,7 +6340,7 @@ count_volumes_list(struct md_list *devlist, char *homehost,
 	*found = 0;
 	st = match_metadata_desc_imsm("imsm");
 	if (st == NULL) {
-		pr_vrb(": cannot allocate memory for imsm supertype\n");
+		pr_vrb("cannot allocate memory for imsm supertype\n");
 		return 0;
 	}
 
@@ -5805,7 +6353,7 @@ count_volumes_list(struct md_list *devlist, char *homehost,
 			continue;
 		tst = dup_super(st);
 		if (tst == NULL) {
-			pr_vrb(": cannot allocate memory for imsm supertype\n");
+			pr_vrb("cannot allocate memory for imsm supertype\n");
 			goto err_1;
 		}
 		tmpdev->container = 0;
@@ -5924,7 +6472,7 @@ count_volumes_list(struct md_list *devlist, char *homehost,
 	}
 
 	for (tmpdev = devlist; tmpdev; tmpdev = tmpdev->next) {
-		if ((tmpdev->used == 1) && (tmpdev->found)) {
+		if (tmpdev->used == 1 && tmpdev->found) {
 			if (count) {
 				if (count < tmpdev->found)
 					count = 0;
@@ -5941,20 +6489,20 @@ count_volumes_list(struct md_list *devlist, char *homehost,
 	return count;
 }
 
-static int
-count_volumes(struct intel_hba *hba, int dpa, int verbose)
+static int __count_volumes(char *hba_path, int dpa, int verbose,
+			   int cmp_hba_path)
 {
 	struct sys_dev *idev, *intel_devices = find_intel_devices();
 	int count = 0;
 	const struct orom_entry *entry;
 	struct devid_list *dv, *devid_list;
 
-	if (!hba || !hba->path)
+	if (!hba_path)
 		return 0;
 
 	for (idev = intel_devices; idev; idev = idev->next) {
-		if (strstr(idev->path, hba->path))
-				break;
+		if (strstr(idev->path, hba_path))
+			break;
 	}
 
 	if (!idev || !idev->dev_id)
@@ -5967,31 +6515,29 @@ count_volumes(struct intel_hba *hba, int dpa, int verbose)
 
 	devid_list = entry->devid_list;
 	for (dv = devid_list; dv; dv = dv->next) {
-		struct md_list *devlist = NULL;
-		struct sys_dev *device = device_by_id(dv->devid);
-		char *hba_path;
+		struct md_list *devlist;
+		struct sys_dev *device = NULL;
+		char *hpath;
 		int found = 0;
 
+		if (cmp_hba_path)
+			device = device_by_id_and_path(dv->devid, hba_path);
+		else
+			device = device_by_id(dv->devid);
+
 		if (device)
-			hba_path = device->path;
+			hpath = device->path;
 		else
 			return 0;
 
-		/* VMD has one orom entry for all domain, but spanning is not allowed.
-		 * VMD arrays should be counted per domain (controller), so skip
-		 * domains that are not the given one.
-		 */
-		if ((hba->type == SYS_DEV_VMD) &&
-		   (strncmp(device->path, hba->path, strlen(device->path)) != 0))
-			continue;
-
-		devlist = get_devices(hba_path);
+		devlist = get_devices(hpath);
 		/* if no intel devices return zero volumes */
 		if (devlist == NULL)
 			return 0;
 
-		count += active_arrays_by_format("imsm", hba_path, &devlist, dpa, verbose);
-		dprintf("path: %s active arrays: %d\n", hba_path, count);
+		count += active_arrays_by_format("imsm", hpath, &devlist, dpa,
+						 verbose);
+		dprintf("path: %s active arrays: %d\n", hpath, count);
 		if (devlist == NULL)
 			return 0;
 		do  {
@@ -6003,7 +6549,7 @@ count_volumes(struct intel_hba *hba, int dpa, int verbose)
 			dprintf("found %d count: %d\n", found, count);
 		} while (found);
 
-		dprintf("path: %s total number of volumes: %d\n", hba_path, count);
+		dprintf("path: %s total number of volumes: %d\n", hpath, count);
 
 		while (devlist) {
 			struct md_list *dv = devlist;
@@ -6013,6 +6559,24 @@ count_volumes(struct intel_hba *hba, int dpa, int verbose)
 		}
 	}
 	return count;
+}
+
+static int count_volumes(struct intel_hba *hba, int dpa, int verbose)
+{
+	if (!hba)
+		return 0;
+	if (hba->type == SYS_DEV_VMD) {
+		struct sys_dev *dev;
+		int count = 0;
+
+		for (dev = find_intel_devices(); dev; dev = dev->next) {
+			if (dev->type == SYS_DEV_VMD)
+				count += __count_volumes(dev->path, dpa,
+							 verbose, 1);
+		}
+		return count;
+	}
+	return __count_volumes(hba->path, dpa, verbose, 0);
 }
 
 static int imsm_default_chunk(const struct imsm_orom *orom)
@@ -6031,14 +6595,14 @@ validate_geometry_imsm_orom(struct intel_super *super, int level, int layout,
 {
 	/* check/set platform and metadata limits/defaults */
 	if (super->orom && raiddisks > super->orom->dpa) {
-		pr_vrb(": platform supports a maximum of %d disks per array\n",
+		pr_vrb("platform supports a maximum of %d disks per array\n",
 		       super->orom->dpa);
 		return 0;
 	}
 
 	/* capabilities of OROM tested - copied from validate_geometry_imsm_volume */
 	if (!is_raid_level_supported(super->orom, level, raiddisks)) {
-		pr_vrb(": platform does not support raid%d with %d disk%s\n",
+		pr_vrb("platform does not support raid%d with %d disk%s\n",
 			level, raiddisks, raiddisks > 1 ? "s" : "");
 		return 0;
 	}
@@ -6047,24 +6611,24 @@ validate_geometry_imsm_orom(struct intel_super *super, int level, int layout,
 		*chunk = imsm_default_chunk(super->orom);
 
 	if (super->orom && !imsm_orom_has_chunk(super->orom, *chunk)) {
-		pr_vrb(": platform does not support a chunk size of: %d\n", *chunk);
+		pr_vrb("platform does not support a chunk size of: %d\n", *chunk);
 		return 0;
 	}
 
 	if (layout != imsm_level_to_layout(level)) {
 		if (level == 5)
-			pr_vrb(": imsm raid 5 only supports the left-asymmetric layout\n");
+			pr_vrb("imsm raid 5 only supports the left-asymmetric layout\n");
 		else if (level == 10)
-			pr_vrb(": imsm raid 10 only supports the n2 layout\n");
+			pr_vrb("imsm raid 10 only supports the n2 layout\n");
 		else
-			pr_vrb(": imsm unknown layout %#x for this raid level %d\n",
+			pr_vrb("imsm unknown layout %#x for this raid level %d\n",
 				layout, level);
 		return 0;
 	}
 
 	if (super->orom && (super->orom->attr & IMSM_OROM_ATTR_2TB) == 0 &&
 			(calc_array_size(level, raiddisks, layout, *chunk, size) >> 32) > 0) {
-		pr_vrb(": platform does not support a volume size over 2TB\n");
+		pr_vrb("platform does not support a volume size over 2TB\n");
 		return 0;
 	}
 
@@ -6235,7 +6799,7 @@ static int validate_geometry_imsm_volume(struct supertype *st, int level,
 		int count = count_volumes(super->hba,
 				      super->orom->dpa, verbose);
 		if (super->orom->vphba <= count) {
-			pr_vrb(": platform does not support more than %d raid volumes.\n",
+			pr_vrb("platform does not support more than %d raid volumes.\n",
 			       super->orom->vphba);
 			return 0;
 		}
@@ -6391,7 +6955,7 @@ static int validate_geometry_imsm(struct supertype *st, int level, int layout,
 				count = count_volumes(super->hba,
 						      super->orom->dpa, verbose);
 				if (super->orom->vphba <= count) {
-					pr_vrb(": platform does not support more than %d raid volumes.\n",
+					pr_vrb("platform does not support more than %d raid volumes.\n",
 					       super->orom->vphba);
 					return 0;
 				}
@@ -6712,12 +7276,6 @@ static struct mdinfo *container_content_imsm(struct supertype *st, char *subarra
 		pr_err("Unsupported attributes in IMSM metadata.Arrays activation is blocked.\n");
 	}
 
-	/* check for bad blocks */
-	if (imsm_bbm_log_size(super->anchor)) {
-		pr_err("BBM log found in IMSM metadata.Arrays activation is blocked.\n");
-		sb_errors = 1;
-	}
-
 	/* count spare devices, not used in maps
 	 */
 	for (d = super->disks; d; d = d->next)
@@ -6844,7 +7402,20 @@ static struct mdinfo *container_content_imsm(struct supertype *st, char *subarra
 
 			info_d->events = __le32_to_cpu(mpb->generation_num);
 			info_d->data_offset = pba_of_lba0(map);
-			info_d->component_size = blocks_per_member(map);
+
+			if (map->raid_level == 5) {
+				info_d->component_size =
+						num_data_stripes(map) *
+						map->blocks_per_strip;
+			} else {
+				info_d->component_size = blocks_per_member(map);
+			}
+
+			info_d->bb.supported = 1;
+			get_volume_badblocks(super->bbm_log, ord_to_idx(ord),
+					     info_d->data_offset,
+					     info_d->component_size,
+					     &info_d->bb);
 		}
 		/* now that the disk list is up-to-date fixup recovery_start */
 		update_recovery_start(super, dev, this);
@@ -6958,8 +7529,8 @@ static int imsm_count_failed(struct intel_super *super, struct imsm_dev *dev,
 		/* when MAP_X is passed both maps failures are counted
 		 */
 		if (prev &&
-		    ((look_in_map == MAP_1) || (look_in_map == MAP_X)) &&
-		    (i < prev->num_members)) {
+		    (look_in_map == MAP_1 || look_in_map == MAP_X) &&
+		    i < prev->num_members) {
 			ord = __le32_to_cpu(prev->disk_ord_tbl[i]);
 			idx_1 = ord_to_idx(ord);
 
@@ -6967,8 +7538,8 @@ static int imsm_count_failed(struct intel_super *super, struct imsm_dev *dev,
 			if (!disk || is_failed(disk) || ord & IMSM_ORD_REBUILD)
 				failed++;
 		}
-		if (((look_in_map == MAP_0) || (look_in_map == MAP_X)) &&
-		    (i < map->num_members)) {
+		if ((look_in_map == MAP_0 || look_in_map == MAP_X) &&
+		    i < map->num_members) {
 			ord = __le32_to_cpu(map->disk_ord_tbl[i]);
 			idx = ord_to_idx(ord);
 
@@ -6990,6 +7561,7 @@ static int imsm_open_new(struct supertype *c, struct active_array *a,
 {
 	struct intel_super *super = c->sb;
 	struct imsm_super *mpb = super->anchor;
+	struct imsm_update_prealloc_bb_mem u;
 
 	if (atoi(inst) >= mpb->num_raid_devs) {
 		pr_err("subarry index %d, out of range\n", atoi(inst));
@@ -6998,6 +7570,10 @@ static int imsm_open_new(struct supertype *c, struct active_array *a,
 
 	dprintf("imsm: open_new %s\n", inst);
 	a->info.container_member = atoi(inst);
+
+	u.type = update_prealloc_badblocks_mem;
+	imsm_update_metadata_locally(c, &u, sizeof(u));
+
 	return 0;
 }
 
@@ -7017,15 +7593,16 @@ static int is_resyncing(struct imsm_dev *dev)
 
 	migr_map = get_imsm_map(dev, MAP_1);
 
-	if ((migr_map->map_state == IMSM_T_STATE_NORMAL) &&
-	    (dev->vol.migr_type != MIGR_GEN_MIGR))
+	if (migr_map->map_state == IMSM_T_STATE_NORMAL &&
+	    dev->vol.migr_type != MIGR_GEN_MIGR)
 		return 1;
 	else
 		return 0;
 }
 
 /* return true if we recorded new information */
-static int mark_failure(struct imsm_dev *dev, struct imsm_disk *disk, int idx)
+static int mark_failure(struct intel_super *super,
+			struct imsm_dev *dev, struct imsm_disk *disk, int idx)
 {
 	__u32 ord;
 	int slot;
@@ -7061,19 +7638,22 @@ static int mark_failure(struct imsm_dev *dev, struct imsm_disk *disk, int idx)
 		struct imsm_map *map2 = get_imsm_map(dev, MAP_1);
 		int slot2 = get_imsm_disk_slot(map2, idx);
 
-		if ((slot2 < map2->num_members) &&
-		    (slot2 >= 0))
+		if (slot2 < map2->num_members && slot2 >= 0)
 			set_imsm_ord_tbl_ent(map2, slot2,
 					     idx | IMSM_ORD_REBUILD);
 	}
 	if (map->failed_disk_num == 0xff)
 		map->failed_disk_num = slot;
+
+	clear_disk_badblocks(super->bbm_log, ord_to_idx(ord));
+
 	return 1;
 }
 
-static void mark_missing(struct imsm_dev *dev, struct imsm_disk *disk, int idx)
+static void mark_missing(struct intel_super *super,
+			 struct imsm_dev *dev, struct imsm_disk *disk, int idx)
 {
-	mark_failure(dev, disk, idx);
+	mark_failure(super, dev, disk, idx);
 
 	if (disk->scsi_id == __cpu_to_le32(~(__u32)0))
 		return;
@@ -7109,7 +7689,7 @@ static void handle_missing(struct intel_super *super, struct imsm_dev *dev)
 			end_migration(dev, super, map_state);
 	}
 	for (dl = super->missing; dl; dl = dl->next)
-		mark_missing(dev, &dl->disk, dl->index);
+		mark_missing(super, dev, &dl->disk, dl->index);
 	super->updates_pending++;
 }
 
@@ -7357,6 +7937,25 @@ skip_mark_checkpoint:
 	return consistent;
 }
 
+static int imsm_disk_slot_to_ord(struct active_array *a, int slot)
+{
+	int inst = a->info.container_member;
+	struct intel_super *super = a->container->sb;
+	struct imsm_dev *dev = get_imsm_dev(super, inst);
+	struct imsm_map *map = get_imsm_map(dev, MAP_0);
+
+	if (slot > map->num_members) {
+		pr_err("imsm: imsm_disk_slot_to_ord %d out of range 0..%d\n",
+		       slot, map->num_members - 1);
+		return -1;
+	}
+
+	if (slot < 0)
+		return -1;
+
+	return get_imsm_ord_tbl_ent(dev, slot, MAP_0);
+}
+
 static void imsm_set_disk(struct active_array *a, int n, int state)
 {
 	int inst = a->info.container_member;
@@ -7367,24 +7966,19 @@ static void imsm_set_disk(struct active_array *a, int n, int state)
 	struct mdinfo *mdi;
 	int recovery_not_finished = 0;
 	int failed;
-	__u32 ord;
+	int ord;
 	__u8 map_state;
 
-	if (n > map->num_members)
-		pr_err("imsm: set_disk %d out of range 0..%d\n",
-			n, map->num_members - 1);
-
-	if (n < 0)
+	ord = imsm_disk_slot_to_ord(a, n);
+	if (ord < 0)
 		return;
 
 	dprintf("imsm: set_disk %d:%x\n", n, state);
-
-	ord = get_imsm_ord_tbl_ent(dev, n, MAP_0);
 	disk = get_imsm_disk(super, ord_to_idx(ord));
 
 	/* check for new failures */
 	if (state & DS_FAULTY) {
-		if (mark_failure(dev, disk, ord_to_idx(ord)))
+		if (mark_failure(super, dev, disk, ord_to_idx(ord)))
 			super->updates_pending++;
 	}
 
@@ -7442,8 +8036,7 @@ static void imsm_set_disk(struct active_array *a, int n, int state)
 	break;
 	case IMSM_T_STATE_DEGRADED: /* transition to degraded state */
 		dprintf_cont("degraded: ");
-		if ((map->map_state != map_state) &&
-		    !dev->vol.migr_state) {
+		if (map->map_state != map_state && !dev->vol.migr_state) {
 			dprintf_cont("mark degraded");
 			map->map_state = map_state;
 			super->updates_pending++;
@@ -7505,27 +8098,30 @@ static int store_imsm_mpb(int fd, struct imsm_super *mpb)
 	__u32 mpb_size = __le32_to_cpu(mpb->mpb_size);
 	unsigned long long dsize;
 	unsigned long long sectors;
+	unsigned int sector_size;
 
+	get_dev_sector_size(fd, NULL, &sector_size);
 	get_dev_size(fd, NULL, &dsize);
 
-	if (mpb_size > 512) {
+	if (mpb_size > sector_size) {
 		/* -1 to account for anchor */
-		sectors = mpb_sectors(mpb) - 1;
+		sectors = mpb_sectors(mpb, sector_size) - 1;
 
 		/* write the extended mpb to the sectors preceeding the anchor */
-		if (lseek64(fd, dsize - (512 * (2 + sectors)), SEEK_SET) < 0)
+		if (lseek64(fd, dsize - (sector_size * (2 + sectors)),
+		   SEEK_SET) < 0)
 			return 1;
 
-		if ((unsigned long long)write(fd, buf + 512, 512 * sectors)
-		    != 512 * sectors)
+		if ((unsigned long long)write(fd, buf + sector_size,
+		   sector_size * sectors) != sector_size * sectors)
 			return 1;
 	}
 
 	/* first block is stored on second to last sector of the disk */
-	if (lseek64(fd, dsize - (512 * 2), SEEK_SET) < 0)
+	if (lseek64(fd, dsize - (sector_size * 2), SEEK_SET) < 0)
 		return 1;
 
-	if (write(fd, buf, 512) != 512)
+	if ((unsigned int)write(fd, buf, sector_size) != sector_size)
 		return 1;
 
 	return 0;
@@ -7773,6 +8369,11 @@ static struct mdinfo *imsm_activate_spare(struct active_array *a,
 			IMSM_T_STATE_DEGRADED)
 		return NULL;
 
+	if (get_imsm_map(dev, MAP_0)->map_state == IMSM_T_STATE_UNINITIALIZED) {
+		dprintf("imsm: No spare activation allowed. Volume is not initialized.\n");
+		return NULL;
+	}
+
 	/*
 	 * If there are any failed disks check state of the other volume.
 	 * Block rebuild if the another one is failed until failed disks
@@ -7840,6 +8441,7 @@ static struct mdinfo *imsm_activate_spare(struct active_array *a,
 		di->data_offset = pba_of_lba0(map);
 		di->component_size = a->info.component_size;
 		di->container_member = inst;
+		di->bb.supported = 1;
 		super->random = random32();
 		di->next = rv;
 		rv = di;
@@ -7901,21 +8503,22 @@ static int disks_overlap(struct intel_super *super, int idx, struct imsm_update_
 
 static struct dl *get_disk_super(struct intel_super *super, int major, int minor)
 {
-	struct dl *dl = NULL;
+	struct dl *dl;
+
 	for (dl = super->disks; dl; dl = dl->next)
-		if ((dl->major == major) &&  (dl->minor == minor))
+		if (dl->major == major &&  dl->minor == minor)
 			return dl;
 	return NULL;
 }
 
 static int remove_disk_super(struct intel_super *super, int major, int minor)
 {
-	struct dl *prev = NULL;
+	struct dl *prev;
 	struct dl *dl;
 
 	prev = NULL;
 	for (dl = super->disks; dl; dl = dl->next) {
-		if ((dl->major == major) && (dl->minor == minor)) {
+		if (dl->major == major && dl->minor == minor) {
 			/* remove */
 			if (prev)
 				prev->next = dl->next;
@@ -7936,7 +8539,8 @@ static void imsm_delete(struct intel_super *super, struct dl **dlp, unsigned ind
 static int add_remove_disk_update(struct intel_super *super)
 {
 	int check_degraded = 0;
-	struct dl *disk = NULL;
+	struct dl *disk;
+
 	/* add/remove some spares to/from the metadata/contrainer */
 	while (super->disk_mgmt_list) {
 		struct dl *disk_cfg;
@@ -7983,12 +8587,11 @@ static int apply_reshape_migration_update(struct imsm_update_reshape_migration *
 	int ret_val = 0;
 
 	dprintf("(enter)\n");
-	if ((u->subdev < 0) ||
-	    (u->subdev > 1)) {
+	if (u->subdev < 0 || u->subdev > 1) {
 		dprintf("imsm: Error: Wrong subdev: %i\n", u->subdev);
 		return ret_val;
 	}
-	if ((space_list == NULL) || (*space_list == NULL)) {
+	if (space_list == NULL || *space_list == NULL) {
 		dprintf("imsm: Error: Memory is not allocated\n");
 		return ret_val;
 	}
@@ -8043,15 +8646,28 @@ static int apply_reshape_migration_update(struct imsm_update_reshape_migration *
 
 			/* update chunk size
 			 */
-			if (u->new_chunksize > 0)
+			if (u->new_chunksize > 0) {
+				unsigned long long num_data_stripes;
+				int used_disks =
+					imsm_num_data_members(dev, MAP_0);
+
+				if (used_disks == 0)
+					return ret_val;
+
 				map->blocks_per_strip =
 					__cpu_to_le16(u->new_chunksize * 2);
+				num_data_stripes =
+					(join_u32(dev->size_low, dev->size_high)
+					/ used_disks);
+				num_data_stripes /= map->blocks_per_strip;
+				num_data_stripes /= map->num_domains;
+				set_num_data_stripes(map, num_data_stripes);
+			}
 
 			/* add disk
 			 */
-			if ((u->new_level != 5) ||
-			    (migr_map->raid_level != 0) ||
-			    (migr_map->raid_level == map->raid_level))
+			if (u->new_level != 5 || migr_map->raid_level != 0 ||
+			    migr_map->raid_level == map->raid_level)
 				goto skip_disk_add;
 
 			if (u->new_disks[0] >= 0) {
@@ -8102,8 +8718,7 @@ static int apply_size_change_update(struct imsm_update_size_change *u,
 	int ret_val = 0;
 
 	dprintf("(enter)\n");
-	if ((u->subdev < 0) ||
-	    (u->subdev > 1)) {
+	if (u->subdev < 0 || u->subdev > 1) {
 		dprintf("imsm: Error: Wrong subdev: %i\n", u->subdev);
 		return ret_val;
 	}
@@ -8114,13 +8729,19 @@ static int apply_size_change_update(struct imsm_update_size_change *u,
 			struct imsm_map *map = get_imsm_map(dev, MAP_0);
 			int used_disks = imsm_num_data_members(dev, MAP_0);
 			unsigned long long blocks_per_member;
+			unsigned long long num_data_stripes;
 
 			/* calculate new size
 			 */
 			blocks_per_member = u->new_size / used_disks;
-			dprintf("(size: %llu, blocks per member: %llu)\n",
-				u->new_size, blocks_per_member);
+			num_data_stripes = blocks_per_member /
+					   map->blocks_per_strip;
+			num_data_stripes /= map->num_domains;
+			dprintf("(size: %llu, blocks per member: %llu, num_data_stipes: %llu)\n",
+				u->new_size, blocks_per_member,
+				num_data_stripes);
 			set_blocks_per_member(map, blocks_per_member);
+			set_num_data_stripes(map, num_data_stripes);
 			imsm_set_array_size(dev, u->new_size);
 
 			ret_val = 1;
@@ -8270,9 +8891,9 @@ static int apply_reshape_container_disks_update(struct imsm_update_reshape *u,
 		dprintf("imsm: new disk for reshape is: %i:%i (%p, index = %i)\n",
 			major(u->new_disks[i]), minor(u->new_disks[i]),
 			new_disk, new_disk->index);
-		if ((new_disk == NULL) ||
-		    ((new_disk->index >= 0) &&
-		     (new_disk->index < u->old_raid_disks)))
+		if (new_disk == NULL ||
+		    (new_disk->index >= 0 &&
+		     new_disk->index < u->old_raid_disks))
 			goto update_reshape_exit;
 		new_disk->index = disk_count++;
 		/* slot to fill in autolayout
@@ -8371,6 +8992,14 @@ static int apply_takeover_update(struct imsm_update_takeover *u,
 	map = get_imsm_map(dev, MAP_0);
 
 	if (u->direction == R10_TO_R0) {
+		unsigned long long num_data_stripes;
+
+		map->num_domains = 1;
+		num_data_stripes = blocks_per_member(map);
+		num_data_stripes /= map->blocks_per_strip;
+		num_data_stripes /= map->num_domains;
+		set_num_data_stripes(map, num_data_stripes);
+
 		/* Number of failed disks must be half of initial disk number */
 		if (imsm_count_failed(super, dev, MAP_0) !=
 				(map->num_members / 2))
@@ -8447,7 +9076,7 @@ static int apply_takeover_update(struct imsm_update_takeover *u,
 	for (du = super->missing; du; du = du->next)
 		if (du->index >= 0) {
 			set_imsm_ord_tbl_ent(map, du->index, du->index);
-			mark_missing(dv->dev, &du->disk, du->index);
+			mark_missing(super, dv->dev, &du->disk, du->index);
 		}
 
 	return 1;
@@ -8738,6 +9367,8 @@ static void imsm_process_update(struct supertype *st,
 		}
 		break;
 	}
+	case update_prealloc_badblocks_mem:
+		break;
 	default:
 		pr_err("error: unsuported process update type:(type: %d)\n",	type);
 	}
@@ -8757,6 +9388,7 @@ static int imsm_prepare_update(struct supertype *st,
 	 */
 	enum imsm_update_type type;
 	struct intel_super *super = st->sb;
+	unsigned int sector_size = super->sector_size;
 	struct imsm_super *mpb = super->anchor;
 	size_t buf_len;
 	size_t len = 0;
@@ -8894,7 +9526,7 @@ static int imsm_prepare_update(struct supertype *st,
 				current_level = map->raid_level;
 				break;
 			}
-		if ((u->new_level == 5) && (u->new_level != current_level)) {
+		if (u->new_level == 5 && u->new_level != current_level) {
 			struct mdinfo *spares;
 
 			spares = get_spares_for_grow(st);
@@ -8978,6 +9610,10 @@ static int imsm_prepare_update(struct supertype *st,
 	case update_add_remove_disk:
 		/* no update->len needed */
 		break;
+	case update_prealloc_badblocks_mem:
+		super->extra_space += sizeof(struct bbm_log) -
+			get_imsm_bbm_log_size(super->bbm_log);
+		break;
 	default:
 		return 0;
 	}
@@ -8988,17 +9624,18 @@ static int imsm_prepare_update(struct supertype *st,
 	else
 		buf_len = super->len;
 
-	if (__le32_to_cpu(mpb->mpb_size) + len > buf_len) {
+	if (__le32_to_cpu(mpb->mpb_size) + super->extra_space + len > buf_len) {
 		/* ok we need a larger buf than what is currently allocated
 		 * if this allocation fails process_update will notice that
 		 * ->next_len is set and ->next_buf is NULL
 		 */
-		buf_len = ROUND_UP(__le32_to_cpu(mpb->mpb_size) + len, 512);
+		buf_len = ROUND_UP(__le32_to_cpu(mpb->mpb_size) +
+				   super->extra_space + len, sector_size);
 		if (super->next_buf)
 			free(super->next_buf);
 
 		super->next_len = buf_len;
-		if (posix_memalign(&super->next_buf, 512, buf_len) == 0)
+		if (posix_memalign(&super->next_buf, sector_size, buf_len) == 0)
 			memset(super->next_buf, 0, buf_len);
 		else
 			super->next_buf = NULL;
@@ -9013,8 +9650,9 @@ static void imsm_delete(struct intel_super *super, struct dl **dlp, unsigned ind
 	struct dl *iter;
 	struct imsm_dev *dev;
 	struct imsm_map *map;
-	int i, j, num_members;
+	unsigned int i, j, num_members;
 	__u32 ord;
+	struct bbm_log *log = super->bbm_log;
 
 	dprintf("deleting device[%d] from imsm_super\n", index);
 
@@ -9045,6 +9683,14 @@ static void imsm_delete(struct intel_super *super, struct dl **dlp, unsigned ind
 			if (map)
 				set_imsm_ord_tbl_ent(map, j, ord - 1);
 		}
+	}
+
+	for (i = 0; i < log->entry_count; i++) {
+		struct bbm_log_entry *entry = &log->marked_block_entries[i];
+
+		if (entry->disk_ordinal <= index)
+			continue;
+		entry->disk_ordinal--;
 	}
 
 	mpb->num_disks--;
@@ -9158,8 +9804,7 @@ int open_backup_targets(struct mdinfo *info, int raid_disks, int *raid_fds,
 			continue;
 		}
 
-		if ((sd->disk.raid_disk >= raid_disks) ||
-		    (sd->disk.raid_disk < 0))
+		if (sd->disk.raid_disk >= raid_disks || sd->disk.raid_disk < 0)
 			continue;
 
 		dn = map_dev(sd->disk.major,
@@ -9174,9 +9819,8 @@ int open_backup_targets(struct mdinfo *info, int raid_disks, int *raid_fds,
 	/* check if maximum array degradation level is not exceeded
 	*/
 	if ((raid_disks - opened) >
-			imsm_get_allowed_degradation(info->new_level,
-						     raid_disks,
-						     super, dev)) {
+	    imsm_get_allowed_degradation(info->new_level, raid_disks,
+					 super, dev)) {
 		pr_err("Not enough disks can be opened.\n");
 		close_targets(raid_fds, raid_disks);
 		return -2;
@@ -9246,7 +9890,7 @@ int validate_container_imsm(struct mdinfo *info)
 			return 1;
 		}
 
-		if ((orom != orom2) || ((hba->type == SYS_DEV_VMD) && (hba != hba2))) {
+		if (orom != orom2) {
 			pr_err("WARNING - IMSM container assembled with disks under different HBAs!\n"
 				"       This operation is not supported and can lead to data loss.\n");
 			return 1;
@@ -9262,6 +9906,150 @@ int validate_container_imsm(struct mdinfo *info)
 	return 0;
 }
 #ifndef MDASSEMBLE
+/*******************************************************************************
+* Function:   imsm_record_badblock
+* Description: This routine stores new bad block record in BBM log
+*
+* Parameters:
+*     a		: array containing a bad block
+*     slot	: disk number containing a bad block
+*     sector	: bad block sector
+*     length	: bad block sectors range
+* Returns:
+*     1 : Success
+*     0 : Error
+******************************************************************************/
+static int imsm_record_badblock(struct active_array *a, int slot,
+			  unsigned long long sector, int length)
+{
+	struct intel_super *super = a->container->sb;
+	int ord;
+	int ret;
+
+	ord = imsm_disk_slot_to_ord(a, slot);
+	if (ord < 0)
+		return 0;
+
+	ret = record_new_badblock(super->bbm_log, ord_to_idx(ord), sector,
+				   length);
+	if (ret)
+		super->updates_pending++;
+
+	return ret;
+}
+/*******************************************************************************
+* Function:   imsm_clear_badblock
+* Description: This routine clears bad block record from BBM log
+*
+* Parameters:
+*     a		: array containing a bad block
+*     slot	: disk number containing a bad block
+*     sector	: bad block sector
+*     length	: bad block sectors range
+* Returns:
+*     1 : Success
+*     0 : Error
+******************************************************************************/
+static int imsm_clear_badblock(struct active_array *a, int slot,
+			unsigned long long sector, int length)
+{
+	struct intel_super *super = a->container->sb;
+	int ord;
+	int ret;
+
+	ord = imsm_disk_slot_to_ord(a, slot);
+	if (ord < 0)
+		return 0;
+
+	ret = clear_badblock(super->bbm_log, ord_to_idx(ord), sector, length);
+	if (ret)
+		super->updates_pending++;
+
+	return ret;
+}
+/*******************************************************************************
+* Function:   imsm_get_badblocks
+* Description: This routine get list of bad blocks for an array
+*
+* Parameters:
+*     a		: array
+*     slot	: disk number
+* Returns:
+*     bb	: structure containing bad blocks
+*     NULL	: error
+******************************************************************************/
+static struct md_bb *imsm_get_badblocks(struct active_array *a, int slot)
+{
+	int inst = a->info.container_member;
+	struct intel_super *super = a->container->sb;
+	struct imsm_dev *dev = get_imsm_dev(super, inst);
+	struct imsm_map *map = get_imsm_map(dev, MAP_0);
+	int ord;
+
+	ord = imsm_disk_slot_to_ord(a, slot);
+	if (ord < 0)
+		return NULL;
+
+	get_volume_badblocks(super->bbm_log, ord_to_idx(ord), pba_of_lba0(map),
+			     blocks_per_member(map), &super->bb);
+
+	return &super->bb;
+}
+/*******************************************************************************
+* Function:   examine_badblocks_imsm
+* Description: Prints list of bad blocks on a disk to the standard output
+*
+* Parameters:
+*     st	: metadata handler
+*     fd	: open file descriptor for device
+*     devname	: device name
+* Returns:
+*     0 : Success
+*     1 : Error
+******************************************************************************/
+static int examine_badblocks_imsm(struct supertype *st, int fd, char *devname)
+{
+	struct intel_super *super = st->sb;
+	struct bbm_log *log = super->bbm_log;
+	struct dl *d = NULL;
+	int any = 0;
+
+	for (d = super->disks; d ; d = d->next) {
+		if (strcmp(d->devname, devname) == 0)
+			break;
+	}
+
+	if ((d == NULL) || (d->index < 0)) { /* serial mismatch probably */
+		pr_err("%s doesn't appear to be part of a raid array\n",
+		       devname);
+		return 1;
+	}
+
+	if (log != NULL) {
+		unsigned int i;
+		struct bbm_log_entry *entry = &log->marked_block_entries[0];
+
+		for (i = 0; i < log->entry_count; i++) {
+			if (entry[i].disk_ordinal == d->index) {
+				unsigned long long sector = __le48_to_cpu(
+					&entry[i].defective_block_start);
+				int cnt = entry[i].marked_count + 1;
+
+				if (!any) {
+					printf("Bad-blocks on %s:\n", devname);
+					any = 1;
+				}
+
+				printf("%20llu for %d sectors\n", sector, cnt);
+			}
+		}
+	}
+
+	if (!any)
+		printf("No bad-blocks list configured on %s\n", devname);
+
+	return 0;
+}
 /*******************************************************************************
  * Function:	init_migr_record_imsm
  * Description:	Function inits imsm migration record
@@ -9358,8 +10146,8 @@ int save_backup_imsm(struct supertype *st,
 {
 	int rv = -1;
 	struct intel_super *super = st->sb;
-	unsigned long long *target_offsets = NULL;
-	int *targets = NULL;
+	unsigned long long *target_offsets;
+	int *targets;
 	int i;
 	struct imsm_map *map_dest = get_imsm_map(dev, MAP_0);
 	int new_disks = map_dest->num_members;
@@ -9486,7 +10274,7 @@ int recover_backup_imsm(struct supertype *st, struct mdinfo *info)
 {
 	struct intel_super *super = st->sb;
 	struct migr_record *migr_rec = super->migr_rec;
-	struct imsm_map *map_dest = NULL;
+	struct imsm_map *map_dest;
 	struct intel_dev *id = NULL;
 	unsigned long long read_offset;
 	unsigned long long write_offset;
@@ -9495,6 +10283,7 @@ int recover_backup_imsm(struct supertype *st, struct mdinfo *info)
 	int new_disks, i, err;
 	char *buf = NULL;
 	int retval = 1;
+	unsigned int sector_size = super->sector_size;
 	unsigned long curr_migr_unit = __le32_to_cpu(migr_rec->curr_migr_unit);
 	unsigned long num_migr_units = __le32_to_cpu(migr_rec->num_migr_units);
 	char buffer[20];
@@ -9531,7 +10320,7 @@ int recover_backup_imsm(struct supertype *st, struct mdinfo *info)
 			pba_of_lba0(map_dest)) * 512;
 
 	unit_len = __le32_to_cpu(migr_rec->dest_depth_per_unit) * 512;
-	if (posix_memalign((void **)&buf, 512, unit_len) != 0)
+	if (posix_memalign((void **)&buf, sector_size, unit_len) != 0)
 		goto abort;
 	targets = xcalloc(new_disks, sizeof(int));
 
@@ -9609,7 +10398,7 @@ static const char *imsm_get_disk_controller_domain(const char *path)
 	strncat(disk_path, path, PATH_MAX - strlen(disk_path) - 1);
 	if (stat(disk_path, &st) == 0) {
 		struct sys_dev* hba;
-		char *path=NULL;
+		char *path;
 
 		path = devt_to_devpath(st.st_rdev);
 		if (path == NULL)
@@ -9688,8 +10477,7 @@ static int imsm_reshape_is_allowed_on_container(struct supertype *st,
 			break;
 		}
 
-		if ((info->array.level != 0) &&
-		    (info->array.level != 5)) {
+		if (info->array.level != 0 && info->array.level != 5) {
 			/* we cannot use this container with other raid level
 			 */
 			dprintf("imsm: for container operation wrong raid level (%i) detected\n",
@@ -9774,11 +10562,11 @@ static int imsm_create_metadata_update_for_reshape(
 {
 	struct intel_super *super = st->sb;
 	struct imsm_super *mpb = super->anchor;
-	int update_memory_size = 0;
-	struct imsm_update_reshape *u = NULL;
-	struct mdinfo *spares = NULL;
+	int update_memory_size;
+	struct imsm_update_reshape *u;
+	struct mdinfo *spares;
 	int i;
-	int delta_disks = 0;
+	int delta_disks;
 	struct mdinfo *dev;
 
 	dprintf("(enter) raid_disks = %i\n", geo->raid_disks);
@@ -9855,8 +10643,8 @@ static int imsm_create_metadata_update_for_size_change(
 				struct imsm_update_size_change **updatep)
 {
 	struct intel_super *super = st->sb;
-	int update_memory_size = 0;
-	struct imsm_update_size_change *u = NULL;
+	int update_memory_size;
+	struct imsm_update_size_change *u;
 
 	dprintf("(enter) New size = %llu\n", geo->size);
 
@@ -9885,8 +10673,8 @@ static int imsm_create_metadata_update_for_migration(
 					struct imsm_update_reshape_migration **updatep)
 {
 	struct intel_super *super = st->sb;
-	int update_memory_size = 0;
-	struct imsm_update_reshape_migration *u = NULL;
+	int update_memory_size;
+	struct imsm_update_reshape_migration *u;
 	struct imsm_dev *dev;
 	int previous_level = -1;
 
@@ -9921,12 +10709,12 @@ static int imsm_create_metadata_update_for_migration(
 			previous_level = map->raid_level;
 		}
 	}
-	if ((geo->level == 5) && (previous_level == 0)) {
+	if (geo->level == 5 && previous_level == 0) {
 		struct mdinfo *spares = NULL;
 
 		u->new_raid_disks++;
 		spares = get_spares_for_grow(st);
-		if ((spares == NULL) || (spares->array.spare_disks < 1)) {
+		if (spares == NULL || spares->array.spare_disks < 1) {
 			free(u);
 			sysfs_free(spares);
 			update_memory_size = 0;
@@ -9990,9 +10778,8 @@ enum imsm_reshape_type imsm_analyze_change(struct supertype *st,
 	int rv;
 
 	getinfo_super_imsm_volume(st, &info, NULL);
-	if ((geo->level != info.array.level) &&
-	    (geo->level >= 0) &&
-	    (geo->level != UnSet)) {
+	if (geo->level != info.array.level && geo->level >= 0 &&
+	    geo->level != UnSet) {
 		switch (info.array.level) {
 		case 0:
 			if (geo->level == 5) {
@@ -10030,16 +10817,14 @@ enum imsm_reshape_type imsm_analyze_change(struct supertype *st,
 	} else
 		geo->level = info.array.level;
 
-	if ((geo->layout != info.array.layout)
-	    && ((geo->layout != UnSet) && (geo->layout != -1))) {
+	if (geo->layout != info.array.layout &&
+	    (geo->layout != UnSet && geo->layout != -1)) {
 		change = CH_MIGRATION;
-		if ((info.array.layout == 0)
-		    && (info.array.level == 5)
-		    && (geo->layout == 5)) {
+		if (info.array.layout == 0 && info.array.level == 5 &&
+		    geo->layout == 5) {
 			/* reshape 5 -> 4 */
-		} else if ((info.array.layout == 5)
-			   && (info.array.level == 5)
-			   && (geo->layout == 0)) {
+		} else if (info.array.layout == 5 && info.array.level == 5 &&
+			   geo->layout == 0) {
 			/* reshape 4 -> 5 */
 			geo->layout = 0;
 			geo->level = 5;
@@ -10055,11 +10840,22 @@ enum imsm_reshape_type imsm_analyze_change(struct supertype *st,
 			imsm_layout = info.array.layout;
 	}
 
-	if ((geo->chunksize > 0) && (geo->chunksize != UnSet)
-	    && (geo->chunksize != info.array.chunk_size))
+	if (geo->chunksize > 0 && geo->chunksize != UnSet &&
+	    geo->chunksize != info.array.chunk_size) {
+		if (info.array.level == 10) {
+			pr_err("Error. Chunk size change for RAID 10 is not supported.\n");
+			change = -1;
+			goto analyse_change_exit;
+		} else if (info.component_size % (geo->chunksize/512)) {
+			pr_err("New chunk size (%dK) does not evenly divide device size (%lluk). Aborting...\n",
+			       geo->chunksize/1024, info.component_size/2);
+			change = -1;
+			goto analyse_change_exit;
+		}
 		change = CH_MIGRATION;
-	else
+	} else {
 		geo->chunksize = info.array.chunk_size;
+	}
 
 	chunk = geo->chunksize / 1024;
 
@@ -10070,12 +10866,12 @@ enum imsm_reshape_type imsm_analyze_change(struct supertype *st,
 	 */
 	current_size = info.custom_array_size / data_disks;
 
-	if ((geo->size > 0) && (geo->size != MAX_SIZE)) {
+	if (geo->size > 0 && geo->size != MAX_SIZE) {
 		/* align component size
 		 */
 		geo->size = imsm_component_size_aligment_check(
 				    get_imsm_raid_level(dev->vol.map),
-				    chunk * 1024,
+				    chunk * 1024, super->sector_size,
 				    geo->size * 2);
 		if (geo->size == 0) {
 			pr_err("Error. Size expansion is supported only (current size is %llu, requested size /rounded/ is 0).\n",
@@ -10084,7 +10880,7 @@ enum imsm_reshape_type imsm_analyze_change(struct supertype *st,
 		}
 	}
 
-	if ((current_size != geo->size) && (geo->size > 0)) {
+	if (current_size != geo->size && geo->size > 0) {
 		if (change != -1) {
 			pr_err("Error. Size change should be the only one at a time.\n");
 			change = -1;
@@ -10109,7 +10905,7 @@ enum imsm_reshape_type imsm_analyze_change(struct supertype *st,
 			 */
 			max_size = imsm_component_size_aligment_check(
 					get_imsm_raid_level(dev->vol.map),
-					chunk * 1024,
+					chunk * 1024, super->sector_size,
 					max_size);
 		}
 		if (geo->size == MAX_SIZE) {
@@ -10123,7 +10919,7 @@ enum imsm_reshape_type imsm_analyze_change(struct supertype *st,
 				geo->size = max_size;
 		}
 
-		if ((direction == ROLLBACK_METADATA_CHANGES)) {
+		if (direction == ROLLBACK_METADATA_CHANGES) {
 			/* accept size for rollback only
 			*/
 		} else {
@@ -10169,8 +10965,8 @@ enum imsm_reshape_type imsm_analyze_change(struct supertype *st,
 	}
 
 analyse_change_exit:
-	if ((direction == ROLLBACK_METADATA_CHANGES) &&
-	     ((change == CH_MIGRATION) || (change == CH_TAKEOVER))) {
+	if (direction == ROLLBACK_METADATA_CHANGES &&
+	    (change == CH_MIGRATION || change == CH_TAKEOVER)) {
 		dprintf("imsm: Metadata changes rollback is not supported for migration and takeover operations.\n");
 		change = -1;
 	}
@@ -10345,6 +11141,33 @@ exit_imsm_reshape_super:
 	return ret_val;
 }
 
+#define COMPLETED_OK		0
+#define COMPLETED_NONE		1
+#define COMPLETED_DELAYED	2
+
+static int read_completed(int fd, unsigned long long *val)
+{
+	int ret;
+	char buf[50];
+
+	ret = sysfs_fd_get_str(fd, buf, 50);
+	if (ret < 0)
+		return ret;
+
+	ret = COMPLETED_OK;
+	if (strncmp(buf, "none", 4) == 0) {
+		ret = COMPLETED_NONE;
+	} else if (strncmp(buf, "delayed", 7) == 0) {
+		ret = COMPLETED_DELAYED;
+	} else {
+		char *ep;
+		*val = strtoull(buf, &ep, 0);
+		if (ep == buf || (*ep != 0 && *ep != '\n' && *ep != ' '))
+			ret = -1;
+	}
+	return ret;
+}
+
 /*******************************************************************************
  * Function:	wait_for_reshape_imsm
  * Description:	Function writes new sync_max value and waits until
@@ -10360,6 +11183,7 @@ exit_imsm_reshape_super:
 int wait_for_reshape_imsm(struct mdinfo *sra, int ndata)
 {
 	int fd = sysfs_get_fd(sra, NULL, "sync_completed");
+	int retry = 3;
 	unsigned long long completed;
 	/* to_complete : new sync_max position */
 	unsigned long long to_complete = sra->reshape_progress;
@@ -10370,11 +11194,17 @@ int wait_for_reshape_imsm(struct mdinfo *sra, int ndata)
 		return 1;
 	}
 
-	if (sysfs_fd_get_ll(fd, &completed) < 0) {
-		dprintf("cannot read reshape_position (no reshape in progres)\n");
-		close(fd);
-		return 1;
-	}
+	do {
+		if (sysfs_fd_get_ll(fd, &completed) < 0) {
+			if (!retry) {
+				dprintf("cannot read reshape_position (no reshape in progres)\n");
+				close(fd);
+				return 1;
+			}
+			usleep(30000);
+		} else
+			break;
+	} while (retry--);
 
 	if (completed > position_to_set) {
 		dprintf("wrong next position to set %llu (%llu)\n",
@@ -10392,24 +11222,31 @@ int wait_for_reshape_imsm(struct mdinfo *sra, int ndata)
 	}
 
 	do {
+		int rc;
 		char action[20];
 		int timeout = 3000;
+
 		sysfs_wait(fd, &timeout);
 		if (sysfs_get_str(sra, NULL, "sync_action",
 				  action, 20) > 0 &&
 				strncmp(action, "reshape", 7) != 0) {
+			if (strncmp(action, "idle", 4) == 0)
+				break;
 			close(fd);
 			return -1;
 		}
-		if (sysfs_fd_get_ll(fd, &completed) < 0) {
+
+		rc = read_completed(fd, &completed);
+		if (rc < 0) {
 			dprintf("cannot read reshape_position (in loop)\n");
 			close(fd);
 			return 1;
-		}
+		} else if (rc == COMPLETED_NONE)
+			break;
 	} while (completed < position_to_set);
+
 	close(fd);
 	return 0;
-
 }
 
 /*******************************************************************************
@@ -10430,7 +11267,7 @@ int check_degradation_change(struct mdinfo *info,
 	int rv;
 
 	rv = sysfs_get_ll(info, NULL, "degraded", &new_degraded);
-	if ((rv == -1) || (new_degraded != (unsigned long long)degraded)) {
+	if (rv == -1 || (new_degraded != (unsigned long long)degraded)) {
 		/* check each device to ensure it is still working */
 		struct mdinfo *sd;
 		new_degraded = 0;
@@ -10438,9 +11275,10 @@ int check_degradation_change(struct mdinfo *info,
 			if (sd->disk.state & (1<<MD_DISK_FAULTY))
 				continue;
 			if (sd->disk.state & (1<<MD_DISK_SYNC)) {
-				char sbuf[20];
+				char sbuf[100];
+
 				if (sysfs_get_str(info,
-					sd, "state", sbuf, 20) < 0 ||
+					sd, "state", sbuf, sizeof(sbuf)) < 0 ||
 					strstr(sbuf, "faulty") ||
 					strstr(sbuf, "in_sync") == NULL) {
 					/* this device is dead */
@@ -10465,7 +11303,7 @@ int check_degradation_change(struct mdinfo *info,
  * Function:	imsm_manage_reshape
  * Description:	Function finds array under reshape and it manages reshape
  *		process. It creates stripes backups (if required) and sets
- *		checheckpoits.
+ *		checkpoints.
  * Parameters:
  *	afd		: Backup handle (nattive) - not used
  *	sra		: general array info
@@ -10489,7 +11327,8 @@ static int imsm_manage_reshape(
 {
 	int ret_val = 0;
 	struct intel_super *super = st->sb;
-	struct intel_dev *dv = NULL;
+	struct intel_dev *dv;
+	unsigned int sector_size = super->sector_size;
 	struct imsm_dev *dev = NULL;
 	struct imsm_map *map_src;
 	int migr_vol_qan = 0;
@@ -10507,7 +11346,10 @@ static int imsm_manage_reshape(
 	int degraded = 0;
 	int source_layout = 0;
 
-	if (!fds || !offsets || !sra)
+	if (!sra)
+		return ret_val;
+
+	if (!fds || !offsets)
 		goto abort;
 
 	/* Find volume during the reshape */
@@ -10520,7 +11362,7 @@ static int imsm_manage_reshape(
 	}
 	/* Only one volume can migrate at the same time */
 	if (migr_vol_qan != 1) {
-		pr_err(": %s", migr_vol_qan ?
+		pr_err("%s", migr_vol_qan ?
 			"Number of migrating volumes greater than 1\n" :
 			"There is no volume during migrationg\n");
 		goto abort;
@@ -10564,8 +11406,8 @@ static int imsm_manage_reshape(
 	buf_size += __le32_to_cpu(migr_rec->dest_depth_per_unit) * 512;
 	/* add space for stripe aligment */
 	buf_size += old_data_stripe_length;
-	if (posix_memalign((void **)&buf, 4096, buf_size)) {
-		dprintf("imsm: Cannot allocate checpoint buffer\n");
+	if (posix_memalign((void **)&buf, MAX_SECTOR_SIZE, buf_size)) {
+		dprintf("imsm: Cannot allocate checkpoint buffer\n");
 		goto abort;
 	}
 
@@ -10595,7 +11437,7 @@ static int imsm_manage_reshape(
 
 		start = current_position * 512;
 
-		/* allign reading start to old geometry */
+		/* align reading start to old geometry */
 		start_buf_shift = start % old_data_stripe_length;
 		start_src = start - start_buf_shift;
 
@@ -10609,7 +11451,7 @@ static int imsm_manage_reshape(
 			 *             to backup alligned to source array
 			 *             [bytes]
 			 */
-			unsigned long long next_step_filler = 0;
+			unsigned long long next_step_filler;
 			unsigned long long copy_length = next_step * 512;
 
 			/* allign copy area length to stripe in old geometry */
@@ -10681,17 +11523,18 @@ static int imsm_manage_reshape(
 	/* clear migr_rec on disks after successful migration */
 	struct dl *d;
 
-	memset(super->migr_rec_buf, 0, MIGR_REC_BUF_SIZE);
+	memset(super->migr_rec_buf, 0, MIGR_REC_BUF_SECTORS*sector_size);
 	for (d = super->disks; d; d = d->next) {
 		if (d->index < 0 || is_failed(&d->disk))
 			continue;
 		unsigned long long dsize;
 
 		get_dev_size(d->fd, NULL, &dsize);
-		if (lseek64(d->fd, dsize - MIGR_REC_POSITION,
+		if (lseek64(d->fd, dsize - MIGR_REC_SECTOR_POSITION*sector_size,
 			    SEEK_SET) >= 0) {
-			if (write(d->fd, super->migr_rec_buf,
-				MIGR_REC_BUF_SIZE) != MIGR_REC_BUF_SIZE)
+			if ((unsigned int)write(d->fd, super->migr_rec_buf,
+			    MIGR_REC_BUF_SECTORS*sector_size) !=
+			    MIGR_REC_BUF_SECTORS*sector_size)
 				perror("Write migr_rec failed");
 		}
 	}
@@ -10700,6 +11543,10 @@ static int imsm_manage_reshape(
 	ret_val = 1;
 abort:
 	free(buf);
+	/* See Grow.c: abort_reshape() for further explanation */
+	sysfs_set_num(sra, NULL, "suspend_lo", 0x7FFFFFFFFFFFFFFFULL);
+	sysfs_set_num(sra, NULL, "suspend_hi", 0);
+	sysfs_set_num(sra, NULL, "suspend_lo", 0);
 
 	return ret_val;
 }
@@ -10729,6 +11576,7 @@ struct superswitch super_imsm = {
 	.manage_reshape = imsm_manage_reshape,
 	.recover_backup = recover_backup_imsm,
 	.copy_metadata = copy_metadata_imsm,
+	.examine_badblocks = examine_badblocks_imsm,
 #endif
 	.match_home	= match_home_imsm,
 	.uuid_from_super= uuid_from_super_imsm,
@@ -10761,5 +11609,8 @@ struct superswitch super_imsm = {
 	.activate_spare = imsm_activate_spare,
 	.process_update = imsm_process_update,
 	.prepare_update = imsm_prepare_update,
+	.record_bad_block = imsm_record_badblock,
+	.clear_bad_block  = imsm_clear_badblock,
+	.get_bad_blocks   = imsm_get_badblocks,
 #endif /* MDASSEMBLE */
 };

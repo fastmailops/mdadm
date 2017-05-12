@@ -45,6 +45,10 @@ extern __off64_t lseek64 __P ((int __fd, __off64_t __offset, int __whence));
 #include	<errno.h>
 #include	<string.h>
 #include	<syslog.h>
+#ifdef __GLIBC__
+/* Newer glibc requires sys/sysmacros.h directly for makedev() */
+#include	<sys/sysmacros.h>
+#endif
 #ifdef __dietlibc__
 #include	<strings.h>
 /* dietlibc has deprecated random and srandom!! */
@@ -64,7 +68,6 @@ typedef uint64_t cmap_handle_t;
 #include	<errno.h>
 #else
 #define LKF_NOQUEUE	0x00000001
-#define LKF_CONVERT	0x00000004
 #define LKM_PWMODE	4
 #define EUNLOCK		0x10002
 
@@ -139,20 +142,20 @@ struct dlm_lksb {
  * and there is no standard conversion function so... */
 /* And dietlibc doesn't think byteswap is ok, so.. */
 /*  #include <byteswap.h> */
-#define bswap_16(x) (((x) & 0x00ffU) << 8 | \
-		     ((x) & 0xff00U) >> 8)
-#define bswap_32(x) (((x) & 0x000000ffU) << 24 | \
-		     ((x) & 0xff000000U) >> 24 | \
-		     ((x) & 0x0000ff00U) << 8  | \
-		     ((x) & 0x00ff0000U) >> 8)
-#define bswap_64(x) (((x) & 0x00000000000000ffULL) << 56 | \
-		     ((x) & 0xff00000000000000ULL) >> 56 | \
-		     ((x) & 0x000000000000ff00ULL) << 40 | \
-		     ((x) & 0x00ff000000000000ULL) >> 40 | \
-		     ((x) & 0x0000000000ff0000ULL) << 24 | \
-		     ((x) & 0x0000ff0000000000ULL) >> 24 | \
-		     ((x) & 0x00000000ff000000ULL) << 8 | \
-		     ((x) & 0x000000ff00000000ULL) >> 8)
+#define __mdadm_bswap_16(x) (((x) & 0x00ffU) << 8 | \
+			     ((x) & 0xff00U) >> 8)
+#define __mdadm_bswap_32(x) (((x) & 0x000000ffU) << 24 | \
+			     ((x) & 0xff000000U) >> 24 | \
+			     ((x) & 0x0000ff00U) << 8  | \
+			     ((x) & 0x00ff0000U) >> 8)
+#define __mdadm_bswap_64(x) (((x) & 0x00000000000000ffULL) << 56 | \
+			     ((x) & 0xff00000000000000ULL) >> 56 | \
+			     ((x) & 0x000000000000ff00ULL) << 40 | \
+			     ((x) & 0x00ff000000000000ULL) >> 40 | \
+			     ((x) & 0x0000000000ff0000ULL) << 24 | \
+			     ((x) & 0x0000ff0000000000ULL) >> 24 | \
+			     ((x) & 0x00000000ff000000ULL) << 8 |  \
+			     ((x) & 0x000000ff00000000ULL) >> 8)
 
 #if !defined(__KLIBC__)
 #if BYTE_ORDER == LITTLE_ENDIAN
@@ -163,19 +166,19 @@ struct dlm_lksb {
 #define __le32_to_cpu(_x) (unsigned int)(_x)
 #define __le64_to_cpu(_x) (unsigned long long)(_x)
 
-#define	__cpu_to_be16(_x) bswap_16(_x)
-#define __cpu_to_be32(_x) bswap_32(_x)
-#define __cpu_to_be64(_x) bswap_64(_x)
-#define	__be16_to_cpu(_x) bswap_16(_x)
-#define __be32_to_cpu(_x) bswap_32(_x)
-#define __be64_to_cpu(_x) bswap_64(_x)
+#define	__cpu_to_be16(_x) __mdadm_bswap_16(_x)
+#define __cpu_to_be32(_x) __mdadm_bswap_32(_x)
+#define __cpu_to_be64(_x) __mdadm_bswap_64(_x)
+#define	__be16_to_cpu(_x) __mdadm_bswap_16(_x)
+#define __be32_to_cpu(_x) __mdadm_bswap_32(_x)
+#define __be64_to_cpu(_x) __mdadm_bswap_64(_x)
 #elif BYTE_ORDER == BIG_ENDIAN
-#define	__cpu_to_le16(_x) bswap_16(_x)
-#define __cpu_to_le32(_x) bswap_32(_x)
-#define __cpu_to_le64(_x) bswap_64(_x)
-#define	__le16_to_cpu(_x) bswap_16(_x)
-#define __le32_to_cpu(_x) bswap_32(_x)
-#define __le64_to_cpu(_x) bswap_64(_x)
+#define	__cpu_to_le16(_x) __mdadm_bswap_16(_x)
+#define __cpu_to_le32(_x) __mdadm_bswap_32(_x)
+#define __cpu_to_le64(_x) __mdadm_bswap_64(_x)
+#define	__le16_to_cpu(_x) __mdadm_bswap_16(_x)
+#define __le32_to_cpu(_x) __mdadm_bswap_32(_x)
+#define __le64_to_cpu(_x) __mdadm_bswap_64(_x)
 
 #define	__cpu_to_be16(_x) (unsigned int)(_x)
 #define __cpu_to_be32(_x) (unsigned int)(_x)
@@ -234,6 +237,17 @@ struct dlm_lksb {
 
 extern const char Name[];
 
+struct md_bb_entry {
+	unsigned long long sector;
+	int length;
+};
+
+struct md_bb {
+	int supported;
+	int count;
+	struct md_bb_entry *entries;
+};
+
 /* general information that might be extracted from a superblock */
 struct mdinfo {
 	mdu_array_info_t	array;
@@ -290,13 +304,15 @@ struct mdinfo {
 	int container_enough; /* flag external handlers can set to
 			       * indicate that subarrays have not enough (-1),
 			       * enough to start (0), or all expected disks (1) */
-	char		sys_name[20];
+	char		sys_name[32];
 	struct mdinfo *devs;
 	struct mdinfo *next;
 
 	/* Device info for mdmon: */
 	int recovery_fd;
 	int state_fd;
+	int bb_fd;
+	int ubb_fd;
 	#define DS_FAULTY	1
 	#define	DS_INSYNC	2
 	#define	DS_WRITE_MOSTLY	4
@@ -308,6 +324,8 @@ struct mdinfo {
 
 	/* info read from sysfs */
 	char		sysfs_array_state[20];
+
+	struct md_bb bb;
 };
 
 struct createinfo {
@@ -380,6 +398,8 @@ enum special_options {
 	ConfigFile,
 	ChunkSize,
 	WriteMostly,
+	FailFast,
+	NoFailFast,
 	Layout,
 	Auto,
 	Force,
@@ -417,6 +437,10 @@ enum bitmap_update {
     NoUpdate,
     NameUpdate,
     NodeNumUpdate,
+};
+
+enum flag_mode {
+	FlagDefault, FlagSet, FlagClear,
 };
 
 /* structures read from config file */
@@ -512,7 +536,8 @@ struct mddev_dev {
 				 * 'A' for re_add.
 				 * Not set for names read from .config
 				 */
-	char writemostly;	/* 1 for 'set writemostly', 2 for 'clear writemostly' */
+	enum flag_mode writemostly;
+	enum flag_mode failfast;
 	int used;		/* set when used */
 	long long data_offset;
 	struct mddev_dev *next;
@@ -632,7 +657,7 @@ extern int sysfs_disk_to_scsi_id(int fd, __u32 *id);
 extern int sysfs_unique_holder(char *devnm, long rdev);
 extern int sysfs_freeze_array(struct mdinfo *sra);
 extern int sysfs_wait(int fd, int *msec);
-extern int load_sys(char *path, char *buf);
+extern int load_sys(char *path, char *buf, int len);
 extern int reshape_prepare_fdlist(char *devname,
 				  struct mdinfo *sra,
 				  int raid_disks,
@@ -818,6 +843,8 @@ extern struct superswitch {
 	 *   linear-grow-update - now change the size of the array.
 	 *   writemostly - set the WriteMostly1 bit in the superblock devflags
 	 *   readwrite - clear the WriteMostly1 bit in the superblock devflags
+	 *   failfast - set the FailFast1 bit in the superblock
+	 *   nofailfast - clear the FailFast1 bit
 	 *   no-bitmap - clear any record that a bitmap is present.
 	 *   bbl       - add a bad-block-log if possible
 	 *   no-bbl    - remove any bad-block-log is it is empty.
@@ -897,6 +924,8 @@ extern struct superswitch {
 	 * created, in which case data_size may be updated, or it might
 	 * already exist.  Metadata handler can know if init_super
 	 * has been called, but not write_init_super.
+	 *  0:     Success
+	 * -Exxxx: On error
 	 */
 	int (*add_internal_bitmap)(struct supertype *st, int *chunkp,
 				   int delay, int write_behind,
@@ -904,7 +933,7 @@ extern struct superswitch {
 	/* Seek 'fd' to start of write-intent-bitmap.  Must be an
 	 * md-native format bitmap
 	 */
-	int (*locate_bitmap)(struct supertype *st, int fd);
+	int (*locate_bitmap)(struct supertype *st, int fd, int node_num);
 	/* if add_internal_bitmap succeeded for existing array, this
 	 * writes it out.
 	 */
@@ -1030,6 +1059,17 @@ extern struct superswitch {
 	/* validate container after assemble */
 	int (*validate_container)(struct mdinfo *info);
 
+	/* records new bad block in metadata */
+	int (*record_bad_block)(struct active_array *a, int n,
+					unsigned long long sector, int length);
+
+	/* clears bad block from metadata */
+	int (*clear_bad_block)(struct active_array *a, int n,
+					unsigned long long sector, int length);
+
+	/* get list of bad blocks from metadata */
+	struct md_bb *(*get_bad_blocks)(struct active_array *a, int n);
+
 	int swapuuid; /* true if uuid is bigending rather than hostendian */
 	int external;
 	const char *name; /* canonical metadata name */
@@ -1107,6 +1147,7 @@ static inline struct supertype *guess_super(int fd) {
 }
 extern struct supertype *dup_super(struct supertype *st);
 extern int get_dev_size(int fd, char *dname, unsigned long long *sizep);
+extern int get_dev_sector_size(int fd, char *dname, unsigned int *sectsizep);
 extern int must_be_container(int fd);
 extern int dev_size_from_id(dev_t id, unsigned long long *size);
 void wait_for(char *dev, int fd);
@@ -1326,7 +1367,14 @@ extern int CreateBitmap(char *filename, int force, char uuid[16],
 extern int ExamineBitmap(char *filename, int brief, struct supertype *st);
 extern int Write_rules(char *rule_name);
 extern int bitmap_update_uuid(int fd, int *uuid, int swap);
-extern unsigned long bitmap_sectors(struct bitmap_super_s *bsb);
+
+/* calculate the size of the bitmap given the array size and bitmap chunksize */
+static inline unsigned long long
+bitmap_bits(unsigned long long array_size, unsigned long chunksize)
+{
+	return (array_size * 512 + chunksize - 1) / chunksize;
+}
+
 extern int Dump_metadata(char *dev, char *dir, struct context *c,
 			 struct supertype *st);
 extern int Restore_metadata(char *dev, char *dir, struct context *c,
@@ -1439,8 +1487,8 @@ extern char *find_free_devnm(int use_partitions);
 
 extern void put_md_name(char *name);
 extern char *devid2kname(int devid);
-extern char *devid2devnm(int devid);
-extern int devnm2devid(char *devnm);
+extern char *devid2devnm(dev_t devid);
+extern dev_t devnm2devid(char *devnm);
 extern char *get_md_name(char *devnm);
 
 extern char DefaultConfFile[];
@@ -1465,6 +1513,7 @@ extern int mdmon_running(char *devnm);
 extern int mdmon_pid(char *devnm);
 extern int check_env(char *name);
 extern __u32 random32(void);
+extern void random_uuid(__u8 *buf);
 extern int start_mdmon(char *devnm);
 
 extern int child_monitor(int afd, struct mdinfo *sra, struct reshape *reshape,
@@ -1475,7 +1524,8 @@ void abort_reshape(struct mdinfo *sra);
 
 void *super1_make_v0(struct supertype *st, struct mdinfo *info, mdp_super_t *sb0);
 
-extern void fmt_devname(char *name, int num);
+extern char *stat2kname(struct stat *st);
+extern char *fd2kname(int fd);
 extern char *stat2devnm(struct stat *st);
 extern char *fd2devnm(int fd);
 

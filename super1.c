@@ -77,6 +77,7 @@ struct mdp_superblock_1 {
 	__u8	device_uuid[16]; /* user-space setable, ignored by kernel */
 	__u8    devflags;        /* per-device flags.  Only one defined...*/
 #define WriteMostly1    1        /* mask for writemostly flag in above */
+#define FailFast1	2        /* Device should get FailFast requests */
 	/* bad block log.  If there are any bad blocks the feature flag is set.
 	 * if offset and size are non-zero, that space is reserved and available.
 	 */
@@ -162,7 +163,8 @@ static unsigned int calc_bitmap_size(bitmap_super_t *bms, unsigned int boundary)
 {
 	unsigned long long bits, bytes;
 
-	bits = __le64_to_cpu(bms->sync_size) / (__le32_to_cpu(bms->chunksize)>>9);
+	bits = bitmap_bits(__le64_to_cpu(bms->sync_size),
+			   __le32_to_cpu(bms->chunksize));
 	bytes = (bits+7) >> 3;
 	bytes += sizeof(bitmap_super_t);
 	bytes = ROUND_UP(bytes, boundary);
@@ -212,8 +214,7 @@ struct align_fd {
 static void init_afd(struct align_fd *afd, int fd)
 {
 	afd->fd = fd;
-
-	if (ioctl(afd->fd, BLKSSZGET, &afd->blk_sz) != 0)
+	if (!get_dev_sector_size(afd->fd, NULL, (unsigned int *)&afd->blk_sz))
 		afd->blk_sz = 512;
 }
 
@@ -430,6 +431,8 @@ static void examine_super1(struct supertype *st, char *homehost)
 		printf("          Flags :");
 		if (sb->devflags & WriteMostly1)
 			printf(" write-mostly");
+		if (sb->devflags & FailFast1)
+			printf(" failfast");
 		printf("\n");
 	}
 
@@ -730,12 +733,12 @@ static int copy_metadata1(struct supertype *st, int from, int to)
 	}
 
 	if (super.bblog_size != 0 &&
-	    __le32_to_cpu(super.bblog_size) <= 100 &&
+	    __le16_to_cpu(super.bblog_size) <= 100 &&
 	    super.bblog_offset != 0 &&
 	    (super.feature_map & __le32_to_cpu(MD_FEATURE_BAD_BLOCKS))) {
 		/* There is a bad block log */
 		unsigned long long bb_offset = sb_offset;
-		int bytes = __le32_to_cpu(super.bblog_size) * 512;
+		int bytes = __le16_to_cpu(super.bblog_size) * 512;
 		int written = 0;
 		struct align_fd afrom, ato;
 
@@ -832,7 +835,7 @@ static int examine_badblocks_super1(struct supertype *st, int fd, char *devname)
 	__u64 *bbl, *bbp;
 	int i;
 
-	if  (!sb->bblog_size || __le32_to_cpu(sb->bblog_size) > 100
+	if  (!sb->bblog_size || __le16_to_cpu(sb->bblog_size) > 100
 	     || !sb->bblog_offset){
 		printf("No bad-blocks list configured on %s\n", devname);
 		return 0;
@@ -843,7 +846,7 @@ static int examine_badblocks_super1(struct supertype *st, int fd, char *devname)
 		return 0;
 	}
 
-	size = __le32_to_cpu(sb->bblog_size)* 512;
+	size = __le16_to_cpu(sb->bblog_size)* 512;
 	if (posix_memalign((void**)&bbl, 4096, size) != 0) {
 		pr_err("could not allocate badblocks list\n");
 		return 0;
@@ -973,11 +976,7 @@ static void getinfo_super1(struct supertype *st, struct mdinfo *info, char *map)
 		earliest = super_offset + (32+4)*2; /* match kernel */
 		if (info->bitmap_offset > 0) {
 			unsigned long long bmend = info->bitmap_offset;
-			unsigned long long size = __le64_to_cpu(bsb->sync_size);
-			size /= __le32_to_cpu(bsb->chunksize) >> 9;
-			size = (size + 7) >> 3;
-			size += sizeof(bitmap_super_t);
-			size = ROUND_UP(size, 4096);
+			unsigned long long size = calc_bitmap_size(bsb, 4096);
 			size /= 512;
 			bmend += size;
 			if (bmend > earliest)
@@ -986,7 +985,7 @@ static void getinfo_super1(struct supertype *st, struct mdinfo *info, char *map)
 		if (sb->bblog_offset && sb->bblog_size) {
 			unsigned long long bbend = super_offset;
 			bbend += (int32_t)__le32_to_cpu(sb->bblog_offset);
-			bbend += __le32_to_cpu(sb->bblog_size);
+			bbend += __le16_to_cpu(sb->bblog_size);
 			if (bbend > earliest)
 				earliest = bbend;
 		}
@@ -1024,6 +1023,8 @@ static void getinfo_super1(struct supertype *st, struct mdinfo *info, char *map)
 	}
 	if (sb->devflags & WriteMostly1)
 		info->disk.state |= (1 << MD_DISK_WRITEMOSTLY);
+	if (sb->devflags & FailFast1)
+		info->disk.state |= (1 << MD_DISK_FAILFAST);
 	info->events = __le64_to_cpu(sb->events);
 	sprintf(info->text_version, "1.%d", st->minor_version);
 	info->safe_mode_delay = 200;
@@ -1175,7 +1176,7 @@ static int update_super1(struct supertype *st, struct mdinfo *info,
 		}
 	} else if (strcmp(update, "linear-grow-new") == 0) {
 		unsigned int i;
-		int rfd, fd;
+		int fd;
 		unsigned int max = __le32_to_cpu(sb->max_dev);
 
 		for (i=0 ; i < max ; i++)
@@ -1186,13 +1187,7 @@ static int update_super1(struct supertype *st, struct mdinfo *info,
 		if (max >= __le32_to_cpu(sb->max_dev))
 			sb->max_dev = __cpu_to_le32(max+1);
 
-		if ((rfd = open("/dev/urandom", O_RDONLY)) < 0 ||
-		    read(rfd, sb->device_uuid, 16) != 16) {
-			__u32 r[4] = {random(), random(), random(), random()};
-			memcpy(sb->device_uuid, r, 16);
-		}
-		if (rfd >= 0)
-			close(rfd);
+		random_uuid(sb->device_uuid);
 
 		sb->dev_roles[i] =
 			__cpu_to_le16(info->disk.raid_disk);
@@ -1225,11 +1220,8 @@ static int update_super1(struct supertype *st, struct mdinfo *info,
 	} else if (strcmp(update, "uuid") == 0) {
 		copy_uuid(sb->set_uuid, info->uuid, super1.swapuuid);
 
-		if (__le32_to_cpu(sb->feature_map)&MD_FEATURE_BITMAP_OFFSET) {
-			struct bitmap_super_s *bm;
-			bm = (struct bitmap_super_s*)(st->sb+MAX_SB_SIZE);
-			memcpy(bm->uuid, sb->set_uuid, 16);
-		}
+		if (__le32_to_cpu(sb->feature_map) & MD_FEATURE_BITMAP_OFFSET)
+			memcpy(bms->uuid, sb->set_uuid, 16);
 	} else if (strcmp(update, "no-bitmap") == 0) {
 		sb->feature_map &= ~__cpu_to_le32(MD_FEATURE_BITMAP_OFFSET);
 	} else if (strcmp(update, "bbl") == 0) {
@@ -1238,15 +1230,14 @@ static int update_super1(struct supertype *st, struct mdinfo *info,
 		 */
 		unsigned long long sb_offset = __le64_to_cpu(sb->super_offset);
 		unsigned long long data_offset = __le64_to_cpu(sb->data_offset);
-		long bitmap_offset = (long)(int32_t)__le32_to_cpu(sb->bitmap_offset);
+		long bitmap_offset = 0;
 		long bm_sectors = 0;
 		long space;
 
 #ifndef MDASSEMBLE
 		if (sb->feature_map & __cpu_to_le32(MD_FEATURE_BITMAP_OFFSET)) {
-			struct bitmap_super_s *bsb;
-			bsb = (struct bitmap_super_s *)(((char*)sb)+MAX_SB_SIZE);
-			bm_sectors = bitmap_sectors(bsb);
+			bitmap_offset = (long)__le32_to_cpu(sb->bitmap_offset);
+			bm_sectors = calc_bitmap_size(bms, 4096) >> 9;
 		}
 #endif
 		if (sb_offset < data_offset) {
@@ -1300,7 +1291,7 @@ static int update_super1(struct supertype *st, struct mdinfo *info,
 			strcat(sb->set_name, ":");
 			strcat(sb->set_name, info->name);
 		} else
-			strcpy(sb->set_name, info->name);
+			strncpy(sb->set_name, info->name, sizeof(sb->set_name));
 	} else if (strcmp(update, "devicesize") == 0 &&
 	    __le64_to_cpu(sb->super_offset) <
 	    __le64_to_cpu(sb->data_offset)) {
@@ -1391,6 +1382,10 @@ static int update_super1(struct supertype *st, struct mdinfo *info,
 		sb->devflags |= WriteMostly1;
 	else if (strcmp(update, "readwrite")==0)
 		sb->devflags &= ~WriteMostly1;
+	else if (strcmp(update, "failfast") == 0)
+		sb->devflags |= FailFast1;
+	else if (strcmp(update, "nofailfast") == 0)
+		sb->devflags &= ~FailFast1;
 	else
 		rv = -1;
 
@@ -1407,7 +1402,6 @@ static int init_super1(struct supertype *st, mdu_array_info_t *info,
 {
 	struct mdp_superblock_1 *sb;
 	int spares;
-	int rfd;
 	char defname[10];
 	int sbsize;
 
@@ -1437,14 +1431,8 @@ static int init_super1(struct supertype *st, mdu_array_info_t *info,
 
 	if (uuid)
 		copy_uuid(sb->set_uuid, uuid, super1.swapuuid);
-	else {
-		if ((rfd = open("/dev/urandom", O_RDONLY)) < 0 ||
-		    read(rfd, sb->set_uuid, 16) != 16) {
-			__u32 r[4] = {random(), random(), random(), random()};
-			memcpy(sb->set_uuid, r, 16);
-		}
-		if (rfd >= 0) close(rfd);
-	}
+	else
+		random_uuid(sb->set_uuid);;
 
 	if (name == NULL || *name == 0) {
 		sprintf(defname, "%d", info->md_minor);
@@ -1457,7 +1445,7 @@ static int init_super1(struct supertype *st, mdu_array_info_t *info,
 		strcat(sb->set_name, ":");
 		strcat(sb->set_name, name);
 	} else
-		strcpy(sb->set_name, name);
+		strncpy(sb->set_name, name, sizeof(sb->set_name));
 
 	sb->ctime = __cpu_to_le64((unsigned long long)time(0));
 	sb->level = __cpu_to_le32(info->level);
@@ -1548,7 +1536,7 @@ static int add_to_super1(struct supertype *st, mdu_disk_info_t *dk,
 }
 #endif
 
-static int locate_bitmap1(struct supertype *st, int fd);
+static int locate_bitmap1(struct supertype *st, int fd, int node_num);
 
 static int store_super1(struct supertype *st, int fd)
 {
@@ -1622,7 +1610,7 @@ static int store_super1(struct supertype *st, int fd)
 		struct bitmap_super_s *bm = (struct bitmap_super_s*)
 			(((char*)sb)+MAX_SB_SIZE);
 		if (__le32_to_cpu(bm->magic) == BITMAP_MAGIC) {
-			locate_bitmap1(st, fd);
+			locate_bitmap1(st, fd, 0);
 			if (awrite(&afd, bm, sizeof(*bm)) != sizeof(*bm))
 				return 5;
 		}
@@ -1643,7 +1631,8 @@ static unsigned long choose_bm_space(unsigned long devsize)
 	 * NOTE: result must be multiple of 4K else bad things happen
 	 * on 4K-sector devices.
 	 */
-	if (devsize < 64*2) return 0;
+	if (devsize < 64*2)
+		return 0;
 	if (devsize - 64*2 >= 200*1024*1024*2)
 		return 128*2;
 	if (devsize - 4*2 > 8*1024*1024*2)
@@ -1706,13 +1695,13 @@ static int write_init_super1(struct supertype *st)
 {
 	struct mdp_superblock_1 *sb = st->sb;
 	struct supertype *refst;
-	int rfd;
 	int rv = 0;
 	unsigned long long bm_space;
 	struct devinfo *di;
 	unsigned long long dsize, array_size;
 	unsigned long long sb_offset;
 	unsigned long long data_offset;
+	long bm_offset;
 
 	for (di = st->info; di; di = di->next) {
 		if (di->disk.state & (1 << MD_DISK_JOURNAL))
@@ -1733,14 +1722,12 @@ static int write_init_super1(struct supertype *st)
 			sb->devflags |= WriteMostly1;
 		else
 			sb->devflags &= ~WriteMostly1;
+		if (di->disk.state & (1<<MD_DISK_FAILFAST))
+			sb->devflags |= FailFast1;
+		else
+			sb->devflags &= ~FailFast1;
 
-		if ((rfd = open("/dev/urandom", O_RDONLY)) < 0 ||
-		    read(rfd, sb->device_uuid, 16) != 16) {
-			__u32 r[4] = {random(), random(), random(), random()};
-			memcpy(sb->device_uuid, r, 16);
-		}
-		if (rfd >= 0)
-			close(rfd);
+		random_uuid(sb->device_uuid);
 
 		if (!(di->disk.state & (1<<MD_DISK_JOURNAL)))
 			sb->events = 0;
@@ -1786,15 +1773,25 @@ static int write_init_super1(struct supertype *st)
 		 * data_offset has already been set.
 		 */
 		array_size = __le64_to_cpu(sb->size);
-		/* work out how much space we left for a bitmap,
-		 * Add 8 sectors for bad block log */
-		bm_space = choose_bm_space(array_size) + 8;
+
+		/* work out how much space we left for a bitmap */
+		if (sb->feature_map & __cpu_to_le32(MD_FEATURE_BITMAP_OFFSET)) {
+			bitmap_super_t *bms = (bitmap_super_t *)
+					(((char *)sb) + MAX_SB_SIZE);
+			bm_space = calc_bitmap_size(bms, 4096) >> 9;
+			bm_offset = (long)__le32_to_cpu(sb->bitmap_offset);
+		} else {
+			bm_space = choose_bm_space(array_size);
+			bm_offset = 8;
+		}
 
 		data_offset = di->data_offset;
 		if (data_offset == INVALID_SECTORS)
 			data_offset = st->data_offset;
 		switch(st->minor_version) {
 		case 0:
+			/* Add 8 sectors for bad block log */
+			bm_space += 8;
 			if (data_offset == INVALID_SECTORS)
 				data_offset = 0;
 			sb_offset = dsize;
@@ -1811,38 +1808,26 @@ static int write_init_super1(struct supertype *st)
 			}
 			break;
 		case 1:
-			sb->super_offset = __cpu_to_le64(0);
-			if (data_offset == INVALID_SECTORS)
-				data_offset = 16;
-
-			sb->data_offset = __cpu_to_le64(data_offset);
-			sb->data_size = __cpu_to_le64(dsize - data_offset);
-			if (data_offset >= 8 + 32*2 + 8) {
-				sb->bblog_size = __cpu_to_le16(8);
-				sb->bblog_offset = __cpu_to_le32(8 + 32*2);
-			} else if (data_offset >= 16) {
-				sb->bblog_size = __cpu_to_le16(8);
-				sb->bblog_offset = __cpu_to_le32(data_offset-8);
-			}
-			break;
 		case 2:
-			sb_offset = 4*2;
+			sb_offset = st->minor_version == 2 ? 8 : 0;
 			sb->super_offset = __cpu_to_le64(sb_offset);
 			if (data_offset == INVALID_SECTORS)
-				data_offset = 24;
+				data_offset = sb_offset + 16;
 
 			sb->data_offset = __cpu_to_le64(data_offset);
 			sb->data_size = __cpu_to_le64(dsize - data_offset);
-			if (data_offset >= 16 + 32*2 + 8) {
+			if (data_offset >= sb_offset+bm_offset+bm_space+8) {
 				sb->bblog_size = __cpu_to_le16(8);
-				sb->bblog_offset = __cpu_to_le32(8 + 32*2);
-			} else if (data_offset >= 16+16) {
+				sb->bblog_offset = __cpu_to_le32(bm_offset +
+								 bm_space);
+			} else if (data_offset >= sb_offset + 16) {
 				sb->bblog_size = __cpu_to_le16(8);
-				/* '8' sectors for the bblog, and another '8'
+				/* '8' sectors for the bblog, and 'sb_offset'
 				 * because we want offset from superblock, not
 				 * start of device.
 				 */
-				sb->bblog_offset = __cpu_to_le32(data_offset-8-8);
+				sb->bblog_offset = __cpu_to_le32(data_offset -
+								 8 - sb_offset);
 			}
 			break;
 		default:
@@ -1867,7 +1852,7 @@ static int write_init_super1(struct supertype *st)
 		}
 
 		if (rv == 0 && (__le32_to_cpu(sb->feature_map) & 1))
-			rv = st->ss->write_bitmap(st, di->fd, NoUpdate);
+			rv = st->ss->write_bitmap(st, di->fd, NodeNumUpdate);
 		close(di->fd);
 		di->fd = -1;
 		if (rv)
@@ -2016,6 +2001,8 @@ static int load_super1(struct supertype *st, int fd, char *devname)
 		return 1;
 	}
 
+	memset(super, 0, SUPER1_SIZE);
+
 	if (aread(&afd, super, MAX_SB_SIZE) != MAX_SB_SIZE) {
 		if (devname)
 			pr_err("Cannot read superblock on %s\n",
@@ -2062,7 +2049,7 @@ static int load_super1(struct supertype *st, int fd, char *devname)
 	 * valid.  If it doesn't clear the bit.  An --assemble --force
 	 * should get that written out.
 	 */
-	locate_bitmap1(st, fd);
+	locate_bitmap1(st, fd, 0);
 	if (aread(&afd, bsb, 512) != 512)
 		goto no_bitmap;
 
@@ -2137,7 +2124,7 @@ static __u64 avail_size1(struct supertype *st, __u64 devsize,
 		/* hot-add. allow for actual size of bitmap */
 		struct bitmap_super_s *bsb;
 		bsb = (struct bitmap_super_s *)(((char*)super)+MAX_SB_SIZE);
-		bmspace = bitmap_sectors(bsb);
+		bmspace = calc_bitmap_size(bsb, 4096) >> 9;
 	}
 #endif
 	/* Allow space for bad block log */
@@ -2201,6 +2188,7 @@ add_internal_bitmap1(struct supertype *st,
 	unsigned long long chunk = *chunkp;
 	int room = 0;
 	int creating = 0;
+	int len;
 	struct mdp_superblock_1 *sb = st->sb;
 	bitmap_super_t *bms = (bitmap_super_t*)(((char*)sb) + MAX_SB_SIZE);
 	int uuid[4];
@@ -2267,7 +2255,7 @@ add_internal_bitmap1(struct supertype *st,
 		}
 		break;
 	default:
-		return 0;
+		return -ENOSPC;
 	}
 
 	room -= bbl_size;
@@ -2277,7 +2265,7 @@ add_internal_bitmap1(struct supertype *st,
 
 	if (room <= 1)
 		/* No room for a bitmap */
-		return 0;
+		return -ENOSPC;
 
 	max_bits = (room * 512 - sizeof(bitmap_super_t)) * 8;
 
@@ -2295,9 +2283,9 @@ add_internal_bitmap1(struct supertype *st,
 		if (chunk < 64*1024*1024)
 			chunk = 64*1024*1024;
 	} else if (chunk < min_chunk)
-		return 0; /* chunk size too small */
+		return -EINVAL; /* chunk size too small */
 	if (chunk == 0) /* rounding problem */
-		return 0;
+		return -EINVAL;
 
 	if (offset == 0) {
 		/* start bitmap on a 4K boundary with enough space for
@@ -2326,15 +2314,17 @@ add_internal_bitmap1(struct supertype *st,
 	if (st->nodes)
 		sb->feature_map = __cpu_to_le32(__le32_to_cpu(sb->feature_map)
 						| MD_FEATURE_BITMAP_VERSIONED);
-	if (st->cluster_name)
-		strncpy((char *)bms->cluster_name,
-			st->cluster_name, strlen(st->cluster_name));
+	if (st->cluster_name) {
+		len = sizeof(bms->cluster_name);
+		strncpy((char *)bms->cluster_name, st->cluster_name, len);
+		bms->cluster_name[len - 1] = '\0';
+	}
 
 	*chunkp = chunk;
-	return 1;
+	return 0;
 }
 
-static int locate_bitmap1(struct supertype *st, int fd)
+static int locate_bitmap1(struct supertype *st, int fd, int node_num)
 {
 	unsigned long long offset;
 	struct mdp_superblock_1 *sb;
@@ -2353,7 +2343,7 @@ static int locate_bitmap1(struct supertype *st, int fd)
 	else
 		ret = -1;
 	offset = __le64_to_cpu(sb->super_offset);
-	offset += (int32_t) __le32_to_cpu(sb->bitmap_offset);
+	offset += (int32_t) __le32_to_cpu(sb->bitmap_offset) * (node_num + 1);
 	if (mustfree)
 		free(sb);
 	lseek64(fd, offset<<9, 0);
@@ -2366,7 +2356,7 @@ static int write_bitmap1(struct supertype *st, int fd, enum bitmap_update update
 	bitmap_super_t *bms = (bitmap_super_t*)(((char*)sb)+MAX_SB_SIZE);
 	int rv = 0;
 	void *buf;
-	int towrite, n;
+	int towrite, n, len;
 	struct align_fd afd;
 	unsigned int i = 0;
 	unsigned long long total_bm_space, bm_space_per_node;
@@ -2375,15 +2365,39 @@ static int write_bitmap1(struct supertype *st, int fd, enum bitmap_update update
 	case NameUpdate:
 		/* update cluster name */
 		if (st->cluster_name) {
-			memset((char *)bms->cluster_name, 0, sizeof(bms->cluster_name));
-			strncpy((char *)bms->cluster_name, st->cluster_name, 64);
+			len = sizeof(bms->cluster_name);
+			memset((char *)bms->cluster_name, 0, len);
+			strncpy((char *)bms->cluster_name,
+				st->cluster_name, len);
+			bms->cluster_name[len - 1] = '\0';
 		}
 		break;
 	case NodeNumUpdate:
 		/* cluster md only supports superblock 1.2 now */
-		if (st->minor_version != 2) {
+		if (st->minor_version != 2 && bms->version == BITMAP_MAJOR_CLUSTERED) {
 			pr_err("Warning: cluster md only works with superblock 1.2\n");
 			return -EINVAL;
+		}
+
+		if (bms->version == BITMAP_MAJOR_CLUSTERED) {
+			if (st->nodes == 1) {
+				/* the parameter for nodes is not valid */
+				pr_err("Warning: cluster-md at least needs two nodes\n");
+				return -EINVAL;
+			} else if (st->nodes == 0)
+				/* --nodes is not specified */
+				break;
+			else if (__cpu_to_le32(st->nodes) < bms->nodes) {
+				/* Since the nodes num is not increased, no need to check the space
+				 * is enough or not, just update bms->nodes */
+				bms->nodes = __cpu_to_le32(st->nodes);
+				break;
+			}
+		} else {
+			/* no need to change bms->nodes for other bitmap types */
+			if (st->nodes)
+				pr_err("Warning: --nodes option is only suitable for clustered bitmap\n");
+			break;
 		}
 
 		/* Each node has an independent bitmap, it is necessary to calculate the
@@ -2408,7 +2422,7 @@ static int write_bitmap1(struct supertype *st, int fd, enum bitmap_update update
 
 	init_afd(&afd, fd);
 
-	locate_bitmap1(st, fd);
+	locate_bitmap1(st, fd, 0);
 
 	if (posix_memalign(&buf, 4096, 4096))
 		return -ENOMEM;
@@ -2423,7 +2437,15 @@ static int write_bitmap1(struct supertype *st, int fd, enum bitmap_update update
 			memset(buf, 0xff, 4096);
 		memcpy(buf, (char *)bms, sizeof(bitmap_super_t));
 
-		towrite = calc_bitmap_size(bms, 4096);
+		/*
+		 * use 4096 boundary if bitmap_offset is aligned
+		 * with 8 sectors, then it should compatible with
+		 * older mdadm.
+		 */
+		if (__le32_to_cpu(sb->bitmap_offset) & 7)
+			towrite = calc_bitmap_size(bms, 512);
+		else
+			towrite = calc_bitmap_size(bms, 4096);
 		while (towrite > 0) {
 			n = towrite;
 			if (n > 4096)
@@ -2567,7 +2589,6 @@ void *super1_make_v0(struct supertype *st, struct mdinfo *info, mdp_super_t *sb0
 	void *ret;
 	struct mdp_superblock_1 *sb;
 	int i;
-	int rfd;
 	unsigned long long offset;
 
 	if (posix_memalign(&ret, 4096, 1024) != 0)
@@ -2599,13 +2620,7 @@ void *super1_make_v0(struct supertype *st, struct mdinfo *info, mdp_super_t *sb0
 	sb->super_offset = __cpu_to_le64(offset);
 	//*(__u64*)(st->other + 128 + 8 + 8) = __cpu_to_le64(offset);
 
-	if ((rfd = open("/dev/urandom", O_RDONLY)) < 0 ||
-	    read(rfd, sb->device_uuid, 16) != 16) {
-		__u32 r[4] = {random(), random(), random(), random()};
-		memcpy(sb->device_uuid, r, 16);
-	}
-	if (rfd >= 0)
-		close(rfd);
+	random_uuid(sb->device_uuid);
 
 	for (i = 0; i < MD_SB_DISKS; i++) {
 		int state = sb0->disks[i].state;
