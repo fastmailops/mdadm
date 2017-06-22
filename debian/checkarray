@@ -142,7 +142,7 @@ for array in $arrays; do
     continue
   fi
 
-  read cur_status < $MDBASE/sync_action
+  cur_status="$(cat $MDBASE/sync_action)"
 
   if [ $action = status ]; then
     echo "$array: $cur_status"
