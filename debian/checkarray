@@ -196,7 +196,7 @@ for array in $arrays; do
         low) ioarg='-c2 -n7'; renice=5;;
         high) ioarg='-c2 -n0'; renice=0;;
         realtime) ioarg='-c1 -n4'; renice=-5;;
-        *) break;;
+        *) continue;;
       esac
 
       resync_pid= wait=5

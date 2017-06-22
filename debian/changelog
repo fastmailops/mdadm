@@ -6,7 +6,7 @@ mdadm (4.0-1) UNRELEASED; urgency=medium
     included in the initramfs.
   * Add a warning to mkconf generated file that mdadm.conf is copied into
     initrafms.
-  * Fix checkaaray script. LP: #1599428
+  * Fix checkarray script bugs. LP: #1599428 Closes: #787950 Closes: #843665
 
  -- Dimitri John Ledkov <xnox@ubuntu.com>  Fri, 12 May 2017 12:31:46 +0100
 
