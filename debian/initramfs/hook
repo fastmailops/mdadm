@@ -88,7 +88,6 @@ else
 	sed -i '/^CREATE/s/^/#/' $DESTMDADMCONF
         if ! grep -q '^ARRAY' $CONFIG; then
                 tmpfile="${DESTMDADMCONF}.tmp"
-                warn "$CONFIG defines no arrays."
                 if /usr/share/mdadm/mkconf > $tmpfile; then
                         cp -p $tmpfile $DESTMDADMCONF
                 else
@@ -98,12 +97,8 @@ else
                 # make sure the configuration file knows about all running devices
                 /sbin/mdadm --detail --scan | while read array device params; do
                         uuid=${params#*UUID=}; uuid=${uuid%% *}
-                        if ! grep -qi "UUID=$uuid" $DESTMDADMCONF; then
-                                warn "the array $device with UUID $uuid"
-                                warn "is currently active, but it is not listed in mdadm.conf. if"
-                                warn "it is needed for boot, then YOUR SYSTEM IS NOW UNBOOTABLE!"
-                                warn "please inspect the output of /usr/share/mdadm/mkconf, compare"
-                                warn "it to $CONFIG, and make the necessary changes."
+                        if grep -qi "UUID=$uuid" $DESTMDADMCONF; then
+                                info "$uuid $device added to the mdadm.conf in the initramfs"
                         fi
                 done
         fi
