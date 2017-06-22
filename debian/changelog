@@ -4,6 +4,8 @@ mdadm (4.0-1) UNRELEASED; urgency=medium
   * Drop warnings that raid arrays are missing from the initramfs
     configuration. Instead have a positive message as to which arrays are
     included in the initramfs.
+  * Add a warning to mkconf generated file that mdadm.conf is copied into
+    initrafms.
 
  -- Dimitri John Ledkov <xnox@ubuntu.com>  Fri, 12 May 2017 12:31:46 +0100
 
