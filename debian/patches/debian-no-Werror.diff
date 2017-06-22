@@ -15,7 +15,7 @@ Signed-off-by: martin f. krafft <madduck@debian.org>
 +++ b/Makefile
 @@ -43,7 +43,7 @@
  
- CC = $(CROSS_COMPILE)gcc
+ CC ?= $(CROSS_COMPILE)gcc
  CXFLAGS ?= -ggdb
 -CWFLAGS = -Wall -Werror -Wstrict-prototypes -Wextra -Wno-unused-parameter
 +CWFLAGS = -Wall -Wstrict-prototypes -Wextra -Wno-unused-parameter

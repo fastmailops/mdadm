@@ -19,7 +19,7 @@ Reviewed-by: martin f. krafft <madduck@debian.org>
 
 --- a/Makefile
 +++ b/Makefile
-@@ -61,8 +61,8 @@
+@@ -62,8 +62,8 @@
  PKG_CONFIG ?= pkg-config
  
  SYSCONFDIR = /etc
@@ -32,7 +32,7 @@ Reviewed-by: martin f. krafft <madduck@debian.org>
  # Both MAP_DIR and MDMON_DIR should be somewhere that persists across the
 --- a/ReadMe.c
 +++ b/ReadMe.c
-@@ -590,7 +590,7 @@
+@@ -604,7 +604,7 @@
  ;
  
  char Help_config[] =
@@ -43,7 +43,7 @@ Reviewed-by: martin f. krafft <madduck@debian.org>
  " configuration lines.\n"
 --- a/mdadm.8.in
 +++ b/mdadm.8.in
-@@ -264,13 +264,13 @@
+@@ -267,13 +267,13 @@
  .TP
  .BR \-c ", " \-\-config=
  Specify the config file or directory.  Default is to use
@@ -61,7 +61,7 @@ Reviewed-by: martin f. krafft <madduck@debian.org>
  If the config file given is
  .B "partitions"
  then nothing will be read, but
-@@ -1742,9 +1742,9 @@
+@@ -1888,9 +1888,9 @@
  or requested with (a possibly implicit)
  .BR \-\-scan .
  In the later case,
@@ -73,7 +73,7 @@ Reviewed-by: martin f. krafft <madduck@debian.org>
  is used.
  
  If
-@@ -3003,7 +3003,7 @@
+@@ -3184,7 +3184,7 @@
  is given in Misc mode, and to monitor array reconstruction
  on Monitor mode.
  
@@ -82,7 +82,7 @@ Reviewed-by: martin f. krafft <madduck@debian.org>
  
  The config file lists which devices may be scanned to see if
  they contain MD super block, and gives identifying information
-@@ -3011,7 +3011,7 @@
+@@ -3192,7 +3192,7 @@
  .BR mdadm.conf (5)
  for more details.
  
