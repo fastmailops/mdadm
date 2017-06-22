@@ -1,4 +1,4 @@
-mdadm (4.0-1) UNRELEASED; urgency=medium
+mdadm (4.0-1) unstable; urgency=medium
 
   * New upstream release. LP: #1668128
   * Drop warnings that raid arrays are missing from the initramfs
@@ -8,7 +8,7 @@ mdadm (4.0-1) UNRELEASED; urgency=medium
     initrafms.
   * Fix checkarray script bugs. LP: #1599428 Closes: #787950 Closes: #843665
 
- -- Dimitri John Ledkov <xnox@ubuntu.com>  Fri, 12 May 2017 12:31:46 +0100
+ -- Dimitri John Ledkov <xnox@ubuntu.com>  Thu, 22 Jun 2017 13:23:10 +0100
 
 mdadm (3.4-4) unstable; urgency=high
 
