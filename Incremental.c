@@ -703,6 +703,7 @@ static int count_active(struct supertype *st, struct mdinfo *sra,
 	int cnt = 0;
 	int replcnt = 0;
 	__u64 max_events = 0;
+	__u64 max_journal_events = 0;
 	char *avail = NULL;
 	int *best = NULL;
 	char *devmap = NULL;
@@ -733,8 +734,9 @@ static int count_active(struct supertype *st, struct mdinfo *sra,
 
 		info.array.raid_disks = raid_disks;
 		st->ss->getinfo_super(st, &info, devmap + raid_disks * devnum);
-		if (info.disk.raid_disk == MD_DISK_ROLE_JOURNAL)
-			bestinfo->journal_clean = 1;
+		if (info.disk.raid_disk == MD_DISK_ROLE_JOURNAL &&
+		    info.events > max_journal_events)
+			max_journal_events = info.events;
 		if (!avail) {
 			raid_disks = info.array.raid_disks;
 			avail = xcalloc(raid_disks, 1);
@@ -784,6 +786,8 @@ static int count_active(struct supertype *st, struct mdinfo *sra,
 			replcnt++;
 		st->ss->free_super(st);
 	}
+	if (max_journal_events >= max_events - 1)
+		bestinfo->journal_clean = 1;
 
 	if (!avail)
 		return 0;
