@@ -13,7 +13,7 @@ Package: mdadm
 Architecture: linux-any
 Depends: ${shlibs:Depends}, udev, ${misc:Depends}, lsb-base, debconf
 Recommends: ${mta:Recommends}, kmod | module-init-tools
-Suggests: ${mta:Suggests}
+Suggests: ${mta:Suggests}, dracut-core
 Description: tool to administer Linux MD arrays (software RAID)
  The mdadm utility can be used to create, manage, and monitor MD
  (multi-disk) arrays for software RAID or multipath I/O.

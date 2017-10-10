@@ -1,3 +1,17 @@
+mdadm (4.0-2) unstable; urgency=medium
+
+  * Ship mdadm-shutdown.service and suggest dracut-core. Users of systemd
+    with rootfs on Intel Matrix Raid and DDF external metadata-raid arrays
+    that require mdmon monitoring, may wish to install dracut-core package
+    and enable mdadm-shutdown.service. This will create a shutdown
+    initramfs, that systemd-shutdown can pivot to. This may result in an
+    improved shutdown behaviour with less hangs and synced raid
+    arrays. The generated initramfs will takeover mdmon monitoring, wait
+    for the arrays to be clean before stopping them and unmounting
+    everything and finally executing requested shutdown command.
+
+ -- Dimitri John Ledkov <xnox@ubuntu.com>  Tue, 10 Oct 2017 11:55:52 +0100
+
 mdadm (4.0-1) unstable; urgency=medium
 
   * New upstream release. LP: #1668128

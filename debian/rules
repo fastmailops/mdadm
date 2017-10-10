@@ -67,6 +67,7 @@ install-arch: build-arch
 	install -Dm0755 udeb/mdadm $(DESTDIR_UDEB)/sbin/mdadm
 	install -Dm0755 udeb/mdmon $(DESTDIR_UDEB)/sbin/mdmon
 	install -Dm0644 udev-md-raid-arrays.rules $(DESTDIR_UDEB)/lib/udev/rules.d/63-md-raid-arrays.rules
+	install -Dm0644 debian/mdadm-shutdown.service $(DESTDIR)/lib/systemd/system/mdadm-shutdown.service
 ifeq ($(shell dpkg-vendor --derives-from Ubuntu && echo yes), yes)
 	install -Dm0644 udev-md-raid-assembly.rules $(DESTDIR_UDEB)/lib/udev/rules.d/64-md-raid-assembly.rules
 	install -Dm0644 debian/source_mdadm.py $(DESTDIR)/usr/share/apport/package-hooks/source_mdadm.py
