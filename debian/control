@@ -2,7 +2,7 @@ Source: mdadm
 Section: admin
 Priority: optional
 Maintainer: Debian mdadm maintainers <pkg-mdadm-devel@lists.alioth.debian.org>
-Uploaders: Dimitri John Ledkov <xnox@debian.org>
+Uploaders: Dimitri John Ledkov <xnox@debian.org>, Dimitri John Ledkov <xnox@ubuntu.com>
 Build-Depends: debhelper (>= 9), po-debconf, groff-base
 Standards-Version: 4.1.1
 Vcs-Git: https://git.dgit.debian.org/mdadm

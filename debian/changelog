@@ -11,6 +11,7 @@ mdadm (4.0-2) unstable; urgency=medium
     everything and finally executing requested shutdown command.
   * Bump standards version, no changes required.
   * Bump debhelper to 9.
+  * Add second email address to avoid NMU warnings.
 
  -- Dimitri John Ledkov <xnox@ubuntu.com>  Tue, 10 Oct 2017 11:55:52 +0100
 
